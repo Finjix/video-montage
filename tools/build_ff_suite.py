@@ -71,7 +71,7 @@ def build():
   path,value=manifests[name]; entry={"relative_path":spec["relative_path"],"manifest_relative_path":str(path.relative_to(ROOT)).replace("\\","/"),"manifest_sha256":sha(path),"tree_sha256":value["tree_sha256"],"interface":spec["interface"]}
   if name=="semantic": entry.update({"package_id":spec["package_id"],"version":spec["version"]})
   registry["components"][name]=entry
- registry["project_name"]="codex-montage"
+ registry["project_name"]="video-montage"
  atomic(ROOT/"suite_registry.json",registry); return registry
 
 

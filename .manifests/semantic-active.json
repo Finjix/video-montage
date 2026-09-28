@@ -21,5 +21,5 @@
     "validate": "scripts/validate_package.py",
     "completion_schema": "semantic-delivery-manifest/v20"
   },
-  "activated_at": "2026-09-28T11:44:03+08:00"
+  "activated_at": "2026-09-28T12:01:31+08:00"
 }
