@@ -30,10 +30,12 @@ def components(suite):
     semantic=suite/"components"/"semantic"
     controller=suite/"components"/"controller"
     executor=suite/"components"/"executor"
+    packaging=suite/"components"/"packaging"
     return {
         "semantic":{"root":semantic,"interface":{"orchestrator":"scripts/v15_orchestrator.py","run_command":"run-continuous","gate_runtime":"scripts/v9_gate_runtime.py","frame_plan_gate":"scripts/v20_frame_plan_gate.py","portable_renderer":"scripts/portable_frame_renderer.py","frame_range_repair":"scripts/frame_range_repair.py","winky_ledger":"scripts/winky_ledger.py","fail_closed":"scripts/v20_fail_closed.py","completion_schema":"semantic-delivery-manifest/v260928"}},
         "controller":{"root":controller,"interface":{"controller":"scripts/ffmpeg_controller.py"}},
         "executor":{"root":executor,"interface":{"orchestrator":"scripts/three_suite_ff.py"}},
+        "packaging":{"root":packaging,"interface":{"packager":"scripts/package_video.py"}},
     }
 def verify(suite):
     verifier=suite/"tools"/"verify_runtime.py"
@@ -41,7 +43,7 @@ def verify(suite):
     result=run([sys.executable,str(verifier)])
     if json.loads(result.stdout).get("decision")!="pass": raise RuntimeError("runtime verification failed")
     c=components(suite)
-    required=[suite/"skill/video-montage/SKILL.md",c["semantic"]["root"]/c["semantic"]["interface"]["gate_runtime"],c["semantic"]["root"]/c["semantic"]["interface"]["frame_plan_gate"],c["semantic"]["root"]/c["semantic"]["interface"]["portable_renderer"],c["semantic"]["root"]/c["semantic"]["interface"]["frame_range_repair"],c["semantic"]["root"]/c["semantic"]["interface"]["winky_ledger"],c["controller"]["root"]/c["controller"]["interface"]["controller"]]
+    required=[suite/"skill/video-montage/SKILL.md",c["semantic"]["root"]/c["semantic"]["interface"]["gate_runtime"],c["semantic"]["root"]/c["semantic"]["interface"]["frame_plan_gate"],c["semantic"]["root"]/c["semantic"]["interface"]["portable_renderer"],c["semantic"]["root"]/c["semantic"]["interface"]["frame_range_repair"],c["semantic"]["root"]/c["semantic"]["interface"]["winky_ledger"],c["controller"]["root"]/c["controller"]["interface"]["controller"],c["packaging"]["root"]/c["packaging"]["interface"]["packager"]]
     missing=[str(x) for x in required if not x.is_file()]
     if missing: raise RuntimeError(f"missing components: {missing}")
     return c
@@ -56,10 +58,13 @@ def require_argument(path,item,label):
     return expected
 def clear_after(value,stage,job):
     keys={
-        "semantic":("semantic_prelock_recheck","semantic_completion","controller_preflight","delivery_manifest","controller_validation","completion"),
-        "preflight":("delivery_manifest","controller_validation","completion"),
-        "finalize":("controller_validation","completion"),
-        "validate":("completion",),
+        "semantic":("semantic_prelock_recheck","semantic_completion","controller_preflight","delivery_manifest","controller_validation","packaging_draft","packaging_delivery","packaging_validation","completion"),
+        "preflight":("delivery_manifest","controller_validation","packaging_draft","packaging_delivery","packaging_validation","completion"),
+        "finalize":("controller_validation","packaging_draft","packaging_delivery","packaging_validation","completion"),
+        "validate":("packaging_draft","packaging_delivery","packaging_validation","completion"),
+        "packaging_draft":("packaging_delivery","packaging_validation","completion"),
+        "packaging_finalize":("packaging_validation","completion"),
+        "packaging_validate":("completion",),
     }
     if value.get("completion"):
         (job/"video_montage_completion.json").unlink(missing_ok=True)
@@ -79,6 +84,10 @@ def main():
     cp=sub.add_parser("controller-preflight"); cp.add_argument("--job-dir",type=Path,required=True); cp.add_argument("--report",type=Path,required=True)
     cf=sub.add_parser("controller-finalize"); cf.add_argument("--job-dir",type=Path,required=True); cf.add_argument("--premaster-manifest",type=Path,required=True); cf.add_argument("--semantic-release",type=Path,required=True); cf.add_argument("--output-dir",type=Path,required=True); cf.add_argument("--manifest",type=Path,required=True)
     cv=sub.add_parser("controller-validate"); cv.add_argument("--job-dir",type=Path,required=True); cv.add_argument("--manifest",type=Path,required=True); cv.add_argument("--semantic-release",type=Path,required=True); cv.add_argument("--post-qc",type=Path,required=True); cv.add_argument("--opening-family-report",type=Path,required=True); cv.add_argument("--report",type=Path,required=True)
+    pd=sub.add_parser("packaging-draft"); pd.add_argument("--job-dir",type=Path,required=True); pd.add_argument("--output-dir",type=Path,required=True)
+    pf=sub.add_parser("packaging-finalize"); pf.add_argument("--job-dir",type=Path,required=True); pf.add_argument("--config",type=Path,required=True); pf.add_argument("--output-dir",type=Path,required=True); pf.add_argument("--manifest",type=Path,required=True)
+    pr=sub.add_parser("packaging-reburn"); pr.add_argument("--job-dir",type=Path,required=True); pr.add_argument("--plan-id",required=True); pr.add_argument("--subtitle-txt","--subtitle-srt",dest="subtitle_txt",type=Path,required=True); pr.add_argument("--output-dir",type=Path,required=True); pr.add_argument("--manifest",type=Path,required=True)
+    pv=sub.add_parser("packaging-validate"); pv.add_argument("--job-dir",type=Path,required=True); pv.add_argument("--manifest",type=Path,required=True); pv.add_argument("--review",type=Path,required=True); pv.add_argument("--review-authority",type=Path,required=True); pv.add_argument("--report",type=Path,required=True)
     co=sub.add_parser("complete"); co.add_argument("--job-dir",type=Path,required=True)
     st=sub.add_parser("status"); st.add_argument("--job-dir",type=Path,required=True)
     a=p.parse_args(); suite=root(a.suite_root)
@@ -141,6 +150,36 @@ def main():
         if report.get("decision")!="pass" or Path(report.get("manifest_path","")).resolve()!=delivery_path or report.get("manifest_sha256")!=value["delivery_manifest"]["sha256"]: raise RuntimeError("controller validation rejected or unbound")
         clear_after(value,"validate",job)
         value["controller_validation"]={"path":str(a.report.resolve()),"sha256":sha(a.report),"post_qc":str(a.post_qc.resolve()),"post_qc_sha256":sha(a.post_qc),"opening_family_report":str(a.opening_family_report.resolve()),"opening_family_report_sha256":sha(a.opening_family_report)}; save(job,value,"controller_validated","post-encode, opening-family and technical QC passed"); return
+    packager=c["packaging"]["root"]/c["packaging"]["interface"]["packager"]
+    if a.command=="packaging-draft":
+        require_reference(value.get("controller_validation"),"controller validation")
+        delivery=require_reference(value.get("delivery_manifest"),"clean delivery")
+        run([sys.executable,str(packager),"draft-batch","--delivery-manifest",str(delivery),"--output-dir",str(a.output_dir.resolve())])
+        draft=a.output_dir.resolve()/"subtitle_draft.json"
+        clear_after(value,"packaging_draft",job)
+        value["packaging_draft"]={"path":str(draft),"sha256":sha(draft)}; save(job,value,"packaging_drafted","editable subtitles generated"); return
+    if a.command=="packaging-finalize":
+        validation=require_reference(value.get("controller_validation"),"controller validation")
+        require_reference(value.get("packaging_draft"),"subtitle draft")
+        delivery=require_reference(value.get("delivery_manifest"),"clean delivery")
+        run([sys.executable,str(packager),"render","--config",str(a.config.resolve()),"--output-dir",str(a.output_dir.resolve()),"--manifest",str(a.manifest.resolve()),"--delivery-manifest",str(delivery),"--controller-validation",str(validation)])
+        clear_after(value,"packaging_finalize",job)
+        value["packaging_delivery"]={"path":str(a.manifest.resolve()),"sha256":sha(a.manifest)}; save(job,value,"packaging_outputs","packaged outputs completed"); return
+    if a.command=="packaging-reburn":
+        require_reference(value.get("controller_validation"),"controller validation")
+        previous=require_reference(value.get("packaging_delivery"),"previous packaging delivery")
+        run([sys.executable,str(packager),"reburn","--previous-manifest",str(previous),"--plan-id",a.plan_id,
+             "--subtitle-txt",str(a.subtitle_txt.resolve()),"--output-dir",str(a.output_dir.resolve()),"--manifest",str(a.manifest.resolve())])
+        clear_after(value,"packaging_finalize",job)
+        value["packaging_delivery"]={"path":str(a.manifest.resolve()),"sha256":sha(a.manifest)}
+        save(job,value,"packaging_outputs","edited subtitle TXT burned into new packaged outputs"); return
+    if a.command=="packaging-validate":
+        manifest=require_argument(a.manifest,value.get("packaging_delivery"),"packaging delivery")
+        run([sys.executable,str(packager),"validate","--manifest",str(manifest),"--review",str(a.review.resolve()),"--review-authority",str(a.review_authority.resolve()),"--report",str(a.report.resolve())])
+        report=read(a.report)
+        if report.get("decision")!="pass" or report.get("manifest_sha256")!=value["packaging_delivery"]["sha256"]: raise RuntimeError("packaging validation failed")
+        clear_after(value,"packaging_validate",job)
+        value["packaging_validation"]={"path":str(a.report.resolve()),"sha256":sha(a.report),"review_path":str(a.review.resolve()),"review_sha256":sha(a.review),"authority_path":str(a.review_authority.resolve()),"authority_sha256":sha(a.review_authority)}; save(job,value,"packaging_validated","packaging review and technical QC passed"); return
     if a.command=="complete":
         if not value.get("controller_invocations"): raise RuntimeError("controller invocation missing")
         for key in ("semantic_prelock_recheck","semantic_completion","controller_preflight","delivery_manifest","controller_validation"):
@@ -160,7 +199,22 @@ def main():
         for item in results:
             path=Path(item.get("output_path", ""))
             if not path.is_file() or sha(path)!=item.get("output_sha256"): raise RuntimeError(f"delivered output changed: {item.get('plan_id')}")
-        receipt={"schema":"video-montage-completion/v260928","completed_at":now(),"semantic":value["semantic_completion"],"controller_preflight":value["controller_preflight"],"delivery_manifest":value["delivery_manifest"],"controller_validation":value["controller_validation"],"components":value["components"]}; atomic(job/"video_montage_completion.json",receipt); value["completion"]={"path":str(job/"video_montage_completion.json"),"sha256":sha(job/"video_montage_completion.json")}; save(job,value,"complete","video-montage release complete"); print(value["completion"]["path"]); return
+        packaged={}
+        if value.get("packaging_draft"):
+            package_path=require_reference(value.get("packaging_delivery"),"packaging delivery")
+            report_path=require_reference(value.get("packaging_validation"),"packaging validation")
+            review_path=require_reference({"path":value["packaging_validation"].get("review_path"),"sha256":value["packaging_validation"].get("review_sha256")},"packaging review")
+            authority_path=require_reference({"path":value["packaging_validation"].get("authority_path"),"sha256":value["packaging_validation"].get("authority_sha256")},"packaging review authority")
+            package,report=read(package_path),read(report_path)
+            if package.get("clean_delivery_sha256")!=value["delivery_manifest"]["sha256"] or report.get("decision")!="pass" or report.get("manifest_sha256")!=sha(package_path) or report.get("review_sha256")!=sha(review_path) or report.get("review_authority_sha256")!=sha(authority_path): raise RuntimeError("packaging validation binding mismatch")
+            for item in package.get("results",[]):
+                path=Path(item.get("output_path",""))
+                if not path.is_file() or sha(path)!=item.get("output_sha256"): raise RuntimeError("packaged output changed")
+            recheck=job/"packaging_completion_recheck.json"
+            run([sys.executable,str(packager),"validate","--manifest",str(package_path),"--review",str(review_path),"--review-authority",str(authority_path),"--report",str(recheck)])
+            if read(recheck).get("decision")!="pass" or read(recheck).get("manifest_sha256")!=sha(package_path): raise RuntimeError("packaging completion recheck failed")
+            packaged={"packaging_delivery":value["packaging_delivery"],"packaging_validation":value["packaging_validation"],"packaging_completion_recheck":{"path":str(recheck),"sha256":sha(recheck)}}
+        receipt={"schema":"video-montage-completion/v260928","completed_at":now(),"semantic":value["semantic_completion"],"controller_preflight":value["controller_preflight"],"delivery_manifest":value["delivery_manifest"],"controller_validation":value["controller_validation"],**packaged,"components":value["components"]}; atomic(job/"video_montage_completion.json",receipt); value["completion"]={"path":str(job/"video_montage_completion.json"),"sha256":sha(job/"video_montage_completion.json")}; save(job,value,"complete","video-montage release complete"); print(value["completion"]["path"]); return
     print(json.dumps(value,ensure_ascii=False,indent=2))
 
 

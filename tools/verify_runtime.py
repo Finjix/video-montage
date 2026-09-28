@@ -23,6 +23,7 @@ REQUIRED = (
     "components/semantic/scripts/portable_frame_renderer.py",
     "components/semantic/scripts/frame_range_repair.py",
     "components/controller/scripts/ffmpeg_controller.py",
+    "components/packaging/scripts/package_video.py",
     "components/executor/scripts/three_suite_ff.py",
 )
 
@@ -42,6 +43,11 @@ def verify() -> dict:
             result = subprocess.run([str(path), "-version"], capture_output=True, text=True)
             if result.returncode:
                 failures.append(f"{binary} failed")
+    ffmpeg = ROOT / "dependencies/ffmpeg/bin/ffmpeg.exe"
+    if ffmpeg.is_file():
+        filters = subprocess.run([str(ffmpeg), "-hide_banner", "-filters"], capture_output=True, text=True)
+        if filters.returncode or any(f" {name} " not in filters.stdout for name in ("ass", "overlay", "amix")):
+            failures.append("FFmpeg packaging filters unavailable: ass, overlay, amix")
     model = ROOT / REQUIRED[3]
     if model.is_file() and model.stat().st_size < 1_500_000_000:
         failures.append("Whisper model incomplete")

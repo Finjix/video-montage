@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 PYTHON = ROOT / "dependencies/python/python.exe"
 SEMANTIC = ROOT / "components/semantic"
 CONTROLLER = ROOT / "components/controller"
+PACKAGING = ROOT / "components/packaging"
 EXECUTOR = ROOT / "components/executor"
 
 
@@ -29,13 +30,14 @@ def validate() -> dict:
         run("runtime", [str(PYTHON), str(ROOT / "tools/verify_runtime.py")]),
         run("semantic_tests", [str(PYTHON), "-B", "-m", "unittest", "discover", "-s", str(SEMANTIC / "tests"), "-p", "test_*.py"]),
         run("controller_tests", [str(PYTHON), "-B", "-m", "unittest", "discover", "-s", str(CONTROLLER / "tests"), "-p", "test_*.py"]),
+        run("packaging_tests", [str(PYTHON), "-B", "-m", "unittest", "discover", "-s", str(PACKAGING / "tests"), "-p", "test_*.py"]),
         run("integrity_tests", [str(PYTHON), "-B", "-m", "unittest", "discover", "-s", str(ROOT / "tools"), "-p", "test_release_integrity.py"]),
         run("single_skill", [str(PYTHON), str(ROOT / "tools/validate_skill.py"), str(ROOT / "skill/video-montage")]),
         run("suite_preflight", [str(PYTHON), str(EXECUTOR / "scripts/three_suite_ff.py"), "--suite-root", str(ROOT), "preflight"]),
     ]
     with tempfile.TemporaryDirectory(prefix="video-montage-check-") as temporary:
         checks.append(run("controller_preflight", [str(PYTHON), str(CONTROLLER / "scripts/ffmpeg_controller.py"), "preflight", "--output", str(Path(temporary) / "controller.json")]))
-    for script in (*SEMANTIC.glob("scripts/*.py"), *CONTROLLER.glob("scripts/*.py"), *EXECUTOR.glob("scripts/*.py")):
+    for script in (*SEMANTIC.glob("scripts/*.py"), *CONTROLLER.glob("scripts/*.py"), *PACKAGING.glob("scripts/*.py"), *EXECUTOR.glob("scripts/*.py")):
         try:
             ast.parse(script.read_text(encoding="utf-8-sig"), filename=str(script))
         except SyntaxError as exc:

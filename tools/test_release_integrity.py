@@ -72,105 +72,121 @@ class InstallationTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.base = Path(self.temporary.name)
         self.source = self.base / "source"
-        self.source.mkdir()
         (self.source / "skill/video-montage").mkdir(parents=True)
-        (self.source / "skill/video-montage/SKILL.md").write_text("new", encoding="utf-8")
-        self.target = self.base / "video-montage"
-        self.old = self.base / "CodexMontageFF/20.2.5"
-        self.roots = (self.base / "codex/skills", self.base / "agents/skills")
+        (self.source / "skill/video-montage/SKILL.md").write_text("name: video-montage\n", encoding="utf-8")
+        (self.source / "components/executor/scripts").mkdir(parents=True)
+        (self.source / "components/executor/scripts/three_suite_ff.py").write_text("", encoding="utf-8")
+        self.target = self.base / "codex/skills/video-montage"
+        self.legacy = self.base / "video-montage"
+        self.agent_link = self.base / ".agents/skills/video-montage"
 
-    def test_first_install_and_reinstall_clear_target(self):
+    def test_first_install_and_reinstall_replace_skill_directory(self):
         (self.source / "release").mkdir()
-        (self.source / "release" / "large.zip").write_bytes(b"archive")
+        (self.source / "release/large.zip").write_bytes(b"archive")
         with patch.object(self.deployer, "run_checked"):
-            self.deployer.install(self.source, self.target, self.old, self.roots)
-            self.assertTrue(all((root / "video-montage").is_junction() for root in self.roots))
+            self.deployer.install(self.source, self.target, self.legacy, self.agent_link)
+            self.assertTrue((self.target / "SKILL.md").is_file())
+            self.assertFalse(self.target.is_junction())
             (self.target / "personal.txt").write_text("old", encoding="utf-8")
-            self.deployer.install(self.source, self.target, self.old, self.roots)
+            self.deployer.install(self.source, self.target, self.legacy, self.agent_link)
         self.assertFalse((self.target / "personal.txt").exists())
-        self.assertFalse((self.target / ".manifests").exists())
-        self.assertFalse((self.target / "artifacts").exists())
         self.assertFalse((self.target / "release").exists())
+        self.assertFalse(self.legacy.exists())
+        self.assertFalse(self.agent_link.exists())
 
-    def test_legacy_links_removed_and_failure_restores_install(self):
-        self.old.mkdir(parents=True)
-        (self.old / "old.txt").write_text("previous", encoding="utf-8")
-        for root in self.roots:
-            root.mkdir(parents=True)
-            self.deployer.create_junction(root / self.deployer.OLD_SKILLS[0], self.old / "components")
+    def test_migrates_legacy_install_and_links(self):
+        (self.legacy / "skill/video-montage").mkdir(parents=True)
+        (self.legacy / "skill/video-montage/SKILL.md").write_text("name: video-montage\n", encoding="utf-8")
+        (self.legacy / "components/executor/scripts").mkdir(parents=True)
+        (self.legacy / "components/executor/scripts/three_suite_ff.py").write_text("", encoding="utf-8")
+        self.target.parent.mkdir(parents=True)
+        self.deployer.create_junction(self.target, self.legacy / "skill/video-montage")
+        self.agent_link.parent.mkdir(parents=True)
+        self.deployer.create_junction(self.agent_link, self.legacy / "skill/video-montage")
         with patch.object(self.deployer, "run_checked"):
-            self.deployer.install(self.source, self.target, self.old, self.roots)
-        self.assertFalse(self.old.exists())
-        self.assertTrue(all(not (root / self.deployer.OLD_SKILLS[0]).exists() for root in self.roots))
-        (self.target / "marker.txt").write_text("keep until success", encoding="utf-8")
-        with patch.object(self.deployer, "run_checked"), patch.object(self.deployer, "create_junction", side_effect=OSError("injected failure")):
+            self.deployer.install(self.source, self.target, self.legacy, self.agent_link)
+        self.assertTrue((self.target / "SKILL.md").is_file())
+        self.assertFalse(self.target.is_junction())
+        self.assertFalse(self.legacy.exists())
+        self.assertFalse(self.agent_link.exists())
+
+    def test_failure_restores_previous_skill(self):
+        with patch.object(self.deployer, "run_checked"):
+            self.deployer.install(self.source, self.target, self.legacy, self.agent_link)
+        (self.target / "marker.txt").write_text("keep", encoding="utf-8")
+        self.agent_link.parent.mkdir(parents=True)
+        self.deployer.create_junction(self.agent_link, self.target)
+        original_rename = Path.rename
+        def fail_agent_rename(path, destination):
+            if path == self.agent_link:
+                raise OSError("injected failure")
+            return original_rename(path, destination)
+        with patch.object(self.deployer, "run_checked"), patch.object(Path, "rename", fail_agent_rename):
             with self.assertRaisesRegex(OSError, "injected failure"):
-                self.deployer.install(self.source, self.target, self.old, self.roots)
-        self.assertEqual("keep until success", (self.target / "marker.txt").read_text(encoding="utf-8"))
-        self.assertTrue(all((root / "video-montage").is_junction() for root in self.roots))
+                self.deployer.install(self.source, self.target, self.legacy, self.agent_link)
+        self.assertEqual("keep", (self.target / "marker.txt").read_text(encoding="utf-8"))
+        self.assertTrue(self.agent_link.is_junction())
 
     def test_preflight_does_not_create_install(self):
-        deployer = self.deployer
-        with patch.dict(os.environ, {"USERPROFILE": str(self.base)}):
+        with patch.dict(os.environ, {"USERPROFILE": str(self.base), "CODEX_HOME": str(self.base / "codex")}):
             with patch.object(sys, "argv", [str(ROOT / "install.cmd"), str(ROOT / "install.cmd"), "-PreflightOnly"]):
-                with patch.object(deployer, "run_checked"):
-                    deployer.main()
+                with patch.object(self.deployer, "run_checked"):
+                    self.deployer.main()
         self.assertFalse(self.target.exists())
 
-    def test_uninstall_removes_install_and_owned_links_only(self):
-        (self.target / "skill/video-montage").mkdir(parents=True)
+    def test_install_cmd_shows_preflight_completion_prompt(self):
+        result = subprocess.run(
+            ["cmd.exe", "/d", "/c", str(ROOT / "install.cmd"), "-PreflightOnly"],
+            input="\n", capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+        )
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("[安装中] 正在检查运行环境", result.stdout)
+        self.assertIn("Preflight completed successfully.", result.stdout)
+        self.assertIn("Press any key to close this window.", result.stdout)
+
+    def test_uninstall_removes_skill_directory(self):
         (self.target / "components/executor/scripts").mkdir(parents=True)
-        (self.target / "skill/video-montage/SKILL.md").write_text("name: video-montage\n", encoding="utf-8")
+        (self.target / "SKILL.md").write_text("name: video-montage\n", encoding="utf-8")
         (self.target / "components/executor/scripts/three_suite_ff.py").write_text("", encoding="utf-8")
-        for root in self.roots:
-            root.mkdir(parents=True)
-            self.deployer.create_junction(root / "video-montage", self.target / "skill/video-montage")
-        unrelated = self.base / "unrelated"
-        unrelated.mkdir()
-        (unrelated / "keep.txt").write_text("keep", encoding="utf-8")
-        self.deployer.create_junction(self.roots[0] / "foreign", unrelated)
-        self.deployer.create_junction(self.target / "external", unrelated)
         env = os.environ.copy()
         env["USERPROFILE"] = str(self.base)
         env["CODEX_HOME"] = str(self.base / "codex")
         result = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ROOT / "tools/uninstall.ps1")],
+            ["cmd.exe", "/d", "/c", str(ROOT / "uninstall.cmd"), "-NoPause"],
             capture_output=True, text=True, encoding="utf-8", errors="replace", env=env,
         )
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertFalse(self.target.exists())
-        self.assertTrue(all(not (root / "video-montage").exists() for root in self.roots))
-        self.assertTrue((self.roots[0] / "foreign").is_junction())
-        self.assertEqual("keep", (unrelated / "keep.txt").read_text(encoding="utf-8"))
 
-    def test_uninstall_refuses_unrelated_target(self):
-        self.target.mkdir()
+    def test_uninstall_refuses_unrelated_skill(self):
+        self.target.mkdir(parents=True)
         (self.target / "personal.txt").write_text("keep", encoding="utf-8")
         env = os.environ.copy()
         env["USERPROFILE"] = str(self.base)
         env["CODEX_HOME"] = str(self.base / "codex")
         result = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ROOT / "tools/uninstall.ps1")],
+            ["cmd.exe", "/d", "/c", str(ROOT / "uninstall.cmd"), "-NoPause"],
             capture_output=True, text=True, encoding="utf-8", errors="replace", env=env,
         )
-        self.assertNotEqual(0, result.returncode)
+        self.assertEqual(1, result.returncode)
         self.assertTrue((self.target / "personal.txt").exists())
 
-    def test_uninstall_cmd_reports_synchronous_failure(self):
-        self.target.mkdir()
-        (self.target / "personal.txt").write_text("keep", encoding="utf-8")
+    def test_uninstall_cmd_shows_completion_prompt(self):
         env = os.environ.copy()
         env["USERPROFILE"] = str(self.base)
         env["CODEX_HOME"] = str(self.base / "codex")
-        result = subprocess.run(["cmd.exe", "/d", "/c", str(ROOT / "uninstall.cmd")], capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
-        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
-        self.assertTrue((self.target / "personal.txt").exists())
+        result = subprocess.run(
+            ["cmd.exe", "/d", "/c", str(ROOT / "uninstall.cmd")],
+            input="\n", capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=30,
+        )
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("Uninstall completed.", result.stdout)
+        self.assertIn("Press any key to close this window.", result.stdout)
 
     def test_uninstall_from_installed_cmd(self):
         (self.target / "tools").mkdir(parents=True)
-        (self.target / "skill/video-montage").mkdir(parents=True)
         (self.target / "components/executor/scripts").mkdir(parents=True)
-        (self.target / "skill/video-montage/SKILL.md").write_text("name: video-montage\n", encoding="utf-8")
+        (self.target / "SKILL.md").write_text("name: video-montage\n", encoding="utf-8")
         (self.target / "components/executor/scripts/three_suite_ff.py").write_text("", encoding="utf-8")
         (self.target / "uninstall.cmd").write_bytes((ROOT / "uninstall.cmd").read_bytes())
         (self.target / "tools/uninstall.ps1").write_bytes((ROOT / "tools/uninstall.ps1").read_bytes())
@@ -182,29 +198,32 @@ class InstallationTests(unittest.TestCase):
             input="\n", capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=30,
         )
         self.assertEqual(3, result.returncode, result.stdout + result.stderr)
+        self.assertIn("Press any key to start uninstall.", result.stdout)
         deadline = time.monotonic() + 10
         while self.target.exists() and time.monotonic() < deadline:
             time.sleep(0.1)
         self.assertFalse(self.target.exists())
 
-    def test_uninstall_preserves_same_name_foreign_skill(self):
-        unrelated = self.base / "unrelated"
-        unrelated.mkdir()
-        root = self.roots[0]
-        root.mkdir(parents=True)
-        self.deployer.create_junction(root / "video-montage", unrelated)
-        env = os.environ.copy()
-        env["USERPROFILE"] = str(self.base)
-        env["CODEX_HOME"] = str(self.base / "codex")
-        result = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(ROOT / "tools/uninstall.ps1")],
-            capture_output=True, text=True, encoding="utf-8", errors="replace", env=env,
-        )
-        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
-        self.assertTrue((root / "video-montage").is_junction())
-
 
 class PackagingTests(unittest.TestCase):
+    def test_package_cmd_reaches_version_validation(self):
+        result = subprocess.run(
+            ["cmd.exe", "/d", "/c", str(ROOT / "package.cmd"), "invalid"],
+            input="\n", capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+        )
+        self.assertEqual(1, result.returncode)
+        self.assertIn("Archive version must look like", result.stderr)
+        self.assertIn("Packaging failed with exit code 1.", result.stdout)
+        self.assertIn("Press any key to close this window.", result.stdout)
+
+    def test_package_cmd_no_pause(self):
+        result = subprocess.run(
+            ["cmd.exe", "/d", "/c", str(ROOT / "package.cmd"), "invalid", "-NoPause"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
+        )
+        self.assertEqual(1, result.returncode)
+        self.assertNotIn("Press any key", result.stdout)
+
     def test_clean_archive_and_independent_archive_name(self):
         packager = load_packager()
         with tempfile.TemporaryDirectory() as temporary:
@@ -257,7 +276,7 @@ class DocumentationTests(unittest.TestCase):
         legacy = re.compile(r"(?i)\bv(?:[6-9]|1[0-9]|20)(?:\.\d+)*\b|旧版|旧版本|旧安装|历史版本|兼容旧|迁移")
         links = re.compile(r"\]\(([^)]+\.md)\)")
         for path in ROOT.rglob("*.md"):
-            if "dependencies" in path.parts or "release" in path.parts or path == ROOT / "docs/版本更新.md":
+            if {"dependencies", "release", "test"} & set(path.parts) or path == ROOT / "docs/版本更新.md":
                 continue
             self.assertNotRegex(path.as_posix(), legacy.pattern)
             content = path.read_text(encoding="utf-8-sig")

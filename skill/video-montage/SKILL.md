@@ -8,10 +8,19 @@ metadata:
 # Video montage
 
 Run this skill with the bundled Python at `dependencies/python/python.exe`. The
-suite root is two directories above this file. Start with
+suite root is the directory containing this file when installed, or two
+directories above it in the source package. Start with
 `components/executor/scripts/three_suite_ff.py preflight`,
 then use its `init`, `semantic-run`, `semantic-complete`, `controller-preflight`,
 `controller-finalize`, `controller-validate`, and `complete` commands in order.
+When packaging is requested, run `packaging-draft`, edit the `subtitle-xx.txt` and per-output
+configuration, then run `packaging-finalize` and `packaging-validate` after
+`controller-validate` and before `complete`. Read the
+[packaging workflow](../../components/packaging/README.md). Without packaging,
+keep the clean delivery behavior.
+Burn subtitles into the video picture only; retain the editable `subtitle-xx.txt` in a
+`subtitles/` subdirectory away from the packaged MP4. When the user edits that TXT, run `packaging-reburn` (or the
+standalone packager's `reburn`) into a new directory, then validate the new MP4.
 
 The semantic component owns source ASR, candidate evidence, independent candidate
 review, batch planning, frame-plan validation, and the portable frame renderer.
@@ -28,6 +37,10 @@ source lineage and hash-bound task evidence. Render only through the bundled
 portable frame renderer; require a complete semantic release before controller
 finalization and a passing independent post-encode QC before completion. Do not
 add music, captions, overlays, or extra audio unless the current user requests them.
+Packaging creates a separate output from a controller-validated clean video.
+Never replace the clean output or claim a standalone packaging test passed the
+semantic release. An independent reviewer must inspect final picture, subtitles,
+overlays, and audio before the optional packaging gate can complete.
 
 Task evidence belongs in the job directory. The installed suite does not create
 package manifests or deployment reports.
