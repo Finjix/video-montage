@@ -106,12 +106,26 @@ class PackagingContractTests(unittest.TestCase):
     def test_render_keeps_subtitle_as_named_txt(self):
         output = self.root / "rendered"
         output.mkdir()
-        manifest = self.root / "rendered.json"
+        manifest = output / "packaging_manifest.json"
         with patch.object(packaging, "video_spec", return_value=self.spec), patch.object(packaging, "render_one", return_value={"plan_id": "P1", "subtitles": {"path": str(self.srt), "sha256": packaging.sha(self.srt)}}):
-            packaging.render(self.config, output, manifest)
-        self.assertEqual(self.srt.read_bytes(), (output / "subtitles" / "subtitle-P1.txt").read_bytes())
-        self.assertFalse(list(output.glob("*.txt")))
+            result = packaging.render(self.config, output, manifest)
+        self.assertEqual(self.srt.read_bytes(), (output / "subtitle-P1.txt").read_bytes())
+        self.assertEqual(self.config.read_bytes(), (output / "packaging.json").read_bytes())
+        self.assertEqual(str(output / "subtitle-P1.txt"), result["results"][0]["subtitle_snapshot"]["path"])
+        self.assertEqual(str(output / "packaging.json"), result["config_snapshot_path"])
+        self.assertEqual({"packaging.json", "packaging_manifest.json", "subtitle-P1.txt"},
+                         {path.name for path in output.iterdir()})
         self.assertFalse(list(output.glob("*.srt")))
+
+    def test_render_reuses_config_and_subtitle_already_in_output_root(self):
+        output = self.root
+        manifest = output / "packaging_manifest.json"
+        with patch.object(packaging, "video_spec", return_value=self.spec), patch.object(packaging, "render_one", return_value={"plan_id": "P1", "subtitles": {"path": str(self.srt), "sha256": packaging.sha(self.srt)}}):
+            result = packaging.render(self.config, output, manifest)
+        self.assertEqual(str(self.config), result["config_snapshot_path"])
+        self.assertEqual(str(self.srt), result["results"][0]["subtitle_snapshot"]["path"])
+        self.assertFalse((output / "packaging_config_snapshot.json").exists())
+        self.assertFalse((output / "subtitles").exists())
 
     def test_reburn_uses_edited_srt_and_new_config(self):
         previous = self.root / "previous.json"
@@ -122,7 +136,7 @@ class PackagingContractTests(unittest.TestCase):
                                                  "subtitle_snapshot": {"path": str(old_srt), "sha256": packaging.sha(old_srt)},
                                                  "nameplate": None, "text_pins": [], "disclaimer": None, "bgm": None}]})
         output = self.root / "new"
-        manifest = self.root / "new_manifest.json"
+        manifest = output / "packaging_manifest.json"
         with patch.object(packaging, "render", return_value={"schema": "video-montage-packaging-delivery/v1"}) as mock_render:
             result = packaging.reburn(previous, "P1", self.srt, output, manifest)
         config = json.loads((output / "reburn_config.json").read_text(encoding="utf-8"))

@@ -393,16 +393,21 @@ def render(config_path: Path, output_dir: Path, manifest_path: Path, delivery_ma
             raise ValueError("passing controller validation bound to clean delivery required")
         expected = {item["plan_id"]: item["output_sha256"] for item in delivery["results"]}
     rows = prepared_rows(config_path, expected)
-    snapshots = [output_dir / "subtitles" / subtitle_filename(row["plan_id"]) for row in rows]
-    config_snapshot = output_dir / "packaging_config_snapshot.json"
-    if config_snapshot.exists() or any(path.exists() for path in snapshots):
-        raise FileExistsError("refusing to overwrite packaging snapshots")
+    snapshots = [output_dir / subtitle_filename(row["plan_id"]) for row in rows]
+    config_snapshot = output_dir / config_path.name
+    copies = [(config_path, config_snapshot)] + [
+        (Path(row["subtitles"]["path"]), snapshot) for row, snapshot in zip(rows, snapshots)
+    ]
+    for source, target in copies:
+        if source.resolve() != target.resolve() and target.exists():
+            raise FileExistsError(f"refusing to overwrite packaging file: {target}")
     results = [render_one(row, output_dir) for row in rows]
     for row, result, snapshot in zip(rows, results, snapshots):
-        snapshot.parent.mkdir(parents=True, exist_ok=True)
-        snapshot.write_bytes(Path(row["subtitles"]["path"]).read_bytes())
+        if Path(row["subtitles"]["path"]).resolve() != snapshot.resolve():
+            snapshot.write_bytes(Path(row["subtitles"]["path"]).read_bytes())
         result["subtitle_snapshot"] = {"path": str(snapshot.resolve()), "sha256": sha(snapshot)}
-    config_snapshot.write_bytes(config_path.read_bytes())
+    if config_path.resolve() != config_snapshot.resolve():
+        config_snapshot.write_bytes(config_path.read_bytes())
     manifest = {"schema": "video-montage-packaging-delivery/v1", "mode": "complete_montage" if delivery_manifest else "standalone_test",
                 "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
                 "config_path": str(config_path.resolve()), "config_sha256": sha(config_path),
@@ -427,8 +432,8 @@ def reburn(previous_manifest_path: Path, plan_id: str, subtitle_txt: Path, outpu
         raise ValueError(f"unknown plan ID in previous packaging: {plan_id}")
     if output_dir.exists() and any(output_dir.iterdir()):
         raise FileExistsError(f"refusing non-empty reburn output directory: {output_dir}")
-    if manifest_path.exists() or manifest_path.resolve().is_relative_to(output_dir.resolve()):
-        raise FileExistsError(f"reburn manifest must be a new file outside the output directory: {manifest_path}")
+    if manifest_path.exists():
+        raise FileExistsError(f"reburn manifest must be a new file: {manifest_path}")
     edited = resolve_file(Path.cwd(), str(subtitle_txt))
     rows = []
     for old in results:

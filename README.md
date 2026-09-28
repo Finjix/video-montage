@@ -24,7 +24,7 @@
 
 ### 可选成片包装
 
-通过控制器质检后，可用包装模块生成可编辑中文字幕草稿，并按每条视频的 JSON 配置加入文字钉、BGM、免责图和明星名牌。字幕只烧录进视频，保留 `subtitles/subtitle-xx.txt` 供修改后重新烧录，不生成外挂字幕轨或 `.srt` 文件；TXT 与 MP4 分目录存放。包装版另存，不覆盖纯净成片；包装配置、素材、字幕和输出均以 SHA-256 绑定。完整任务在 `controller-validate` 后依次运行 `packaging-draft`、`packaging-finalize`、`packaging-validate`，再运行 `complete`；没有包装配置时继续原流程。已有 1440×2560、60 fps 视频也可用独立命令包装，结果标为单条测试。命令、配置和审核格式见 [包装说明](components/packaging/README.md)。
+通过控制器质检后，可用包装模块生成可编辑中文字幕草稿，并按每条视频的 JSON 配置加入文字钉、BGM、免责图和明星名牌。字幕只烧录进视频，保留 `subtitle-xx.txt` 供修改后重新烧录，不生成外挂字幕轨或 `.srt` 文件；包装视频、字幕和 JSON 放在同一输出目录根部，不生成重复快照文件。包装版另存，不覆盖纯净成片；包装配置、素材、字幕和输出均以 SHA-256 绑定。完整任务在 `controller-validate` 后依次运行 `packaging-draft`、`packaging-finalize`、`packaging-validate`，再运行 `complete`；没有包装配置时继续原流程。已有 1440×2560、60 fps 视频也可用独立命令包装，结果标为单条测试。命令、配置和审核格式见 [包装说明](components/packaging/README.md)。
 
 ## 随包依赖与检查
 

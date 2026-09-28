@@ -18,9 +18,11 @@ configuration, then run `packaging-finalize` and `packaging-validate` after
 `controller-validate` and before `complete`. Read the
 [packaging workflow](../../components/packaging/README.md). Without packaging,
 keep the clean delivery behavior.
-Burn subtitles into the video picture only; retain the editable `subtitle-xx.txt` in a
-`subtitles/` subdirectory away from the packaged MP4. When the user edits that TXT, run `packaging-reburn` (or the
-standalone packager's `reburn`) into a new directory, then validate the new MP4.
+Burn subtitles into the video picture only. Put the packaged MP4, editable
+`subtitle-xx.txt`, configuration, manifest, and validation JSON directly in one output directory.
+Do not make `packaged/` or `subtitles/` subdirectories or duplicate config/subtitle snapshots.
+When the user edits that TXT, run `packaging-reburn` (or the standalone packager's
+`reburn`) into a new directory, then validate the new MP4.
 
 The semantic component owns source ASR, candidate evidence, independent candidate
 review, batch planning, frame-plan validation, and the portable frame renderer.
