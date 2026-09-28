@@ -177,6 +177,14 @@ class V7RuntimeTests(unittest.TestCase):
         self.assertFalse(passed)
         self.assertIn("MISSING_REQUIRED_TRACEABILITY", {item["code"] for item in report["failures"]})
 
+    def test_plan_id_cannot_escape_lock_directory(self):
+        self.fixture.plans[0]["plan_id"] = "../escape"
+        self.fixture.refresh()
+        passed, report, _ = self.run_gate("unsafe-id")
+        self.assertFalse(passed)
+        self.assertIn("INVALID_PLAN_ID", {item["code"] for item in report["failures"]})
+        self.assertFalse((self.root / "escape.json").exists())
+
     def test_same_person_boundary_rejected(self):
         self.fixture.candidates[1]["boundary_open_person_id"] = "person:alpha"
         self.fixture.candidates[1]["visible_person_ids"].append("person:alpha")

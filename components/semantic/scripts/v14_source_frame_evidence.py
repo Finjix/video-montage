@@ -162,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--index", type=Path, required=True)
     parser.add_argument("--progress", type=Path, required=True)
-    parser.add_argument("--ffmpeg", default="ffmpeg")
+    parser.add_argument("--ffmpeg", default=str(Path(__file__).resolve().parents[3] / "dependencies" / "ffmpeg" / "bin" / "ffmpeg.exe"))
     parser.add_argument("--max-items-per-run", type=int, default=24)
     parser.add_argument("--pts-tolerance-seconds", type=float, default=0.25)
     args = parser.parse_args(argv)

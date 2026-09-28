@@ -75,7 +75,7 @@ def copy_filter(directory: str, names: list[str], source: Path) -> set[str]:
     ignored = {name for name in names if name in {"__pycache__", ".pytest_cache"} or name.endswith(".pyc")}
     current = Path(directory).resolve()
     if current == source:
-        ignored.update({".git", ".manifests", "artifacts"} & set(names))
+        ignored.update({".git", ".manifests", "artifacts", "release"} & set(names))
     if current == source / "components" / "semantic":
         ignored.update({"records"} & set(names))
     return ignored

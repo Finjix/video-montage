@@ -12,6 +12,7 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from boundary_signal_scan import scan
+from post_encode_evidence import frame_set_sha
 
 
 def sha(path: Path) -> str:
@@ -34,7 +35,7 @@ class BoundarySignalTests(unittest.TestCase):
         with wave.open(str(pcm), "wb") as handle:
             handle.setnchannels(1); handle.setsampwidth(2); handle.setframerate(48000); handle.writeframes(b"\0\0" * 48000)
         evidence = root / "evidence.json"
-        evidence.write_text(json.dumps({"schema": "ffmpeg-post-encode-evidence/v260928", "complete_plan_scope": True, "cuts": [{"plan_id": "P", "cut_index": 1, "boundary_kind": "concat_cut", "frames_before_boundary": 36, "frames_before_cut": 36, "frames": frames, "pcm_path": str(pcm), "cut_sample_index_in_pcm": 24000}]}), encoding="utf-8")
+        evidence.write_text(json.dumps({"schema": "ffmpeg-post-encode-evidence/v260928", "complete_plan_scope": True, "cuts": [{"plan_id": "P", "cut_index": 1, "boundary_kind": "concat_cut", "frames_before_boundary": 36, "frames_before_cut": 36, "frames": frames, "frame_set_sha256": frame_set_sha(frames), "pcm_path": str(pcm), "pcm_sha256": sha(pcm), "cut_sample_index_in_pcm": 24000}]}), encoding="utf-8")
         return evidence
 
     def test_single_expected_cut_passes(self):
@@ -56,7 +57,7 @@ class BoundarySignalTests(unittest.TestCase):
         with wave.open(str(pcm), "wb") as handle:
             handle.setnchannels(1); handle.setsampwidth(2); handle.setframerate(48000); handle.writeframes(b"\0\0" * 48000)
         evidence = root / "head-evidence.json"
-        evidence.write_text(json.dumps({"schema":"ffmpeg-post-encode-evidence/v260928","complete_plan_scope":True,"cuts":[{"plan_id":"P","cut_index":0,"boundary_kind":"output_start","frames_before_boundary":0,"frames":frames,"pcm_path":str(pcm),"cut_sample_index_in_pcm":0}]}),encoding="utf-8")
+        evidence.write_text(json.dumps({"schema":"ffmpeg-post-encode-evidence/v260928","complete_plan_scope":True,"cuts":[{"plan_id":"P","cut_index":0,"boundary_kind":"output_start","frames_before_boundary":0,"frames":frames,"frame_set_sha256":frame_set_sha(frames),"pcm_path":str(pcm),"pcm_sha256":sha(pcm),"cut_sample_index_in_pcm":0}]}),encoding="utf-8")
         report = scan(evidence)
         self.assertEqual("reject", report["decision"])
         self.assertIn("SHORT_OUTPUT_HEAD_SHOT", report["failures"][0]["visual"])
@@ -73,10 +74,24 @@ class BoundarySignalTests(unittest.TestCase):
         with wave.open(str(pcm), "wb") as handle:
             handle.setnchannels(1); handle.setsampwidth(2); handle.setframerate(48000); handle.writeframes(b"\0\0" * 48000)
         evidence = root / "micro-evidence.json"
-        evidence.write_text(json.dumps({"schema": "ffmpeg-post-encode-evidence/v260928", "complete_plan_scope": True, "cuts": [{"plan_id": "P", "cut_index": 1, "boundary_kind": "concat_cut", "frames_before_boundary": 72, "frames_before_cut": 72, "frames": frames, "pcm_path": str(pcm), "cut_sample_index_in_pcm": 24000}]}), encoding="utf-8")
+        evidence.write_text(json.dumps({"schema": "ffmpeg-post-encode-evidence/v260928", "complete_plan_scope": True, "cuts": [{"plan_id": "P", "cut_index": 1, "boundary_kind": "concat_cut", "frames_before_boundary": 72, "frames_before_cut": 72, "frames": frames, "frame_set_sha256": frame_set_sha(frames), "pcm_path": str(pcm), "pcm_sha256": sha(pcm), "cut_sample_index_in_pcm": 24000}]}), encoding="utf-8")
         report = scan(evidence)
         self.assertEqual("reject", report["decision"])
         self.assertIn("EXTRA_VISUAL_TRANSITION_NEAR_CUT", report["failures"][0]["visual"])
+
+    def test_changed_frame_rejects(self):
+        evidence = self.evidence(False)
+        frame = json.loads(evidence.read_text(encoding="utf-8"))["cuts"][0]["frames"][0]
+        Path(frame["path"]).write_bytes(b"tampered")
+        report = scan(evidence)
+        self.assertIn("FRAME_HASH_MISMATCH", report["failures"][0]["integrity_failures"])
+
+    def test_changed_pcm_rejects(self):
+        evidence = self.evidence(False)
+        pcm = json.loads(evidence.read_text(encoding="utf-8"))["cuts"][0]["pcm_path"]
+        Path(pcm).write_bytes(b"tampered")
+        report = scan(evidence)
+        self.assertIn("PCM_HASH_MISMATCH", report["failures"][0]["integrity_failures"])
 
 
 if __name__ == "__main__":

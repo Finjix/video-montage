@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,11 +25,39 @@ def module(name: str, relative: str):
 gate = module("frame_gate", "scripts/v20_frame_plan_gate.py")
 repair = module("frame_repair", "scripts/frame_range_repair.py")
 renderer = module("portable_frame_renderer_for_unit", "scripts/portable_frame_renderer.py")
+cut_smoke = module("cut_smoke_for_unit", "scripts/v9_cut_smoke.py")
+output_evidence = module("output_evidence_for_unit", "scripts/v9_output_evidence.py")
 fail_closed = module("v20_fail_closed_for_unit", "scripts/v20_fail_closed.py")
 runtime = module("v9_runtime_frame_contract", "scripts/v9_gate_runtime.py")
 
 
 class FrameNativeContractTests(unittest.TestCase):
+    def test_semantic_evidence_uses_bundled_media_tools(self):
+        ffmpeg = ROOT.parents[1] / "dependencies/ffmpeg/bin/ffmpeg.exe"
+        ffprobe = ROOT.parents[1] / "dependencies/ffmpeg/bin/ffprobe.exe"
+        self.assertEqual(ffmpeg, Path(cut_smoke.FFMPEG))
+        self.assertEqual(ffmpeg, Path(output_evidence.FFMPEG))
+        self.assertEqual(ffprobe, Path(output_evidence.FFPROBE))
+        template = json.loads((ROOT / "references/pipeline-config.template.json").read_text(encoding="utf-8"))
+        phase = next(item for item in template["phases"] if item["name"] == "SOURCE_FRAME_EVIDENCE")
+        self.assertIn("${package_root}/../../dependencies/ffmpeg/bin/ffmpeg.exe", phase["command"])
+
+    def test_renderer_defaults_to_cpu_encoder(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            argv = ["renderer", "--plan", str(root / "plan.json"), "--output", str(root / "output.mp4"), "--evidence", str(root / "evidence.json")]
+            with patch.object(sys, "argv", argv), patch.object(renderer, "render", return_value={"render_mode": "source_frame_ranges/v1", "export_path": "output"}) as render:
+                self.assertEqual(0, renderer.main())
+            self.assertEqual("libx264", render.call_args.args[-1])
+
+    def test_frame_repair_defaults_to_cpu_encoder(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            argv = ["repair", "--input", str(root / "input.mp4"), "--output", str(root / "output.mp4"), "--delete-registry", str(root / "delete.json"), "--evidence", str(root / "evidence.json")]
+            with patch.object(sys, "argv", argv), patch.object(repair, "render", return_value={"deleted_frame_count": 1}) as render:
+                self.assertEqual(0, repair.main())
+            self.assertEqual("libx264", render.call_args.args[-1])
+
     def test_candidate_fingerprint_binds_native_frame_identity(self):
         base = {
             "source_sha256": "a" * 64, "processing_stage": "raw", "source_in": 1.0, "source_out": 2.0,

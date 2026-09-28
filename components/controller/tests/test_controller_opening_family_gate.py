@@ -21,6 +21,27 @@ def write(path: Path, value: object) -> Path:
 
 
 class ControllerOpeningGateTests(unittest.TestCase):
+    def test_final_validation_rechecks_extracted_frame(self):
+        root = Path(tempfile.mkdtemp())
+        manifest = write(root / "manifest.json", {"output_count": 0, "results": []})
+        release = write(root / "release.json", {"decision": "pass", "authorized_outputs": []})
+        frame = root / "frame.jpg"
+        frame.write_bytes(b"approved")
+        pcm = root / "window.wav"
+        pcm.write_bytes(b"audio")
+        frames = [{"output_frame_number": 0, "path": str(frame), "sha256": controller.sha(frame)}]
+        cut = {"plan_id": "P1", "cut_index": 0, "frames": frames, "frame_set_sha256": controller.evidence_module.frame_set_sha(frames), "pcm_path": str(pcm), "pcm_sha256": controller.sha(pcm)}
+        exact = write(root / "exact.json", {"cuts": [cut]})
+        machine = write(root / "machine.json", {})
+        findings = write(root / "findings.json", {})
+        post = write(root / "post.json", {"schema": "ffmpeg-post-encode-qc/v260928", "decision": "pass", "delivery_manifest_sha256": controller.sha(manifest), "machine_signal_gate": {"decision": "pass", "path": str(machine), "sha256": controller.sha(machine)}, "independent_findings": {"path": str(findings), "sha256": controller.sha(findings)}, "exact_cut_evidence": {"path": str(exact), "sha256": controller.sha(exact)}})
+        opening = write(root / "opening.json", {"schema": "opening-visual-family-release-gate/v260928", "decision": "pass", "delivery_manifest_sha256": controller.sha(manifest)})
+        frame.write_bytes(b"tampered after review")
+        report = root / "report.json"
+        code = controller.validate(SimpleNamespace(manifest=manifest, semantic_release=release, post_qc=post, opening_family_report=opening, report=report))
+        self.assertEqual(2, code)
+        self.assertIn("exact_cut_files:P1:0", json.loads(report.read_text(encoding="utf-8"))["failures"])
+
     def run_case(self, opening_decision: str):
         root = Path(tempfile.mkdtemp())
         manifest = write(root / "manifest.json", {"output_count": 0, "results": []})

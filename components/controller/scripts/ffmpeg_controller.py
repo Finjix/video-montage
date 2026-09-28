@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
+import re
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -13,6 +15,11 @@ CONTROLLER_ROOT = Path(__file__).resolve().parents[1]
 BUNDLED_BIN = CONTROLLER_ROOT.parent.parent / "dependencies" / "ffmpeg" / "bin"
 FFMPEG = str(BUNDLED_BIN / "ffmpeg.exe")
 FFPROBE = str(BUNDLED_BIN / "ffprobe.exe")
+EVIDENCE_SPEC = importlib.util.spec_from_file_location("post_encode_evidence", Path(__file__).resolve().with_name("post_encode_evidence.py"))
+evidence_module = importlib.util.module_from_spec(EVIDENCE_SPEC)
+assert EVIDENCE_SPEC.loader
+EVIDENCE_SPEC.loader.exec_module(evidence_module)
+verify_boundary_files = evidence_module.verify_boundary_files
 
 
 def read(path: Path) -> dict:
@@ -49,13 +56,49 @@ def require_frame_native_manifest(source: dict) -> None:
             raise RuntimeError(f"hash-bound render evidence required: {item.get('plan_id')}")
 
 
+def require_authorized_premasters(items: list[dict], release: dict) -> None:
+    outputs = release.get("outputs")
+    if not isinstance(outputs, list) or len(outputs) != len(items):
+        raise RuntimeError("complete semantic delivery outputs required")
+    by_id = {str(row.get("plan_id")): row for row in outputs if isinstance(row, dict)}
+    if len(by_id) != len(items):
+        raise RuntimeError("duplicate semantic delivery plan IDs")
+    for item in items:
+        plan_id = str(item.get("plan_id") or "")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", plan_id):
+            raise RuntimeError(f"unsafe plan ID: {plan_id}")
+        row = by_id.get(plan_id)
+        if row is None:
+            raise RuntimeError(f"semantic delivery missing plan: {plan_id}")
+        export = Path(str(item.get("export_path") or ""))
+        delivered = Path(str(row.get("path") or ""))
+        render = read(Path(item["render_evidence_path"]))
+        expected_hash = str(item.get("export_sha256") or "").lower()
+        plan = Path(str(item.get("plan_path") or ""))
+        plan_hash = str(item.get("plan_sha256") or "").lower()
+        if (
+            not export.is_file() or not delivered.is_file()
+            or not plan.is_file() or sha(plan) != plan_hash
+            or not expected_hash or sha(export) != expected_hash
+            or sha(delivered) != expected_hash
+            or str(row.get("sha256") or "").lower() != expected_hash
+            or render.get("render_mode") != "source_frame_ranges/v1"
+            or Path(str(render.get("export_path") or "")).resolve() != export.resolve()
+            or str(render.get("export_sha256") or "").lower() != expected_hash
+            or Path(str(render.get("plan_path") or "")).resolve() != plan.resolve()
+            or str(render.get("plan_sha256") or "").lower() != plan_hash
+        ):
+            raise RuntimeError(f"premaster is not the semantic-authorized render: {plan_id}")
+
+
 def preflight(output: Path) -> int:
     checks={}
     for name,binary in (("ffmpeg",FFMPEG),("ffprobe",FFPROBE)):
         run=subprocess.run([binary,"-version"],capture_output=True,text=True)
         checks[name]=run.returncode==0
-    encoders=subprocess.run([FFMPEG,"-hide_banner","-encoders"],capture_output=True,text=True).stdout
-    encoder="h264_nvenc" if "h264_nvenc" in encoders else "libx264"
+    encoders=subprocess.run([FFMPEG,"-hide_banner","-encoders"],capture_output=True,text=True)
+    checks["libx264"]=encoders.returncode==0 and "libx264" in encoders.stdout
+    encoder="libx264"
     report={"schema":"ffmpeg-controller-preflight/v260928","decision":"pass" if all(checks.values()) else "reject","checks":checks,"ffmpeg_path":FFMPEG,"ffprobe_path":FFPROBE,"bundled_runtime":Path(FFMPEG).is_file() and Path(FFPROBE).is_file(),"selected_encoder":encoder,"at":datetime.now().astimezone().isoformat(timespec="seconds")}
     atomic(output,report); print(json.dumps(report,ensure_ascii=False)); return 0 if report["decision"]=="pass" else 2
 
@@ -79,11 +122,13 @@ def finalize(args) -> int:
     source=read(args.premaster_manifest); release=read(args.semantic_release)
     if release.get("decision")!="pass" or release.get("package_version")!="v260928": raise RuntimeError("current semantic release is not pass")
     require_frame_native_manifest(source)
-    items=source.get("results",[]); args.output_dir.mkdir(parents=True,exist_ok=True)
+    items=source.get("results",[])
     premaster_ids=[str(item.get("plan_id") or "") for item in items]; authorized=[str(item) for item in release.get("authorized_outputs",[])]
     if source.get("output_count")!=len(items) or set(premaster_ids)!=set(authorized) or len(premaster_ids)!=len(authorized) or len(set(premaster_ids))!=len(premaster_ids): raise RuntimeError("premaster plan set must equal complete semantic authorization")
+    require_authorized_premasters(items, release)
     encoder=args.encoder
-    if encoder=="auto": encoder="h264_nvenc" if "h264_nvenc" in subprocess.run([FFMPEG,"-hide_banner","-encoders"],capture_output=True,text=True).stdout else "libx264"
+    if encoder=="auto": encoder="libx264"
+    args.output_dir.mkdir(parents=True,exist_ok=True)
     results=[]
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         futures=[pool.submit(finalize_one,item,args.output_dir,args.width,args.height,args.fps,encoder) for item in items]
@@ -109,6 +154,10 @@ def validate(args) -> int:
     if machine.get("decision")!="pass" or not machine_path.is_file() or sha(machine_path)!=str(machine.get("sha256", "")).lower(): failures.append("machine_signal_gate")
     if not independent_path.is_file() or sha(independent_path)!=str(independent.get("sha256", "")).lower(): failures.append("independent_findings")
     if not exact_path.is_file() or sha(exact_path)!=str(exact.get("sha256", "")).lower(): failures.append("exact_cut_evidence")
+    else:
+        for cut in read(exact_path).get("cuts", []):
+            if verify_boundary_files(cut):
+                failures.append(f"exact_cut_files:{cut.get('plan_id')}:{cut.get('cut_index')}")
     if opening.get("schema")!="opening-visual-family-release-gate/v260928" or opening.get("decision")!="pass" or opening.get("delivery_manifest_sha256")!=sha(args.manifest): failures.append("opening_visual_family_gate")
     for item in manifest.get("results",[]):
         for segment in item.get("applied_repairs",[]):

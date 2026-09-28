@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -31,6 +32,26 @@ def frame_set_sha(frames: list[dict]) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def verify_boundary_files(cut: dict) -> list[str]:
+    failures = []
+    frames = cut.get("frames")
+    if not isinstance(frames, list) or not frames:
+        return ["FRAME_SET_INVALID"]
+    for frame in frames:
+        if not isinstance(frame, dict) or not isinstance(frame.get("output_frame_number"), int) or not isinstance(frame.get("sha256"), str):
+            failures.append("FRAME_SET_INVALID")
+            continue
+        path = Path(str(frame.get("path") or ""))
+        if not path.is_file() or sha(path) != str(frame.get("sha256") or "").lower():
+            failures.append("FRAME_HASH_MISMATCH")
+    if "FRAME_SET_INVALID" not in failures and frame_set_sha(frames) != cut.get("frame_set_sha256"):
+        failures.append("FRAME_SET_HASH_MISMATCH")
+    pcm = Path(str(cut.get("pcm_path") or ""))
+    if not pcm.is_file() or sha(pcm) != str(cut.get("pcm_sha256") or "").lower():
+        failures.append("PCM_HASH_MISMATCH")
+    return sorted(set(failures))
+
+
 def validate_plan_scope(delivery: dict, index: dict) -> list[str]:
     delivery_ids = [str(item.get("plan_id") or "") for item in delivery.get("results", [])]
     index_ids = [str(item.get("plan_id") or "") for item in index.get("plans", [])]
@@ -41,6 +62,8 @@ def validate_plan_scope(delivery: dict, index: dict) -> list[str]:
         failures.append("LOCKED_INDEX_SCOPE_INVALID")
     if set(delivery_ids) != set(index_ids):
         failures.append("PARTIAL_BATCH_OR_DEPENDENCY_SCOPE")
+    if any(not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", plan_id) for plan_id in delivery_ids):
+        failures.append("UNSAFE_PLAN_ID")
     return failures
 
 

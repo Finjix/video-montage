@@ -153,7 +153,7 @@ def main() -> int:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--delete-registry", type=Path, required=True)
     parser.add_argument("--evidence", type=Path, required=True)
-    parser.add_argument("--encoder", choices=("h264_nvenc", "libx264"), default="h264_nvenc")
+    parser.add_argument("--encoder", choices=("h264_nvenc", "libx264"), default="libx264")
     args = parser.parse_args()
     value = render(args.input.resolve(), args.output.resolve(), args.delete_registry.resolve(), args.evidence.resolve(), args.encoder)
     print(json.dumps({"decision": "pass", "deleted_frames": value["deleted_frame_count"]}, ensure_ascii=False))

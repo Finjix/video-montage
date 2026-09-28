@@ -5,6 +5,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location("v15_orchestrator", ROOT / "scripts" / "v15_orchestrator.py")
@@ -14,6 +15,26 @@ SPEC.loader.exec_module(runtime)
 
 
 class V15OrchestratorContractTests(unittest.TestCase):
+    def test_repair_discards_rewound_phase_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            feedback = root / "feedback.json"
+            feedback.write_text("{}", encoding="utf-8")
+            response = root / "response.json"
+            response.write_text(json.dumps({"schema": runtime.MODEL_RESPONSE_SCHEMA, "task_id": "task", "phase": "REVIEW", "decision": "repair_required", "repair_phase": "SOLVE", "outputs": [{"name": "review_feedback", "path": str(feedback), "sha256": runtime.sha_file(feedback)}]}), encoding="utf-8")
+            config = {"task_root": str(root), "phases": [
+                {"name": "SOURCE", "outputs": [{"name": "source", "path": str(root / "source.json")}]},
+                {"name": "SOLVE", "outputs": [{"name": "plan", "path": str(root / "plan.json")}]},
+                {"name": "REVIEW", "outputs": [{"name": "review_feedback", "path": str(feedback)}], "on_repair": {"allowed_phases": ["SOLVE"], "max_rounds": 2}},
+            ]}
+            state = {"task_id": "task", "status": "WAITING_MODEL", "phase_index": 2, "repair_round": 0, "artifacts": {"source": {"path": "source"}, "plan": {"path": "stale"}, "review_feedback": {"path": "old"}, "unrelated": {"path": "keep"}}}
+            with patch.object(runtime, "load_bound", return_value=(config, state)), patch.object(runtime, "save_state"), patch.object(runtime, "emit_checkpoint"), patch.object(runtime, "resume", side_effect=lambda _c, _s: (20, state)):
+                code, updated = runtime.supply_model(root / "config.json", root / "state.json", response)
+            self.assertEqual(20, code)
+            self.assertNotIn("plan", updated["artifacts"])
+            self.assertEqual(str(feedback), updated["artifacts"]["review_feedback"]["path"])
+            self.assertIn("source", updated["artifacts"])
+
     def make_config(self, root: Path) -> dict:
         profile = root / "profile.json"
         manifest = root / "sources.json"

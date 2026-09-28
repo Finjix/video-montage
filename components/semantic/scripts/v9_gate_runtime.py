@@ -480,6 +480,9 @@ def validate_and_lock(request_path: Path, output_dir: Path) -> tuple[bool, dict,
         scope = f"plan:{pid}"
         if not gate.require(plan, ["plan_id", "plan_revision", "segments", "transitions"], scope):
             continue
+        if not isinstance(plan.get("plan_id"), str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", pid):
+            gate.fail("INVALID_PLAN_ID", scope, "plan_id must be a portable filename")
+            continue
         segments = plan["segments"] if isinstance(plan["segments"], list) else []
         shot_range = style.get("shot_count", {})
         if not (int(shot_range.get("min", -1)) <= len(segments) <= int(shot_range.get("max", -1))):

@@ -12,7 +12,7 @@
 
 只检查源包而不改动安装目录：`install.cmd -PreflightOnly`。
 
-卸载：运行 `uninstall.cmd`，删除 `%USERPROFILE%\video-montage` 和两个技能目录中指向该安装的 `video-montage` 连接。
+卸载：运行 `uninstall.cmd`，删除 `%USERPROFILE%\video-montage` 和两个技能目录中指向该安装的 `video-montage` 连接。从安装目录运行时，自删除在后台完成，命令返回 3 表示仍在进行，不能视为卸载成功；从项目目录运行时会等待完成并返回实际结果。
 
 ## 使用
 

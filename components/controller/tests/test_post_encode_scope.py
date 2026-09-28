@@ -19,6 +19,11 @@ class PostEncodeScopeTests(unittest.TestCase):
         locked = {"plans": [{"plan_id": "P2"}, {"plan_id": "P1"}]}
         self.assertEqual([], validate_plan_scope(delivery, locked))
 
+    def test_unsafe_plan_id_is_rejected(self):
+        delivery = {"output_count": 1, "results": [{"plan_id": "../escape"}]}
+        locked = {"plans": [{"plan_id": "../escape"}]}
+        self.assertIn("UNSAFE_PLAN_ID", validate_plan_scope(delivery, locked))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+FFMPEG = str(ROOT.parents[2] / "dependencies" / "ffmpeg" / "bin" / "ffmpeg.exe")
 SPEC = importlib.util.spec_from_file_location("v9_gate_runtime", ROOT / "v9_gate_runtime.py")
 gate = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader
@@ -26,14 +27,14 @@ def run(command: list[str]) -> None:
 def frame(source: str, when: float, output: Path) -> dict:
     if not output.is_file():
         output.parent.mkdir(parents=True, exist_ok=True)
-        run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-ss", f"{when:.6f}", "-i", source, "-frames:v", "1", str(output)])
+        run([FFMPEG, "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-ss", f"{when:.6f}", "-i", source, "-frames:v", "1", str(output)])
     return {"path": str(output.resolve()), "sha256": gate.sha_file(output), "source_time": round(when, 6)}
 
 
 def audio(source: str, start: float, duration: float, output: Path) -> dict:
     if not output.is_file():
         output.parent.mkdir(parents=True, exist_ok=True)
-        run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-ss", f"{start:.6f}", "-i", source, "-t", f"{duration:.6f}", "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(output)])
+        run([FFMPEG, "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-ss", f"{start:.6f}", "-i", source, "-t", f"{duration:.6f}", "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(output)])
     return {"path": str(output.resolve()), "sha256": gate.sha_file(output), "source_start": round(start, 6), "duration": round(duration, 6)}
 
 

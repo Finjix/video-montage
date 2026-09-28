@@ -2,12 +2,19 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import wave
 from pathlib import Path
 
 import numpy as np
 from PIL import Image
+
+EVIDENCE_SPEC = importlib.util.spec_from_file_location("post_encode_evidence", Path(__file__).resolve().with_name("post_encode_evidence.py"))
+evidence_module = importlib.util.module_from_spec(EVIDENCE_SPEC)
+assert EVIDENCE_SPEC.loader
+EVIDENCE_SPEC.loader.exec_module(evidence_module)
+verify_boundary_files = evidence_module.verify_boundary_files
 
 
 def read(path: Path) -> dict:
@@ -80,6 +87,12 @@ def scan(evidence_path: Path, stable_frames: int = 60) -> dict:
     if evidence.get("schema") != "ffmpeg-post-encode-evidence/v260928" or evidence.get("complete_plan_scope") is not True:
         failures.append("EVIDENCE_SCHEMA_OR_SCOPE")
     for boundary in evidence.get("cuts", []):
+        integrity = verify_boundary_files(boundary)
+        if integrity:
+            row = {"plan_id": boundary.get("plan_id"), "cut_index": boundary.get("cut_index"), "boundary_kind": boundary.get("boundary_kind"), "decision": "reject", "integrity_failures": integrity}
+            results.append(row)
+            failures.append(row)
+            continue
         visual, audio = visual_scan(boundary, stable_frames), audio_scan(boundary)
         decision = "pass" if visual["decision"] == audio["decision"] == "pass" else "reject"
         row = {"plan_id": boundary.get("plan_id"), "cut_index": boundary.get("cut_index"), "boundary_kind": boundary.get("boundary_kind"), "decision": decision, "visual": visual, "audio": audio}

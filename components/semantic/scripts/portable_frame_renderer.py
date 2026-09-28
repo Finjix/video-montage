@@ -249,7 +249,7 @@ def main() -> int:
     parser.add_argument("--width", type=int, default=1440)
     parser.add_argument("--height", type=int, default=2560)
     parser.add_argument("--fps", type=int, default=60)
-    parser.add_argument("--encoder", choices=("h264_nvenc", "libx264"), default="h264_nvenc")
+    parser.add_argument("--encoder", choices=("h264_nvenc", "libx264"), default="libx264")
     args = parser.parse_args()
     value = render(args.plan.resolve(), args.output.resolve(), args.evidence.resolve(), args.width, args.height, args.fps, args.encoder)
     print(json.dumps({"decision": "pass", "render_mode": value["render_mode"], "output": value["export_path"]}, ensure_ascii=False))

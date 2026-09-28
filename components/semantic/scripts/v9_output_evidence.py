@@ -11,6 +11,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+FFMPEG = str(ROOT.parents[2] / "dependencies" / "ffmpeg" / "bin" / "ffmpeg.exe")
+FFPROBE = str(ROOT.parents[2] / "dependencies" / "ffmpeg" / "bin" / "ffprobe.exe")
 SPEC = importlib.util.spec_from_file_location("v9_gate_runtime", ROOT / "v9_gate_runtime.py")
 gate = importlib.util.module_from_spec(SPEC)
 assert SPEC.loader
@@ -44,7 +46,7 @@ def main(argv: list[str] | None = None) -> int:
         if gate.sha_file(export) != result["export_sha256"]:
             raise ValueError(f"export hash mismatch {entry['plan_id']}")
         plan = gate.load_json(Path(entry["path"]))
-        probe = json.loads(run(["ffprobe", "-v", "error", "-show_streams", "-show_format", "-of", "json", str(export)]))
+        probe = json.loads(run([FFPROBE, "-v", "error", "-show_streams", "-show_format", "-of", "json", str(export)]))
         durations = [round(float(segment["duration"]) * 30) / 30 for segment in plan["segments"]]
         cuts, cursor = [], 0.0
         for duration in durations[:-1]:
@@ -59,12 +61,12 @@ def main(argv: list[str] | None = None) -> int:
                 path = cut_dir / f"{label}.jpg"
                 if not path.is_file():
                     path.parent.mkdir(parents=True, exist_ok=True)
-                    run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-ss", f"{max(0, cut + offset):.6f}", "-i", str(export), "-frames:v", "1", str(path)])
+                    run([FFMPEG, "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-ss", f"{max(0, cut + offset):.6f}", "-i", str(export), "-frames:v", "1", str(path)])
                 frames.append({"label": label, "path": str(path.resolve()), "sha256": gate.sha_file(path), "output_time": round(max(0, cut + offset), 6)})
             audio_path = cut_dir / "cut_window.wav"
             audio_start = max(0, cut - 0.30)
             if not audio_path.is_file():
-                run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-ss", f"{audio_start:.6f}", "-i", str(export), "-t", "0.600000", "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(audio_path)])
+                run([FFMPEG, "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-ss", f"{audio_start:.6f}", "-i", str(export), "-t", "0.600000", "-vn", "-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", str(audio_path)])
             cut_rows.append({"cut_index": cut_index, "cut_time": round(cut, 6), "frames": frames, "audio_path": str(audio_path.resolve()), "audio_sha256": gate.sha_file(audio_path)})
         evidence_rows.append({"plan_id": entry["plan_id"], "plan_path": entry["path"], "plan_sha256": entry["sha256"], "export_path": str(export.resolve()), "export_sha256": result["export_sha256"], "probe": probe, "cuts": cut_rows})
         asr_sources.append({"source_id": entry["plan_id"], "source_path": str(export.resolve()), "source_sha256": result["export_sha256"], "processing_stage": "rendered_output_v9"})

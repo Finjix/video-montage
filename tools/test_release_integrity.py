@@ -6,6 +6,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import types
 import unittest
 import zipfile
@@ -79,6 +80,8 @@ class InstallationTests(unittest.TestCase):
         self.roots = (self.base / "codex/skills", self.base / "agents/skills")
 
     def test_first_install_and_reinstall_clear_target(self):
+        (self.source / "release").mkdir()
+        (self.source / "release" / "large.zip").write_bytes(b"archive")
         with patch.object(self.deployer, "run_checked"):
             self.deployer.install(self.source, self.target, self.old, self.roots)
             self.assertTrue(all((root / "video-montage").is_junction() for root in self.roots))
@@ -87,6 +90,7 @@ class InstallationTests(unittest.TestCase):
         self.assertFalse((self.target / "personal.txt").exists())
         self.assertFalse((self.target / ".manifests").exists())
         self.assertFalse((self.target / "artifacts").exists())
+        self.assertFalse((self.target / "release").exists())
 
     def test_legacy_links_removed_and_failure_restores_install(self):
         self.old.mkdir(parents=True)
@@ -152,6 +156,16 @@ class InstallationTests(unittest.TestCase):
         self.assertNotEqual(0, result.returncode)
         self.assertTrue((self.target / "personal.txt").exists())
 
+    def test_uninstall_cmd_reports_synchronous_failure(self):
+        self.target.mkdir()
+        (self.target / "personal.txt").write_text("keep", encoding="utf-8")
+        env = os.environ.copy()
+        env["USERPROFILE"] = str(self.base)
+        env["CODEX_HOME"] = str(self.base / "codex")
+        result = subprocess.run(["cmd.exe", "/d", "/c", str(ROOT / "uninstall.cmd")], capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertTrue((self.target / "personal.txt").exists())
+
     def test_uninstall_from_installed_cmd(self):
         (self.target / "tools").mkdir(parents=True)
         (self.target / "skill/video-montage").mkdir(parents=True)
@@ -167,7 +181,10 @@ class InstallationTests(unittest.TestCase):
             ["cmd.exe", "/d", "/c", str(self.target / "uninstall.cmd")],
             input="\n", capture_output=True, text=True, encoding="utf-8", errors="replace", env=env, timeout=30,
         )
-        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual(3, result.returncode, result.stdout + result.stderr)
+        deadline = time.monotonic() + 10
+        while self.target.exists() and time.monotonic() < deadline:
+            time.sleep(0.1)
         self.assertFalse(self.target.exists())
 
     def test_uninstall_preserves_same_name_foreign_skill(self):

@@ -2,10 +2,17 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import re
 from datetime import datetime
 from pathlib import Path
+
+EVIDENCE_SPEC = importlib.util.spec_from_file_location("post_encode_evidence", Path(__file__).resolve().with_name("post_encode_evidence.py"))
+evidence_module = importlib.util.module_from_spec(EVIDENCE_SPEC)
+assert EVIDENCE_SPEC.loader
+EVIDENCE_SPEC.loader.exec_module(evidence_module)
+verify_boundary_files = evidence_module.verify_boundary_files
 
 
 def read(path: Path) -> dict:
@@ -48,6 +55,8 @@ def main() -> int:
     for cut in evidence.get("cuts", []):
         key = (cut["plan_id"], int(cut["cut_index"]))
         finding = by_key.get(key, {})
+        for failure in verify_boundary_files(cut):
+            failures.append({"key": key, "reason": failure})
         if cut.get("actual_frame_count") != cut.get("expected_frame_count") or len(cut.get("frames", [])) != cut.get("expected_frame_count"):
             failures.append({"key": key, "reason": "dense_frame_count"})
         if finding.get("boundary_kind") != cut.get("boundary_kind"):

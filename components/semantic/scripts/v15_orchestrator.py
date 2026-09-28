@@ -490,7 +490,15 @@ def supply_model(config_path: Path, state_path: Path, response_path: Path) -> tu
         target_index = next((index for index, item in enumerate(config["phases"]) if item["name"] == target), None)
         if target_index is None or target_index >= int(state["phase_index"]):
             raise ValueError("repair target must be an earlier phase")
-        state.setdefault("artifacts", {}).update(outputs)
+        invalid_names = {
+            output["name"]
+            for later in config["phases"][target_index:]
+            for output in later.get("outputs", [])
+        }
+        artifacts = state.setdefault("artifacts", {})
+        for name in invalid_names:
+            artifacts.pop(name, None)
+        artifacts.update(outputs)
         state.setdefault("history", []).append({"phase": phase["name"], "completed_at": now_iso(), "detail": "repair_required", "repair_round": new_round, "outputs": outputs})
         state["repair_round"] = new_round
         state["phase_index"] = target_index
