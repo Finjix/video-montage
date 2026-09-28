@@ -1,0 +1,56 @@
+{
+  "schema": "semantic-style-policy-profile/v260928",
+  "profile": "celebrity_live_action_opening/v260928",
+  "scope": {
+    "include": [
+      "celebrity live-action performance",
+      "supporting-person question or reaction",
+      "live-action-primary shot with a game inset or handheld phone"
+    ],
+    "end_boundary": "the first frame where full-screen gameplay becomes the dominant visual",
+    "exclude": [
+      "full-screen gameplay",
+      "gameplay voice-over after the live-action boundary",
+      "end card",
+      "spoken or visual CTA"
+    ]
+  },
+  "style_contract": {
+    "profile": "celebrity_live_action_opening/v260928",
+    "target_duration_seconds": {"min": 12.0, "max": 22.0},
+    "shot_count": {"min": 3, "max": 7},
+    "performance_anchor_seconds": {"min": 4.0, "max": 14.0},
+    "response_or_detail_seconds": {"min": 2.0, "max": 7.0},
+    "short_complete_reaction_seconds": {"min": 0.8, "max": 3.0},
+    "max_short_complete_reactions": 2,
+    "min_performance_anchors": 1,
+    "natural_tail_seconds": {"min": 0.02, "max": 0.25},
+    "preferred_natural_tail_seconds": {"min": 0.08, "max": 0.12}
+  },
+  "policy": {
+    "content_scope": "celebrity_live_action_opening",
+    "inventory_mode": "witness_sufficient",
+    "min_replacement_plan_margin": 0.2,
+    "min_actual_asr_text_similarity": 0.82,
+    "max_single_speaker_share": null,
+    "same_person_adjacency": "allow_with_visual_change_and_information_gain",
+    "allowed_same_person_visual_changes": ["scene", "shot_scale", "camera_angle", "costume", "action", "performance_state"],
+    "allowed_transition_relations": ["hook_response", "question_answer", "problem_solution", "claim_support", "cause_effect", "condition_result", "contrast", "escalation", "counterpoint", "payoff", "punchline", "round_continuation"],
+    "require_information_gain": true,
+    "min_information_gain_chars": 4,
+    "require_proposition_progress": true,
+    "allowed_speaker_return_reasons": ["answer", "counterpoint", "round_continuation", "payoff", "escalation"],
+    "enforce_live_action_scope_evidence": true,
+    "enforce_structured_identity_evidence": true,
+    "max_candidate_uses": 6,
+    "max_exact_text_uses": 6,
+    "max_semantic_cluster_uses": 12,
+    "max_ordered_plan_signature_uses": 1,
+    "max_semantic_route_signature_uses": null,
+    "max_pairwise_candidate_overlap": 1,
+    "max_pairwise_exact_text_overlap": 1,
+    "max_pairwise_trigram_similarity": 0.88,
+    "hard_excluded_connectors": [],
+    "hard_excluded_phrases": []
+  }
+}

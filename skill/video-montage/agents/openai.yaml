@@ -1,0 +1,6 @@
+interface:
+  display_name: "Video Montage"
+  short_description: "语义审查、逐帧剪辑与 FFmpeg 成片质检"
+  default_prompt: "Use $video-montage to produce or repair this video montage batch."
+policy:
+  allow_implicit_invocation: true

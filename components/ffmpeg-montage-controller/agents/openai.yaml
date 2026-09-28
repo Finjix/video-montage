@@ -1,6 +1,0 @@
-interface:
-  display_name: "FFmpeg混剪控制器"
-  short_description: "帧号原生60帧直出与逐切点终检"
-  default_prompt: "Use $ffmpeg-montage-controller to finalize and validate a V20.2 frame-native montage batch without Jianying."
-policy:
-  allow_implicit_invocation: true

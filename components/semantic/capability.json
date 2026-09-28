@@ -1,0 +1,184 @@
+{
+  "schema": "semantic-analysis-capability/v260928",
+  "package_id": "video-montage",
+  "version": "v260928",
+  "display_name": "video-montage v260928 内部气口压缩与片头视觉门禁",
+  "created_at": "2026-09-14",
+  "mode": "content_grounded_unbounded_foreground_rolling_production",
+  "inherits": {
+    "package_id": "semantic-analysis-training-backup-v19-2",
+    "baseline_version": "19.2.0",
+    "prior_records_preserved": true
+  },
+  "automatic_training_write_capability": false,
+  "frame_native_rendering": {
+    "render_mode": "source_frame_ranges/v1",
+    "required_fields": ["source_in_frame", "speech_end_frame", "source_out_frame_exclusive", "source_fps_num", "source_fps_den"],
+    "portable_renderer": "scripts/portable_frame_renderer.py",
+    "encoded_output_repair": "scripts/frame_range_repair.py",
+    "plan_gate": "scripts/v20_frame_plan_gate.py",
+    "seconds_only_fallback": false,
+    "video_hold": "forbidden",
+    "audio_boundary_rule": "derive samples only from frame indexes and source FPS"
+    ,"adjacent_same_source_rule": "coalesce monotonic touching or overlapping frame ranges before rendering",
+    "output_frame_deletion_guard": {
+      "registry_schema": "frame-delete-registry/v260928",
+      "forced_alignment_evidence_required": true,
+      "protected_spoken_frame_ranges_required": true,
+      "final_syllable_complete_required": true,
+      "delete_overlap_with_spoken_frames": "hard_reject"
+    }
+  },
+  "portable_runtime": {
+    "renderer_bundled": true,
+    "winky_ledger_bundled": true,
+    "external_absolute_script_placeholders": false
+  },
+  "foreground_orchestrator": {
+    "entrypoint": "scripts/v15_orchestrator.py",
+    "command": "run-continuous",
+    "normal_budget_seconds": 0,
+    "exit_22_action": "continue immediately in the same foreground run",
+    "heartbeat_role": "watchdog_only",
+    "front_status_path": "${task_root}/.v18/front_status.json",
+    "front_status_takeover": false
+  },
+  "candidate_frame_evidence": {
+    "proposal_schema": "semantic-candidate-proposal-index/v260928",
+    "phase": "SOURCE_FRAME_EVIDENCE",
+    "entrypoint": "scripts/v14_source_frame_evidence.py",
+    "extractor": "ffmpeg_accurate_decode",
+    "wpf_evidence_accepted": false,
+    "required_positions": ["in", "mid", "out"],
+    "required_before": "CANDIDATE_BUILD"
+  },
+  "v20_fail_closed_boundary_gate": {
+    "entrypoint": "scripts/v20_fail_closed.py",
+    "dense_evidence_entrypoint": "scripts/v20_dense_boundary_evidence.py",
+    "signal_scan_entrypoint": "scripts/v20_boundary_signal_scan.py",
+    "independent_review_entrypoint": "scripts/v20_review_boundary.py",
+    "invalid_interval_registry": "references/wuzimu-v20-invalid-intervals.json",
+    "candidate_name_bypass_forbidden": true,
+    "legacy_evidence_reuse_forbidden": true,
+    "generator_may_emit_pass": false,
+    "generator_bundle_immutable_pending": true,
+    "separate_independent_review_required": true,
+    "alignment_gap_recomputed_from_samples": true,
+    "minimum_clean_gap_seconds": 0.04,
+    "short_head_tail_shot_max_frames": 12,
+    "boundary_window_seconds": 0.4,
+    "pcm_window_seconds": 0.5,
+    "post_encode_recheck_required": true
+    ,"derived_source_lineage_required": true
+    ,"first_expected_token_must_match": true
+    ,"maximum_first_expected_token_preroll_frames": 3
+    ,"final_qc_schema": "ffmpeg-post-encode-qc/v260928"
+  },
+  "rolling_delivery": {
+    "group_size": 5,
+    "global_plan_witness_before_render": true,
+    "freeze_clean_outputs": true,
+    "quarantine_and_repair_failed_indexes": true,
+    "clean_groups_do_not_wait_for_rejects": true,
+    "complete_only_with_all_requested_indexes": true
+  },
+  "balanced_gate_profile": "references/historical-low-repeat-balanced-v10.json",
+  "celebrity_live_action_profile": "references/celebrity-live-action-opening-v14.json",
+  "celebrity_live_action_scope": {
+    "end": "first dominant full-screen gameplay frame",
+    "exclude": ["full-screen gameplay", "later gameplay voice-over", "end card", "visual CTA without celebrity"],
+    "spoken_cta": "allowed as a middle or closing function when celebrity live action remains visible and the exact speech is source-grounded",
+    "same_person_adjacency": "visual change plus information gain evidence",
+    "speaker_share_limit": null,
+    "short_complete_reaction_seconds": [0.8, 3.0]
+  },
+  "gate_adjustments": {
+    "inventory_mode": "witness_sufficient",
+    "replacement_plan_margin": 0.2,
+    "max_candidate_uses": 6,
+    "max_exact_text_uses": 6,
+    "max_semantic_cluster_uses": 12,
+    "max_semantic_route_signature_uses": null,
+    "max_pairwise_overlap": 1,
+    "max_pairwise_trigram_similarity": 0.88
+  },
+  "content_grounded_gate": {
+    "entrypoint": "scripts/v15_content_gate.py",
+    "contract_reference": "references/v19-feedback-repair-gate.md",
+    "wuzimu_profile": "references/wuzimu-v19-feedback-contract.json",
+    "model_pass_is_sufficient": false,
+    "quote_grounded_transition_evidence_required": true,
+    "normal_speed_output_audio_review_required": true
+  },
+  "reusable_semantic_sequence_gate": {
+    "complete_result_payoff_tag_must_remain_one_segment": true,
+    "standalone_payoff_tag_forbidden": true,
+    "mechanism_acquisition_result_stages_required": true,
+    "result_transition_requires_causal_relation": true,
+    "first_person_player_result_requires_subject_bridge": true,
+    "generic_benefit_requires_concrete_content_and_final_position": true,
+    "benefit_cta_must_follow_proof_or_result": true
+  },
+  "hard_gates_retained": [
+    "canonical person identity",
+    "complete actual ASR and voiced boundaries",
+    "FFmpeg-decoded in/mid/out source frame evidence",
+    "structured CTA and live-action scope evidence",
+    "source and rendered cut safety",
+    "whitelisted semantic transitions and proposition progress",
+    "unique ordered plans",
+    "independent Sol output QC"
+  ],
+  "advertising_close_gate": {
+    "narrative_stage_monotonic": true,
+    "final_segment_requires_closing_payoff": true,
+    "numeric_story_beat_endings_rejected": true,
+    "method_only_endings_rejected": true,
+    "wuzimu_hard_excluded_phrase_count": 1
+  },
+  "feedback_repair_gate": {
+    "all_outputs_duration_seconds": null,
+    "duration_constraint_source": "current_work_order_only",
+    "duration_padding_or_slowdown_without_explicit_constraint_forbidden": true,
+    "default_so_easy_policy": "forbidden",
+    "short_tail_endings_forbidden": true,
+    "maximum_visual_shot_duration_spread_seconds": 3.0,
+    "supporting_cast_without_celebrity_forbidden_globally": true,
+    "generic_question_answer_beats_forbidden": true,
+    "spoken_cta_and_benefit_closes_allowed": true,
+    "same_source_distinct_camera_shots_count_separately": true,
+    "boundary_window_frame_and_audio_evidence_required": true,
+    "opening_original_context_evidence_required": true,
+    "opening_pre_context_seconds_minimum": 1.0,
+    "opening_review_seconds_minimum": 1.5,
+    "stable_frame_run_is_necessary_not_sufficient": true,
+    "opening_orphan_action_tail_forbidden_regardless_of_frame_count": true,
+    "every_segment_start_action_context_required": true,
+    "speech_start_basis": "expected_transcript_forced_alignment",
+    "raw_waveform_energy_as_speech_start_forbidden": true,
+    "maximum_speech_preroll_native_frames": 3,
+    "technical_visual_run_floor_frames": 30,
+    "default_editorial_visual_run_floor_frames": 60,
+    "microshot_range_frames_inclusive": [30, 59],
+    "microshot_requires_independent_semantic_function_review": true,
+    "boundary_evidence_frames_each_side": 72,
+    "zero_gap_adjacent_spoken_token_raw_cut_forbidden": true,
+    "bounded_start_cleanup_maximum_ms": 40,
+    "bounded_start_cleanup_requires_forced_first_token_and_isolated_asr": true,
+    "failed_reused_candidate_invalidates_all_dependents": true,
+    "minimum_global_plan_capacity": 100,
+    "internal_silence_compaction_gate": "scripts/v20_frame_plan_gate.py",
+    "internal_silence_alignment_schema": "internal-silence-alignment-evidence/v260928",
+    "opening_visual_family_release_gate": "scripts/v20_opening_visual_family_gate.py",
+    "opening_visual_family_release_schema": "opening-visual-family-release-gate/v260928",
+    "pcm_clipping_repair": "exact-frame uniform attenuation with lineage and complete re-QC"
+  },
+  "sol_review_provenance_gate": {
+    "schema": "semantic-sol-output-review/v260928",
+    "model_provenance_required": true,
+    "normal_speed_elapsed_time_must_cover_audio": true,
+    "exact_segment_and_closing_findings_required": true
+  },
+  "completion": "semantic-delivery-manifest/v260928",
+  "external_model_policy": "No automatic Winky consultation; DeepSeek disabled; GLM requires current-user authorization."
+}

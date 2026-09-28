@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Append-only semantic analysis training record",
+  "type": "object",
+  "required": [
+    "schema",
+    "record_id",
+    "created_at",
+    "authorization",
+    "source_batch",
+    "analysis_snapshot",
+    "record_content_sha256"
+  ],
+  "properties": {
+    "schema": {"const": "semantic-analysis-training-record/v260928"},
+    "record_id": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "format": "date-time"},
+    "authorization": {
+      "type": "object",
+      "required": ["scope", "current_user_explicit"],
+      "properties": {
+        "scope": {"type": "string"},
+        "current_user_explicit": {"const": true},
+        "reference": {"type": "string"}
+      }
+    },
+    "source_batch": {
+      "type": "object",
+      "required": ["batch_name", "sources"],
+      "properties": {
+        "batch_name": {"type": "string"},
+        "sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["source_path", "source_sha256", "processing_stage"],
+            "properties": {
+              "source_path": {"type": "string"},
+              "source_sha256": {"type": "string", "pattern": "^[A-Fa-f0-9]{64}$"},
+              "processing_stage": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      }
+    },
+    "analysis_snapshot": {
+      "type": "object",
+      "required": ["snapshot_id", "scope", "evidence_limits", "approved", "conditional", "rejected"],
+      "properties": {
+        "snapshot_id": {"type": "string"},
+        "scope": {"type": "string"},
+        "evidence_limits": {"type": "array", "items": {"type": "string"}},
+        "approved": {"type": "array"},
+        "conditional": {"type": "array"},
+        "rejected": {"type": "array"}
+      }
+    },
+    "feedback": {"type": "array"},
+    "record_content_sha256": {"type": "string", "pattern": "^[A-Fa-f0-9]{64}$"}
+  },
+  "additionalProperties": true
+}

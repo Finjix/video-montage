@@ -1,0 +1,47 @@
+{
+  "schema": "celebrity-live-action-reference-study/v260928",
+  "reference_root": "C:\\Users\\dd\\Downloads\\无尽冬日-260227007-明星混剪",
+  "inventory": {
+    "physical_mp4_files": 271,
+    "canonical_complete_layer_outputs": 196,
+    "creative_ids": 49,
+    "substantive_variants_per_creative": 2,
+    "platform_exports": ["APP", "小程序"],
+    "platform_duration_pairs_checked": 98,
+    "platform_duration_pairs_equal": 98,
+    "interpretation": "APP and 小程序 are platform exports, not independent edit logic; nested copies are not new examples."
+  },
+  "scope": {
+    "learn": "celebrity live-action opening before the first full-screen gameplay frame",
+    "allow": ["live-action-primary handheld phone", "live-action-primary game inset"],
+    "exclude": ["full-screen gameplay", "gameplay voice-over after the boundary", "end card", "CTA"]
+  },
+  "representative_sources": [
+    {
+      "path": "C:\\Users\\dd\\Downloads\\无尽冬日-260227007-明星混剪\\无尽冬日-260227007-明星混剪\\无尽冬日-260227007-明星混剪\\李乃文\\APP\\GOFCN49591_明星_李乃文_混剪_多场景_真得砍树1_APP.mp4",
+      "sha256": "f8364c63018c0d0baed378b263fcca07b57e0510dc24197f398f9dd499feb967",
+      "duration_seconds": 59.883991,
+      "opening_pattern": "supporting-person hook -> same celebrity across multiple live-action scenes -> concrete rule/punchline -> gameplay boundary"
+    },
+    {
+      "path": "C:\\Users\\dd\\Downloads\\无尽冬日-260227007-明星混剪\\无尽冬日-260227007-明星混剪\\无尽冬日-260227007-明星混剪\\小沈阳\\APP\\GOFCN49617_明星_小沈阳_混剪_多场景_立马砍树_APP.mp4",
+      "sha256": "b3f7ce026fb8c1be0d8a5846d949ea04a1cba69053f62b4fdd50228b8b1ab38e",
+      "duration_seconds": 59.953991,
+      "opening_pattern": "character conflict -> celebrity endorsement -> social proof -> actionable punchline -> gameplay boundary"
+    },
+    {
+      "path": "C:\\Users\\dd\\Downloads\\无尽冬日-260227007-明星混剪\\无尽冬日-260227007-明星混剪\\无尽冬日-260227007-明星混剪\\双明星\\APP\\GOFCN49635_明星_双明星_混剪_多场景_同台比拼1_APP.mp4",
+      "sha256": "de138d6acef47d765d49e19167b61d7d56fc1ca5954538d58439655906824796",
+      "duration_seconds": 53.382789,
+      "opening_pattern": "two-star challenge -> round-based A/B returns -> counterpoint/verdict -> gameplay boundary"
+    }
+  ],
+  "learned_rules": [
+    "A celebrity opening is a performance unit, not a chain of interchangeable keywords.",
+    "The same celebrity may remain adjacent when scene, framing, action or performance state changes and the next clause adds information.",
+    "A complete short reaction may open or answer, but cannot replace the performance anchor.",
+    "A two-star A-B-A return is valid only for an explicit answer, counterpoint, continued round, escalation or payoff.",
+    "Packaging text and stickers do not prove a semantic transition.",
+    "The first dominant full-screen gameplay frame is a hard scope boundary."
+  ]
+}

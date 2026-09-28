@@ -1,6 +1,0 @@
-interface:
-  display_name: "V20.2 FF混剪完整执行器"
-  short_description: "帧计划门禁、FF直出与最终密集终检"
-  default_prompt: "Use $montage-three-part-orchestrator-ff to produce a V20.2 frame-native exact-60 montage batch without Jianying."
-policy:
-  allow_implicit_invocation: true

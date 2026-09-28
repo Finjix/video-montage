@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+import os
+import sys
 import tempfile
 import types
 import unittest
@@ -9,88 +11,96 @@ from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parent.parent
-EXECUTOR = ROOT / "components/montage-three-part-orchestrator-ff/scripts/three_suite_ff.py"
+EXECUTOR = ROOT / "components/executor/scripts/three_suite_ff.py"
 
 
 def load_executor():
-    spec = importlib.util.spec_from_file_location("three_suite_ff_test", EXECUTOR)
+    spec = importlib.util.spec_from_file_location("video_montage_executor_test", EXECUTOR)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
 def load_deployer():
-    source = (ROOT / "start.cmd").read_text(encoding="utf-8-sig").split("# BEGIN PYTHON DEPLOY\n", 1)[1]
-    source = source.rsplit("\nSOURCE =", 1)[0]
-    module = types.ModuleType("start_deploy_test")
-    exec(compile(source, str(ROOT / "start.cmd"), "exec"), module.__dict__)
+    path = ROOT / "install.cmd"
+    source = path.read_text(encoding="utf-8-sig").split("# BEGIN PYTHON DEPLOY\n", 1)[1]
+    source = source.split("\ntry:\n    main()", 1)[0]
+    module = types.ModuleType("video_montage_install_test")
+    exec(compile(source, str(path), "exec"), module.__dict__)
     return module
 
 
 class ExecutorIntegrityTests(unittest.TestCase):
-    def test_reference_requires_same_path_and_current_hash(self):
+    def test_task_reference_rejects_changed_content(self):
         executor = load_executor()
-        with tempfile.TemporaryDirectory(dir=ROOT / "artifacts") as temporary:
-            directory = Path(temporary)
-            first, second = directory / "first.json", directory / "second.json"
-            first.write_text("{}", encoding="utf-8")
-            second.write_text("{}", encoding="utf-8")
-            reference = {"path": str(first), "sha256": executor.sha(first)}
-            self.assertEqual(first, executor.require_argument(first, reference, "delivery"))
-            with self.assertRaisesRegex(RuntimeError, "previous stage"):
-                executor.require_argument(second, reference, "delivery")
-            first.write_text('{"changed":true}', encoding="utf-8")
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "evidence.json"
+            path.write_text("{}", encoding="utf-8")
+            reference = {"path": str(path), "sha256": executor.sha(path)}
+            self.assertEqual(path, executor.require_reference(reference, "evidence"))
+            path.write_text('{"changed":true}', encoding="utf-8")
             with self.assertRaisesRegex(RuntimeError, "changed"):
-                executor.require_reference(reference, "delivery")
+                executor.require_reference(reference, "evidence")
 
-    def test_full_suite_verifier_failure_is_fatal(self):
+    def test_runtime_verifier_failure_is_fatal(self):
         executor = load_executor()
-        with tempfile.TemporaryDirectory(dir=ROOT / "artifacts") as temporary:
+        with tempfile.TemporaryDirectory() as temporary:
             suite = Path(temporary)
             (suite / "tools").mkdir()
-            (suite / "tools/build_ff_suite.py").write_text('print("{\\"ok\\": false}")', encoding="utf-8")
-            with self.assertRaisesRegex(RuntimeError, "suite hash verification failed"):
-                executor.verify(suite)
+            (suite / "tools/verify_runtime.py").write_text("", encoding="utf-8")
+            with patch.object(executor, "run", return_value=types.SimpleNamespace(stdout='{"decision":"reject"}')):
+                with self.assertRaisesRegex(RuntimeError, "runtime verification failed"):
+                    executor.verify(suite)
 
 
-class DeploymentRollbackTests(unittest.TestCase):
-    def test_activation_failure_restores_all_skill_links_and_active_config(self):
-        deployer = load_deployer()
-        with tempfile.TemporaryDirectory(dir=ROOT / "artifacts") as temporary:
-            base = Path(temporary)
-            target = base / "new"
-            legacy = base / "codex/skills"
-            official = base / "profile/.agents/skills"
-            for name in deployer.SKILLS:
-                (target / "components" / name).mkdir(parents=True)
-                for skill_root in (legacy, official):
-                    old = skill_root / name
-                    old.mkdir(parents=True)
-                    (old / "old.txt").write_text("previous", encoding="utf-8")
-            active_path = base / "codex/three-part-suite-ff/active.json"
-            active_path.parent.mkdir(parents=True)
-            active_path.write_text('{"suite_root":"old"}\n', encoding="utf-8")
-            old_active = active_path.read_bytes()
-            report_path = target / "artifacts/deployment-report.json"
-            original_write = deployer.write_json
+class InstallationTests(unittest.TestCase):
+    def setUp(self):
+        self.deployer = load_deployer()
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.base = Path(self.temporary.name)
+        self.source = self.base / "source"
+        self.source.mkdir()
+        (self.source / "skill/video-montage").mkdir(parents=True)
+        (self.source / "skill/video-montage/SKILL.md").write_text("new", encoding="utf-8")
+        self.target = self.base / "video-montage"
+        self.old = self.base / "CodexMontageFF/20.2.5"
+        self.roots = (self.base / "codex/skills", self.base / "agents/skills")
 
-            def fail_activation(path, value):
-                if path == active_path:
-                    raise OSError("injected activation failure")
-                return original_write(path, value)
+    def test_first_install_and_reinstall_clear_target(self):
+        with patch.object(self.deployer, "run_checked"):
+            self.deployer.install(self.source, self.target, self.old, self.roots)
+            self.assertTrue(all((root / "video-montage").is_junction() for root in self.roots))
+            (self.target / "personal.txt").write_text("old", encoding="utf-8")
+            self.deployer.install(self.source, self.target, self.old, self.roots)
+        self.assertFalse((self.target / "personal.txt").exists())
+        self.assertFalse((self.target / ".manifests").exists())
+        self.assertFalse((self.target / "artifacts").exists())
 
-            with patch.dict(deployer.__dict__, {"write_json": fail_activation}):
-                with self.assertRaisesRegex(OSError, "injected activation failure"):
-                    deployer.register_skills(target, legacy, official, base / "backups",
-                                             active_path, {"suite_root": str(target)}, report_path, {})
-            self.assertEqual(old_active, active_path.read_bytes())
-            self.assertFalse(report_path.exists())
-            for name in deployer.SKILLS:
-                for skill_root in (legacy, official):
-                    link = skill_root / name
-                    self.assertFalse(link.is_junction())
-                    self.assertEqual("previous", (link / "old.txt").read_text(encoding="utf-8"))
-                    self.assertEqual([], list(skill_root.glob(f".{name}.pending-*")))
+    def test_legacy_links_removed_and_failure_restores_install(self):
+        self.old.mkdir(parents=True)
+        (self.old / "old.txt").write_text("previous", encoding="utf-8")
+        for root in self.roots:
+            root.mkdir(parents=True)
+            self.deployer.create_junction(root / self.deployer.OLD_SKILLS[0], self.old / "components")
+        with patch.object(self.deployer, "run_checked"):
+            self.deployer.install(self.source, self.target, self.old, self.roots)
+        self.assertFalse(self.old.exists())
+        self.assertTrue(all(not (root / self.deployer.OLD_SKILLS[0]).exists() for root in self.roots))
+        (self.target / "marker.txt").write_text("keep until success", encoding="utf-8")
+        with patch.object(self.deployer, "run_checked"), patch.object(self.deployer, "create_junction", side_effect=OSError("injected failure")):
+            with self.assertRaisesRegex(OSError, "injected failure"):
+                self.deployer.install(self.source, self.target, self.old, self.roots)
+        self.assertEqual("keep until success", (self.target / "marker.txt").read_text(encoding="utf-8"))
+        self.assertTrue(all((root / "video-montage").is_junction() for root in self.roots))
+
+    def test_preflight_does_not_create_install(self):
+        deployer = self.deployer
+        with patch.dict(os.environ, {"USERPROFILE": str(self.base)}):
+            with patch.object(sys, "argv", [str(ROOT / "install.cmd"), str(ROOT / "install.cmd"), "-PreflightOnly"]):
+                with patch.object(deployer, "run_checked"):
+                    deployer.main()
+        self.assertFalse(self.target.exists())
 
 
 if __name__ == "__main__":
