@@ -1,4 +1,4 @@
-from enum import IntEnum
+from enum import IntEnum, IntFlag
 
 import cython
 import cython.cimports.libav as lib
@@ -7,7 +7,7 @@ from cython.cimports.av.video.format import VideoFormat, get_pix_fmt
 from cython.cimports.av.video.frame import alloc_video_frame
 
 
-class Interpolation(IntEnum):
+class Interpolation(IntFlag):
     FAST_BILINEAR: "Fast bilinear" = SWS_FAST_BILINEAR
     BILINEAR: "Bilinear" = SWS_BILINEAR
     BICUBIC: "2-tap cubic B-spline" = SWS_BICUBIC
@@ -19,6 +19,13 @@ class Interpolation(IntEnum):
     SINC: "Unwindowed Sinc" = SWS_SINC
     LANCZOS: "3-tap sinc/sinc" = SWS_LANCZOS
     SPLINE: "Unwindowed natural cubic spline" = SWS_SPLINE
+    PRINT_INFO: "Emit verbose scaler info to the log" = SWS_PRINT_INFO
+    FULL_CHR_H_INT: "Full chroma interpolation" = SWS_FULL_CHR_H_INT
+    FULL_CHR_H_INP: "Full chroma input" = SWS_FULL_CHR_H_INP
+    DIRECT_BGR: "Direct BGR" = SWS_DIRECT_BGR
+    ACCURATE_RND: "Accurate rounding" = SWS_ACCURATE_RND
+    BITEXACT: "Bit-exact output" = SWS_BITEXACT
+    ERROR_DIFFUSION: "Error diffusion dither" = SWS_ERROR_DIFFUSION
 
 
 class Colorspace(IntEnum):
@@ -29,6 +36,7 @@ class Colorspace(IntEnum):
     SMPTE170M = SWS_CS_SMPTE170M
     SMPTE240M = SWS_CS_SMPTE240M
     DEFAULT = SWS_CS_DEFAULT
+    BT2020 = SWS_CS_BT2020
     # Lowercase for b/c.
     itu709 = SWS_CS_ITU709
     fcc = SWS_CS_FCC
@@ -37,6 +45,7 @@ class Colorspace(IntEnum):
     smpte170m = SWS_CS_SMPTE170M
     smpte240m = SWS_CS_SMPTE240M
     default = SWS_CS_DEFAULT
+    bt2020 = SWS_CS_BT2020
 
 
 class ColorRange(IntEnum):
@@ -139,6 +148,8 @@ def _set_frame_colorspace(
         frame.colorspace = lib.AVCOL_SPC_SMPTE170M
     elif colorspace == SWS_CS_SMPTE240M:
         frame.colorspace = lib.AVCOL_SPC_SMPTE240M
+    elif colorspace == SWS_CS_BT2020:
+        frame.colorspace = lib.AVCOL_SPC_BT2020_NCL
 
 
 @cython.final
@@ -182,7 +193,9 @@ class VideoReformatter:
         :type  src_colorspace: :class:`Colorspace` or ``str``
         :param dst_colorspace: Desired colorspace, or ``None`` for the frame colorspace.
         :type  dst_colorspace: :class:`Colorspace` or ``str``
-        :param interpolation: The interpolation method to use, or ``None`` for ``BILINEAR``.
+        :param interpolation: The scaling algorithm to use, or ``None`` for ``BILINEAR``.
+            Option flags such as ``ACCURATE_RND`` or ``BITEXACT`` may be combined with
+            the algorithm using ``|``, e.g. ``Interpolation.BILINEAR | Interpolation.ACCURATE_RND``.
         :type  interpolation: :class:`Interpolation` or ``str``
         :param src_color_range: Current color range, or ``None`` for the ``UNSPECIFIED``.
         :type  src_color_range: :class:`ColorRange` or ``str``
@@ -211,17 +224,18 @@ class VideoReformatter:
         )
         c_src_color_range = _resolve_enum_value(src_color_range, ColorRange, 0)
         c_dst_color_range = _resolve_enum_value(dst_color_range, ColorRange, 0)
-        c_dst_color_trc = _resolve_enum_value(dst_color_trc, ColorTrc, 0)
+        # Default to UNSPECIFIED (not the source's value) so that a transfer /
+        # primaries conversion is only performed when explicitly requested. See
+        # _reformat for why.
+        c_dst_color_trc = _resolve_enum_value(
+            dst_color_trc, ColorTrc, lib.AVCOL_TRC_UNSPECIFIED
+        )
         c_dst_color_primaries = _resolve_enum_value(
-            dst_color_primaries, ColorPrimaries, 0
+            dst_color_primaries, ColorPrimaries, lib.AVCOL_PRI_UNSPECIFIED
         )
         c_threads: cython.int = threads if threads is not None else 0
         c_width: cython.int = width if width is not None else frame.ptr.width
         c_height: cython.int = height if height is not None else frame.ptr.height
-
-        # Track whether user explicitly specified destination metadata
-        set_dst_color_trc: cython.bint = dst_color_trc is not None
-        set_dst_color_primaries: cython.bint = dst_color_primaries is not None
 
         return self._reformat(
             frame,
@@ -235,8 +249,6 @@ class VideoReformatter:
             c_dst_color_range,
             c_dst_color_trc,
             c_dst_color_primaries,
-            set_dst_color_trc,
-            set_dst_color_primaries,
             c_threads,
         )
 
@@ -254,34 +266,68 @@ class VideoReformatter:
         dst_color_range: cython.int,
         dst_color_trc: cython.int,
         dst_color_primaries: cython.int,
-        set_dst_color_trc: cython.bint,
-        set_dst_color_primaries: cython.bint,
         threads: cython.int,
     ):
-        if frame.ptr.format < 0:
-            raise ValueError("Frame does not have format set.")
-
-        src_format = cython.cast(lib.AVPixelFormat, frame.ptr.format)
-
-        # Shortcut!
-        if (
-            dst_format == src_format
-            and width == frame.ptr.width
-            and height == frame.ptr.height
-            and dst_colorspace == src_colorspace
-            and src_color_range == dst_color_range
-            and not set_dst_color_trc
-            and not set_dst_color_primaries
-        ):
-            return frame
-
         if frame.ptr.hw_frames_ctx:
             frame_sw = alloc_video_frame()
             err_check(lib.av_hwframe_transfer_data(frame_sw.ptr, frame.ptr, 0))
-            frame_sw.pts = frame.pts
+            frame_sw._copy_internal_attributes(frame, data_layout=False)
             frame_sw._init_user_attributes()
             frame = frame_sw
-            src_format = cython.cast(lib.AVPixelFormat, frame.ptr.format)
+
+        new_frame: VideoFrame = alloc_video_frame()
+        new_frame._copy_internal_attributes(frame, data_layout=False)
+        new_frame.ptr.format = dst_format
+        new_frame.ptr.width = width
+        new_frame.ptr.height = height
+
+        # A transfer-characteristic / primaries conversion is opt-in. Unlike the
+        # pre-17.0 sws_scale, sws_scale_frame inspects color_trc/color_primaries
+        # and rejects RESERVED (and other unsupported) values with EOPNOTSUPP,
+        # which regressed plain reformats of e.g. VP9 / NVDEC frames (#2208). So
+        # only feed these fields to swscale when the caller explicitly requested a
+        # destination value; otherwise neutralize them for the scale (as the old
+        # sws_scale effectively did) while still preserving the source's tags on
+        # the returned frame's metadata.
+        convert_trc: cython.bint = dst_color_trc != lib.AVCOL_TRC_UNSPECIFIED
+        convert_primaries: cython.bint = (
+            dst_color_primaries != lib.AVCOL_PRI_UNSPECIFIED
+        )
+        frame_src_color_trc: lib.AVColorTransferCharacteristic = frame.ptr.color_trc
+        frame_src_color_primaries: lib.AVColorPrimaries = frame.ptr.color_primaries
+
+        if convert_trc:
+            new_frame.ptr.color_trc = cython.cast(
+                lib.AVColorTransferCharacteristic, dst_color_trc
+            )
+        else:
+            frame.ptr.color_trc = lib.AVCOL_TRC_UNSPECIFIED
+            new_frame.ptr.color_trc = lib.AVCOL_TRC_UNSPECIFIED
+
+        if convert_primaries:
+            new_frame.ptr.color_primaries = cython.cast(
+                lib.AVColorPrimaries, dst_color_primaries
+            )
+        else:
+            frame.ptr.color_primaries = lib.AVCOL_PRI_UNSPECIFIED
+            new_frame.ptr.color_primaries = lib.AVCOL_PRI_UNSPECIFIED
+
+        # Translate source and destination colorspace/range from SWS_CS_* to AVCOL_*
+        # so sws_is_noop and sws_scale_frame understand them
+        frame_src_colorspace: lib.AVColorSpace = frame.ptr.colorspace
+        frame_src_color_range: lib.AVColorRange = frame.ptr.color_range
+        _set_frame_colorspace(frame.ptr, src_colorspace, src_color_range)
+        _set_frame_colorspace(new_frame.ptr, dst_colorspace, dst_color_range)
+
+        # Shortcut if sws_scale_frame would be a no-op
+        is_noop: cython.bint = sws_is_noop(new_frame.ptr, frame.ptr) != 0
+        if is_noop:
+            # Restore source frame metadata to avoid side effects
+            frame.ptr.colorspace = frame_src_colorspace
+            frame.ptr.color_range = frame_src_color_range
+            frame.ptr.color_trc = frame_src_color_trc
+            frame.ptr.color_primaries = frame_src_color_primaries
+            return frame
 
         if self.ptr == cython.NULL:
             self.ptr = sws_alloc_context()
@@ -290,33 +336,24 @@ class VideoReformatter:
         self.ptr.threads = threads
         self.ptr.flags = cython.cast(cython.uint, interpolation)
 
-        new_frame: VideoFrame = alloc_video_frame()
-        new_frame._copy_internal_attributes(frame)
+        # Allocate frame buffers and perform the conversion
         new_frame._init(dst_format, width, height)
-
-        # Set source frame colorspace/range so sws_scale_frame can read it
-        frame_src_colorspace: lib.AVColorSpace = frame.ptr.colorspace
-        frame_src_color_range: lib.AVColorRange = frame.ptr.color_range
-        _set_frame_colorspace(frame.ptr, src_colorspace, src_color_range)
-        _set_frame_colorspace(new_frame.ptr, dst_colorspace, dst_color_range)
-
         with cython.nogil:
             ret = sws_scale_frame(self.ptr, new_frame.ptr, frame.ptr)
 
-        # Restore source frame colorspace/range to avoid side effects
+        # Restore source frame metadata to avoid side effects
         frame.ptr.colorspace = frame_src_colorspace
         frame.ptr.color_range = frame_src_color_range
+        frame.ptr.color_trc = frame_src_color_trc
+        frame.ptr.color_primaries = frame_src_color_primaries
+
+        # Preserve the source's transfer/primaries on the output when no explicit
+        # conversion was requested (the scale ran with neutralized tags).
+        if not convert_trc:
+            new_frame.ptr.color_trc = frame_src_color_trc
+        if not convert_primaries:
+            new_frame.ptr.color_primaries = frame_src_color_primaries
 
         err_check(ret)
-
-        # Set metadata-only properties on the output frame if explicitly specified
-        if set_dst_color_trc:
-            new_frame.ptr.color_trc = cython.cast(
-                lib.AVColorTransferCharacteristic, dst_color_trc
-            )
-        if set_dst_color_primaries:
-            new_frame.ptr.color_primaries = cython.cast(
-                lib.AVColorPrimaries, dst_color_primaries
-            )
 
         return new_frame

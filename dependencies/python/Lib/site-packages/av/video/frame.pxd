@@ -1,5 +1,5 @@
 cimport libav as lib
-from libc.stdint cimport uint8_t
+from libc.stdint cimport uint8_t, uintptr_t
 
 from av.frame cimport Frame
 from av.video.format cimport VideoFormat
@@ -9,6 +9,8 @@ from av.video.reformatter cimport VideoReformatter
 cdef class CudaContext:
     cdef readonly int device_id
     cdef readonly bint primary_ctx
+    cdef readonly bint current_ctx
+    cdef readonly uintptr_t cuda_stream
     cdef lib.AVBufferRef* _device_ref
     cdef dict _frames_cache
     cdef lib.AVBufferRef* _get_device_ref(self)
@@ -23,6 +25,5 @@ cdef class VideoFrame(Frame):
     cdef readonly int _device_id
     cdef _init(self, lib.AVPixelFormat format, unsigned int width, unsigned int height)
     cdef _init_user_attributes(self)
-    cpdef save(self, object filepath)
 
 cdef VideoFrame alloc_video_frame()

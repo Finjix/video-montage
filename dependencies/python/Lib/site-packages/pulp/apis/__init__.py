@@ -1,21 +1,68 @@
-from typing import Dict, Optional, Type, Union, List
 import json
-from .choco_api import CHOCO_CMD
-from .coin_api import CYLP, PULP_CBC_CMD, COIN_CMD, COINMP_DLL, YAPOSIB
-from .copt_api import COPT, COPT_DLL, COPT_CMD
-from .core import LpSolver, LpSolver_CMD, PulpSolverError
-from .cplex_api import CPLEX_PY, CPLEX_CMD, CPLEX
-from .glpk_api import GLPK_CMD, PYGLPK, GLPK
-from .gurobi_api import GUROBI, GUROBI_CMD
-from .highs_api import HiGHS, HiGHS_CMD
-from .mipcl_api import MIPCL_CMD
-from .mosek_api import MOSEK
-from .sas_api import SAS94, SASCAS, SASsolver
-from .scip_api import SCIP, SCIP_CMD, SCIP_PY, FSCIP_CMD, FSCIP
-from .xpress_api import XPRESS_CMD, XPRESS_PY, XPRESS
-from .cuopt_api import CUOPT
+import warnings
+from typing import Type
 
-_all_solvers: List[Type[LpSolver]] = [
+from .choco import CHOCO_CMD
+from .coin import COIN_CMD, COINMP_DLL, CYLP, YAPOSIB
+from .copt import COPT, COPT_CMD, COPT_DLL
+from .core import LpSolver, LpSolver_CMD, PulpSolverError
+from .cplex import CPLEX, CPLEX_CMD, CPLEX_PY
+from .cuopt import CUOPT
+from .glpk import GLPK, GLPK_CMD, PYGLPK
+from .gurobi import GUROBI, GUROBI_CMD
+from .highs import HiGHS, HiGHS_CMD
+from .mipcl import MIPCL_CMD
+from .mosek import MOSEK
+from .ortools import CPSAT
+from .sas import SAS94, SASCAS, SASsolver
+from .scip import FSCIP, FSCIP_CMD, SCIP, SCIP_CMD, SCIP_PY
+from .xpress import XPRESS, XPRESS_CMD, XPRESS_PY
+
+__all__ = [
+    "CHOCO_CMD",
+    "COIN_CMD",
+    "COINMP_DLL",
+    "CYLP",
+    "YAPOSIB",
+    "COPT",
+    "COPT_CMD",
+    "COPT_DLL",
+    "LpSolver",
+    "LpSolver_CMD",
+    "PulpSolverError",
+    "CPLEX",
+    "CPLEX_CMD",
+    "CPLEX_PY",
+    "CUOPT",
+    "GLPK",
+    "GLPK_CMD",
+    "PYGLPK",
+    "GUROBI",
+    "GUROBI_CMD",
+    "HiGHS",
+    "HiGHS_CMD",
+    "MIPCL_CMD",
+    "MOSEK",
+    "CPSAT",
+    "SAS94",
+    "SASCAS",
+    "SASsolver",
+    "FSCIP",
+    "FSCIP_CMD",
+    "SCIP",
+    "SCIP_CMD",
+    "SCIP_PY",
+    "XPRESS",
+    "XPRESS_CMD",
+    "XPRESS_PY",
+    "LpSolverDefault",
+    "getSolver",
+    "getSolverFromDict",
+    "getSolverFromJson",
+    "listSolvers",
+]
+
+_all_solvers: list[Type[LpSolver]] = [
     CYLP,
     GLPK_CMD,
     PYGLPK,
@@ -24,10 +71,10 @@ _all_solvers: List[Type[LpSolver]] = [
     GUROBI,
     GUROBI_CMD,
     MOSEK,
+    CPSAT,
     XPRESS,
     XPRESS_CMD,
     XPRESS_PY,
-    PULP_CBC_CMD,
     COIN_CMD,
     COINMP_DLL,
     CHOCO_CMD,
@@ -45,14 +92,22 @@ _all_solvers: List[Type[LpSolver]] = [
     CUOPT,
 ]
 
-LpSolverDefault: Optional[Union[COIN_CMD, PULP_CBC_CMD, GLPK_CMD]] = None
-# Default solver selection
+LpSolverDefault: COIN_CMD | GLPK_CMD | None = None
+# Default solver selection: CBC via COIN_CMD (cbcbox extra or ``cbc`` on PATH), else GLPK.
 if COIN_CMD().available():
     LpSolverDefault = COIN_CMD()
-elif PULP_CBC_CMD(_skip_v4_deprecation=True).available():
-    LpSolverDefault = PULP_CBC_CMD(_skip_v4_deprecation=True)
 elif GLPK_CMD().available():
     LpSolverDefault = GLPK_CMD()
+
+
+def addSolver(*solvers: Type[LpSolver]) -> None:
+    for new in solvers:
+        for old in _all_solvers:
+            if new.name == old.name:
+                warnings.warn(
+                    f"Adding solver {new.name} ({new.__name__}) shadows existing solver ({old.__name__})"
+                )
+    _all_solvers.extend(solvers)
 
 
 def getSolver(solver: str, *args, **kwargs) -> LpSolver:
@@ -75,7 +130,7 @@ def getSolver(solver: str, *args, **kwargs) -> LpSolver:
         )
 
 
-def getSolverFromDict(data: Dict[str, Union[str, bool, float, int]]) -> LpSolver:
+def getSolverFromDict(data: dict[str, str | bool | float | int]) -> LpSolver:
     """
     Instantiates a solver from a dictionary with its data
 
@@ -106,7 +161,7 @@ def getSolverFromJson(filename: str) -> LpSolver:
     return getSolverFromDict(data)
 
 
-def listSolvers(onlyAvailable: bool = False) -> List[str]:
+def listSolvers(onlyAvailable: bool = False) -> list[str]:
     """
     List the names of all the existing solvers in PuLP
 
@@ -116,10 +171,7 @@ def listSolvers(onlyAvailable: bool = False) -> List[str]:
     """
     result = []
     for s in _all_solvers:
-        kwargs: Dict[str, Union[str, bool, float, int]] = {"msg": False}
-        if s is PULP_CBC_CMD:
-            kwargs["_skip_v4_deprecation"] = True
-        solver = s(**kwargs)
+        solver = s(msg=False)
         if (not onlyAvailable) or solver.available():
             result.append(solver.name)
         del solver

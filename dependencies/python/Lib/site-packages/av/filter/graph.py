@@ -22,6 +22,8 @@ class Graph:
         self._nb_filters_seen = 0
         self._context_by_ptr = {}
         self._context_by_type = {}
+        self._video_sources = []
+        self._audio_sources = []
 
     def __dealloc__(self):
         if self.ptr:
@@ -50,7 +52,7 @@ class Graph:
         count = self._name_counts.get(name, 0)
         self._name_counts[name] = count + 1
         if count:
-            return "%s_%s" % (name, count)
+            return f"{name}_{count}"
         else:
             return name
 
@@ -108,8 +110,13 @@ class Graph:
 
     @cython.cfunc
     def _register_context(self, ctx: FilterContext):
-        self._context_by_ptr[cython.cast(cython.long, ctx.ptr)] = ctx
-        self._context_by_type.setdefault(ctx.filter.ptr.name, []).append(ctx)
+        name: str = ctx.filter.ptr.name
+        self._context_by_ptr[cython.cast(cython.size_t, ctx.ptr)] = ctx
+        self._context_by_type.setdefault(name, []).append(ctx)
+        if name == "buffer":
+            self._video_sources.append(ctx)
+        elif name == "abuffer":
+            self._audio_sources.append(ctx)
 
     @cython.cfunc
     def _auto_register(self):
@@ -121,7 +128,7 @@ class Graph:
         # point we don't expose that in the API, so we should be okay...
         for i in range(self._nb_filters_seen, self.ptr.nb_filters):
             c_ctx = self.ptr.filters[i]
-            if cython.cast(cython.long, c_ctx) in self._context_by_ptr:
+            if cython.cast(cython.size_t, c_ctx) in self._context_by_ptr:
                 continue
             filter_ = wrap_filter(c_ctx.filter)
             py_ctx = wrap_filter_context(self, filter_, c_ctx)
@@ -232,26 +239,50 @@ class Graph:
                 cython.cast(FilterContext, sink).ptr, frame_size
             )
 
-    def push(self, frame):
+    def push(self, frame, at: cython.int = -1):
+        """Push a frame into the graph's buffer source(s).
+
+        :param frame: An :class:`.AudioFrame` or :class:`.VideoFrame` to push into
+            the matching buffer sources, or ``None`` to signal end of stream to
+            every buffer source.
+        :param int at: Index of a single buffer source to push to, for graphs with
+            multiple inputs (e.g. ``overlay``). The default of ``-1`` pushes to
+            every buffer source matching the frame's type.
+        """
         if frame is None:
-            contexts = self._get_context_by_type("buffer") + self._get_context_by_type(
-                "abuffer"
-            )
+            contexts = self._video_sources + self._audio_sources
         elif isinstance(frame, VideoFrame):
-            contexts = self._get_context_by_type("buffer")
+            contexts = self._video_sources
         elif isinstance(frame, AudioFrame):
-            contexts = self._get_context_by_type("abuffer")
+            contexts = self._audio_sources
         else:
             raise ValueError(
                 f"can only AudioFrame, VideoFrame or None; got {type(frame)}"
             )
 
+        if at >= 0:
+            if at >= len(contexts):
+                raise IndexError(
+                    f"buffer source index {at} out of range; found {len(contexts)}"
+                )
+            contexts[at].push(frame)
+            return
+
         for ctx in contexts:
             ctx.push(frame)
 
-    def vpush(self, frame: VideoFrame | None):
-        """Like `push`, but only for VideoFrames."""
-        for ctx in self._get_context_by_type("buffer"):
+    def vpush(self, frame: VideoFrame | None, at: cython.int = -1):
+        """Like :meth:`push`, but only for :class:`.VideoFrame`."""
+        contexts = self._video_sources
+        if at >= 0:
+            if at >= len(contexts):
+                raise IndexError(
+                    f"buffer source index {at} out of range; found {len(contexts)}"
+                )
+            contexts[at].push(frame)
+            return
+
+        for ctx in contexts:
             ctx.push(frame)
 
     # TODO: Test complex filter graphs, add `at: int = 0` arg to pull() and vpull().

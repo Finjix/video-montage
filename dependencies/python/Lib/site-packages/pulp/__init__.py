@@ -53,14 +53,11 @@ try:
 except Exception:
     pass
 
+from importlib.metadata import version
 
-from .constants import VERSION
+__version__ = version("PuLP")
 
-from .v4_migration import set_v4_migration_warnings
-from .pulp import *
 from .apis import *
-from .utilities import *
 from .constants import *
-
-__doc__ = pulp.__doc__  # type: ignore[name-defined]
-__version__ = VERSION
+from .pulp import *
+from .utilities import *

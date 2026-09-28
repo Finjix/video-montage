@@ -38,7 +38,7 @@ class PyIOFile:
             and self.ftell is not None
             and (seekable is None or seekable())
         ):
-            seek_func: seek_func_t = pyio_seek
+            seek_func = pyio_seek
 
         if writeable is None:
             writeable = self.fwrite is not None
@@ -109,7 +109,7 @@ def pyio_read_gil(opaque: cython.p_void, buf: Buf, buf_size: cython.int) -> cyth
         self.pos += len(res)
         if not res:
             return lib.AVERROR_EOF
-        return len(res)
+        return cython.cast(cython.int, len(res))
     except Exception:
         return stash_exception()
 

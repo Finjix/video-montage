@@ -414,6 +414,14 @@ class Container:
     def input_was_opened(self):
         return self._myflag & 2
 
+    @property
+    def metadata(self) -> dict:
+        # Lazily created so output containers that never touch metadata don't
+        # allocate a dict. Input containers populate ``_metadata`` eagerly.
+        if self._metadata is None:
+            self._metadata = {}
+        return self._metadata
+
     def chapters(self):
         self._assert_open()
         result: list = []
@@ -479,7 +487,7 @@ class Container:
                 )
             ch_array[i] = ch
 
-        self.ptr.nb_chapters = count
+        self.ptr.nb_chapters = cython.cast(cython.uint, count)
         self.ptr.chapters = ch_array
 
 

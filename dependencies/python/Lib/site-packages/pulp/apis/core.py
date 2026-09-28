@@ -30,14 +30,43 @@ Note that the solvers that require a compiled extension may not work in
 the current version
 """
 
+from __future__ import annotations
+
 import ctypes
+import dataclasses
+import functools
+import importlib
+import math
 import os
 import platform
 import shutil
 import sys
+import tempfile
+from time import time
 
 
-def get_operating_system():
+def clock() -> float:
+    """Wall-clock seconds (for solver timing)."""
+    return time()
+
+
+def cpu_clock() -> float:
+    """CPU seconds burned by this process and the child processes it waited on.
+
+    Command line solvers run in a subprocess, so their CPU time only shows up in the
+    ``children_*`` fields, and only on platforms that report them (they stay at zero
+    on Windows).
+    """
+    t = os.times()
+    return t.user + t.system + t.children_user + t.children_system
+
+
+def clocks() -> tuple[float, float]:
+    """Wall-clock and CPU seconds now, to time a solve with :meth:`LpSolver.buildStats`."""
+    return clock(), cpu_clock()
+
+
+def get_operating_system() -> str:
     if sys.platform in ["win32", "cli"]:
         return "win"
     if sys.platform in ["darwin"]:
@@ -45,7 +74,7 @@ def get_operating_system():
     return "linux"
 
 
-def get_arch():
+def get_arch() -> str:
     is_64bits = sys.maxsize > 2**32
     if is_64bits:
         if platform.machine().lower() in ["aarch64", "arm64"]:
@@ -57,12 +86,17 @@ def get_arch():
 operating_system = get_operating_system()
 arch = get_arch()
 
+import contextlib
 import logging
-from time import monotonic as clock
-from typing import Union
+from collections.abc import Callable, Iterator
+from typing import TYPE_CHECKING, Any
 
 from .. import constants as const
 from .. import sparse
+
+if TYPE_CHECKING:
+    from ..core.lp_stats import LpSolveStats
+    from ..pulp import LpProblem
 
 try:
     import ujson as json  # type: ignore[import-untyped]
@@ -74,7 +108,12 @@ log = logging.getLogger(__name__)
 import subprocess
 
 devnull = subprocess.DEVNULL
-to_string = lambda _obj: str(_obj).encode()
+
+
+def to_string(_obj: Any) -> bytes:
+    """Return UTF-8 bytes for ``str(_obj)`` (used for C API string arguments)."""
+    return str(_obj).encode()
+
 
 from uuid import uuid4
 
@@ -87,14 +126,66 @@ class PulpSolverError(const.PulpError):
     pass
 
 
+# errors raised while importing optional solver libraries, by module name
+_OPTIONAL_IMPORT_ERRORS: dict[str, BaseException] = {}
+
+
+def import_optional(module_name: str) -> Any:
+    """
+    Import an optional solver library.
+
+    :param module_name: name of the module to import (e.g. ``"gurobipy"``)
+    :return: the module, or None if it could not be imported. In that case
+        the error is kept so :func:`requires` can report it.
+    """
+    try:
+        return importlib.import_module(module_name)
+    except Exception as exc:  # some libraries (e.g. gurobipy) raise their own errors
+        _OPTIONAL_IMPORT_ERRORS[module_name] = exc
+        return None
+
+
+def requires(*module_names: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """
+    Decorator for solver methods that need optional libraries.
+
+    :param module_names: modules previously imported with :func:`import_optional`
+    :raises PulpSolverError: if any of the modules could not be imported
+    """
+
+    def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
+        @functools.wraps(func)
+        def wrapper(self: LpSolver, *args: Any, **kwargs: Any) -> Any:
+            for module_name in module_names:
+                error = _OPTIONAL_IMPORT_ERRORS.get(module_name)
+                if error is not None:
+                    raise PulpSolverError(f"{self.name}: Not Available:\n{error}")
+            return func(self, *args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
 class LpSolver:
     """A generic LP Solver"""
 
     name = "LpSolver"
 
+    #: True when handing the solver a ``logPath`` sends its output to the file
+    #: *instead of* the console, so :meth:`capture_log` has to echo the log back
+    #: afterwards to keep ``msg=True`` behaving as the caller expects.
+    logPathSilencesMsg: bool = False
+
     def __init__(
-        self, mip=True, msg=True, options=None, timeLimit=None, *args, **kwargs
-    ):
+        self,
+        mip: bool = True,
+        msg: bool = True,
+        options: list[str] | None = None,
+        timeLimit: float | None = None,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
         """
         :param bool mip: if False, assume LP even if integer variables
         :param bool msg: if False, no log is shown
@@ -115,23 +206,18 @@ class LpSolver:
         # gapRel, gapAbs, maxMemory, maxNodes, threads, logPath, timeMode
         self.optionsDict = {k: v for k, v in kwargs.items() if v is not None}
 
-    def available(self):
+    def available(self) -> bool:
         """True if the solver is available"""
         raise NotImplementedError
 
-    def actualSolve(self, lp):
-        """Solve a well formulated lp problem"""
+    def actualSolve(self, lp: LpProblem, **kwargs: Any) -> LpSolveStats:
+        """Solve a well formulated lp problem.
+
+        Implementations end with ``return self.buildStats(...)``.
+        """
         raise NotImplementedError
 
-    def actualResolve(self, lp, **kwargs):
-        """
-        uses existing problem information and solves the problem
-        If it is not implemented in the solver
-        just solve again
-        """
-        self.actualSolve(lp, **kwargs)
-
-    def copy(self):
+    def copy(self) -> LpSolver:
         """Make a copy of self"""
 
         aCopy = self.__class__()
@@ -140,17 +226,206 @@ class LpSolver:
         aCopy.options = self.options
         return aCopy
 
-    def solve(self, lp):
-        """Solve the problem lp"""
-        # Always go through the solve method of LpProblem
-        return lp.solve(self)
+    def solve(self, lp: LpProblem, **kwargs: Any) -> LpSolveStats:
+        """Solve the problem lp and describe how it went."""
+        wasNone, dummyVar = lp.fixObjective()
+        try:
+            # the log only lives until the block ends; actualSolve reads it in
+            # buildStats before returning
+            with self.capture_log():
+                return self.actualSolve(lp, **kwargs)
+        finally:
+            lp.restoreObjective(wasNone, dummyVar)
+
+    def buildStats(
+        self,
+        lp: LpProblem,
+        status: int,
+        has_solution: bool,
+        *,
+        start: tuple[float, float],
+        best_bound: float | None = None,
+    ) -> LpSolveStats:
+        """Describe the solve that just finished, for ``actualSolve`` to return.
+
+        :param lp: the problem that was solved
+        :param status: why the solver stopped, a :class:`~pulp.constants.LpSolveStatus`
+        :param has_solution: whether the solver handed back a feasible solution
+        :param start: :func:`clocks` taken when the solve started
+        :param best_bound: best bound the solver proved, if it reports one
+        """
+        # deferred: pulp.core imports pulp.apis, so this can't be a module-level import
+        from ..core.lp_stats import (
+            LpSolveStats,
+            _stop_reason_from_log,
+            dialect_for_solver,
+            parse_logs,
+        )
+
+        try:
+            status = const.LpSolveStatus(status)
+        except ValueError:
+            raise const.PulpError("Invalid status code: " + str(status)) from None
+        if not isinstance(has_solution, bool):
+            raise const.PulpError("has_solution must be a bool: " + str(has_solution))
+        wall, cpu = clocks()
+        logs = parse_logs(
+            self.optionsDict.get("logPath"), dialect_for_solver(self.name)
+        )
+        # without a solution the variables hold leftovers (e.g. an infeasible
+        # point), so their objective value would be misleading
+        objective = None
+        if has_solution and lp.objective is not None:
+            objective = lp.objective.value()
+        # the solver itself is the better source; the log only fills gaps
+        if logs is not None:
+            if status == const.LpSolveStatus.Stopped:
+                status = _stop_reason_from_log(logs.get("status"), status)
+            if has_solution and objective is None:
+                objective = logs.get("best_solution")
+            if best_bound is None:
+                best_bound = logs.get("best_bound")
+        return LpSolveStats(
+            solver=self.name,
+            status=status,
+            has_solution=has_solution,
+            time=wall - start[0],
+            cpu_time=cpu - start[1],
+            objective=objective,
+            best_bound=best_bound,
+            num_variables=lp.numVariables(),
+            num_constraints=lp.numConstraints(),
+            is_mip=bool(lp.isMIP()),
+            solver_options=self.toDict(),
+            logs=logs,
+        )
+
+    def flipStatsSense(self, stats: LpSolveStats) -> LpSolveStats:
+        """Undo a solver-side objective negation in stats built by :meth:`buildStats`.
+
+        Some solvers (e.g. COIN_CMD, which writes a maximize problem as an MPS
+        file with no ``OBJSENSE`` and no ``-max``, negating the objective instead)
+        are handed the problem with its objective negated. Everything that solver
+        then *reports about the objective* -- its log, and any bound it proves --
+        comes back with the opposite sign to the problem's own sense, and needs
+        flipping back. Call this once, right after :meth:`buildStats`, only for a
+        solve where that negation happened.
+
+        ``stats.objective`` is left alone: it comes from ``lp.objective.value()``,
+        computed from the variable values :meth:`buildStats` already assigned back
+        onto the original (un-negated) problem, so it is already in the problem's
+        sense.
+
+        Mutates ``stats`` in place and returns it, for convenient chaining.
+        """
+
+        def negate(value: Any) -> Any:
+            # leave anything that isn't a plain number alone: None, descriptive
+            # text (e.g. "Cuts: 5"), and CBC's 1e50 "no incumbent yet" sentinel
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                return value
+            if value == 1e50:
+                return value
+            return -value
+
+        if stats.best_bound is not None:
+            stats.best_bound = negate(stats.best_bound)
+
+        logs = stats.logs
+        if logs is not None:
+            logs = dict(logs)
+            for key in ("best_bound", "best_solution", "first_relaxed"):
+                if key in logs:
+                    logs[key] = negate(logs[key])
+            for key in ("first_solution", "cut_info"):
+                nested = logs.get(key)
+                if isinstance(nested, dict):
+                    nested = dict(nested)
+                    for subkey in (
+                        "BestInteger",
+                        "CutsBestBound",
+                        "best_bound",
+                        "best_solution",
+                    ):
+                        if subkey in nested:
+                            nested[subkey] = negate(nested[subkey])
+                    logs[key] = nested
+            progress = logs.get("progress")
+            if progress:
+                logs["progress"] = [
+                    dataclasses.replace(
+                        row,
+                        BestInteger=negate(getattr(row, "BestInteger", None)),
+                        CutsBestBound=negate(getattr(row, "CutsBestBound", None)),
+                    )
+                    for row in progress
+                ]
+            stats.logs = logs
+
+        return stats
+
+    def silent_remove(self, file: str | bytes | os.PathLike) -> None:
+        try:
+            os.remove(file)
+        except (FileNotFoundError, PermissionError):
+            pass
+
+    def _echo_log(self, path: str) -> None:
+        """Print a captured log, standing in for the console output ``logPath`` ate."""
+        try:
+            with open(path, errors="replace") as f:
+                sys.stdout.write(f.read())
+        except OSError:
+            pass
+
+    @contextlib.contextmanager
+    def capture_log(self) -> Iterator[str | None]:
+        """Ensure a parseable solver log exists for the duration of the block.
+
+        Yields the path to the log file, or ``None`` when this solver cannot produce
+        one that orloge understands. A log the caller asked for through ``logPath``
+        is used as-is and left in place; a log this method arranges itself goes to a
+        temporary file that is removed on the way out, so read it before the block
+        ends.
+        """
+        # deferred: pulp.core imports pulp.apis, so this can't be a module-level import
+        from ..core.lp_stats import dialect_for_solver
+
+        if dialect_for_solver(self.name) is None:
+            yield None
+            return
+        existing = self.optionsDict.get("logPath")
+        if existing:
+            yield existing
+            return
+
+        fd, path = tempfile.mkstemp(suffix="-pulp.log")
+        os.close(fd)
+        msg = self.msg
+        self.optionsDict["logPath"] = path
+        if self.logPathSilencesMsg:
+            # otherwise the solver warns that logPath replaces msg=1, and we would
+            # swallow output the caller explicitly asked to see
+            self.msg = False
+        try:
+            yield path
+        finally:
+            self.optionsDict.pop("logPath", None)
+            self.msg = msg
+            if self.logPathSilencesMsg and msg:
+                self._echo_log(path)
+            self.silent_remove(path)
 
     # TODO: Not sure if this code should be here or in a child class
     def getCplexStyleArrays(
-        self, lp, senseDict=None, LpVarCategories=None, LpObjSenses=None, infBound=1e20
-    ):
-        """returns the arrays suitable to pass to a cdll Cplex
-        or other solvers that are similar
+        self,
+        lp: LpProblem,
+        senseDict: dict[int, str] | None = None,
+        LpVarCategories: dict[str, str] | None = None,
+        LpObjSenses: dict[int, int] | None = None,
+        infBound: float = 1e20,
+    ) -> tuple[Any, ...]:
+        """Return arrays suitable for a CDLL CPLEX-style API or similar solvers.
 
         Copyright (c) Stuart Mitchell 2007
         """
@@ -168,19 +443,20 @@ class LpSolver:
         import ctypes
 
         rangeCount = 0
-        variables = list(lp.variables())
+
+        variables = list(lp.exported_variables())
         numVars = len(variables)
-        # associate each variable with a ordinal
-        self.v2n = {variables[i]: i for i in range(numVars)}
+        # associate each variable with an ordinal (key by name; variables are not hashable)
         self.vname2n = {variables[i].name: i for i in range(numVars)}
+        self.v2n = self.vname2n  # alias for code that uses v2n[v.name]
         self.n2v = {i: variables[i] for i in range(numVars)}
         # objective values
         objSense = LpObjSenses[lp.sense]
         NumVarDoubleArray = ctypes.c_double * numVars
         objectCoeffs = NumVarDoubleArray()
-        # print "Get objective Values"
-        for v, val in lp.objective.items():
-            objectCoeffs[self.v2n[v]] = val
+        if lp.objective is not None:
+            for v, val in lp.objective.items():
+                objectCoeffs[self.vname2n[v.name]] = val
         # values for variables
         objectConst = ctypes.c_double(0.0)
         NumVarStrArray = ctypes.c_char_p * numVars
@@ -188,19 +464,20 @@ class LpSolver:
         lowerBounds = NumVarDoubleArray()
         upperBounds = NumVarDoubleArray()
         initValues = NumVarDoubleArray()
-        for v in lp.variables():
-            colNames[self.v2n[v]] = to_string(v.name)
-            initValues[self.v2n[v]] = 0.0
-            if v.lowBound != None:
-                lowerBounds[self.v2n[v]] = v.lowBound
+        for v in variables:
+            i = self.vname2n[v.name]
+            colNames[i] = to_string(v.name)
+            initValues[i] = 0.0
+            if math.isfinite(v.lowBound):
+                lowerBounds[i] = v.lowBound
             else:
-                lowerBounds[self.v2n[v]] = -infBound
-            if v.upBound != None:
-                upperBounds[self.v2n[v]] = v.upBound
+                lowerBounds[i] = -infBound
+            if math.isfinite(v.upBound):
+                upperBounds[i] = v.upBound
             else:
-                upperBounds[self.v2n[v]] = infBound
+                upperBounds[i] = infBound
         # values for constraints
-        numRows = len(lp._constraints)
+        numRows = len(lp.constraints())
         NumRowDoubleArray = ctypes.c_double * numRows
         NumRowStrArray = ctypes.c_char_p * numRows
         NumRowCharArray = ctypes.c_char * numRows
@@ -211,14 +488,14 @@ class LpSolver:
         self.c2n = {}
         self.n2c = {}
         i = 0
-        for c in lp._constraints:
-            rhsValues[i] = -lp._constraints[c].constant
+        for c in lp.constraints():
+            rhsValues[i] = -c.constant
             # for ranged constraints a<= constraint >=b
             rangeValues[i] = 0.0
-            rowNames[i] = to_string(c)
-            rowType[i] = to_string(senseDict[lp._constraints[c].sense])
-            self.c2n[c] = i
-            self.n2c[i] = c
+            rowNames[i] = to_string(c.name)
+            rowType[i] = to_string(senseDict[c.sense])
+            self.c2n[c.name] = i
+            self.n2c[i] = c.name
             i = i + 1
         # return the coefficient matrix as a series of vectors
         coeffs = lp.coefficients()
@@ -240,8 +517,8 @@ class LpSolver:
         NumVarCharArray = ctypes.c_char * numVars
         columnType = NumVarCharArray()
         if lp.isMIP():
-            for v in lp.variables():
-                columnType[self.v2n[v]] = to_string(LpVarCategories[v.cat])
+            for v in variables:
+                columnType[self.vname2n[v.name]] = to_string(LpVarCategories[v.cat])
         self.addedVars = numVars
         self.addedRows = numRows
         return (
@@ -269,8 +546,8 @@ class LpSolver:
             self.n2c,
         )
 
-    def toDict(self):
-        data = dict(solver=self.name)
+    def toDict(self) -> dict[str, Any]:
+        data: dict[str, Any] = dict(solver=self.name)
         for k in ["mip", "msg", "keepFiles"]:
             try:
                 data[k] = getattr(self, k)
@@ -289,7 +566,7 @@ class LpSolver:
 
     to_dict = toDict
 
-    def toJson(self, filename, *args, **kwargs):
+    def toJson(self, filename: str, *args: Any, **kwargs: Any) -> None:
         with open(filename, "w") as f:
             json.dump(self.toDict(), f, *args, **kwargs)
 
@@ -301,7 +578,13 @@ class LpSolver_CMD(LpSolver):
 
     name = "LpSolver_CMD"
 
-    def __init__(self, path=None, keepFiles=False, *args, **kwargs):
+    def __init__(
+        self,
+        path: str | None = None,
+        keepFiles: bool = False,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
         """
 
         :param bool mip: if False, assume LP even if integer variables
@@ -321,16 +604,19 @@ class LpSolver_CMD(LpSolver):
         self.keepFiles = keepFiles
         self.setTmpDir()
 
-    def copy(self):
+    def copy(self) -> LpSolver_CMD:
         """Make a copy of self"""
 
-        aCopy = LpSolver.copy(self)
+        aCopy: LpSolver_CMD = self.__class__()
+        aCopy.mip = self.mip
+        aCopy.msg = self.msg
+        aCopy.options = self.options
         aCopy.path = self.path
         aCopy.keepFiles = self.keepFiles
         aCopy.tmpDir = self.tmpDir
         return aCopy
 
-    def setTmpDir(self):
+    def setTmpDir(self) -> None:
         """Set the tmpDir attribute to a reasonnable location for a temporary
         directory"""
         if os.name != "nt":
@@ -347,48 +633,42 @@ class LpSolver_CMD(LpSolver):
         elif not os.access(self.tmpDir, os.F_OK + os.W_OK):
             self.tmpDir = ""
 
-    def create_tmp_files(self, name, *args):
+    def create_tmp_files(self, name: str, *args: str) -> Iterator[str]:
         if self.keepFiles:
             prefix = name
         else:
             prefix = os.path.join(self.tmpDir, uuid4().hex)
         return (f"{prefix}-pulp.{n}" for n in args)
 
-    def silent_remove(self, file: Union[str, bytes, os.PathLike]) -> None:
-        try:
-            os.remove(file)
-        except FileNotFoundError:
-            pass
-
-    def delete_tmp_files(self, *args):
+    def delete_tmp_files(self, *args: str) -> None:
         if self.keepFiles:
             return
         for file in args:
             self.silent_remove(file)
 
-    def defaultPath(self):
+    def defaultPath(self) -> str:
         raise NotImplementedError
 
     @staticmethod
-    def executableExtension(name):
+    def executableExtension(name: str) -> str:
         if os.name != "nt":
             return name
         else:
             return name + ".exe"
 
     @staticmethod
-    def executable(command):
+    def executable(command: str) -> str | None:
         """Checks that the solver command is executable,
         And returns the actual path to it."""
         return shutil.which(command)
 
-    def get_pipe(self):
+    def get_pipe(self) -> Any:
         if self.msg:
             return None
         return open(os.devnull, "w")
 
 
-def ctypesArrayFill(myList, type=ctypes.c_double):
+def ctypesArrayFill(myList: list[Any], type: Any = ctypes.c_double) -> Any:
     """
     Creates a c array with ctypes from a python list
     type is the type of the c array

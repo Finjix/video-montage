@@ -3,7 +3,7 @@
   "package_id": "semantic-analysis-training-backup-v20",
   "version": "20.2.5",
   "relative_path": "components/semantic-analysis-training-backup-v20",
-  "tree_sha256": "16f4d4088b333d7f2cfe841e1ade89eb5865afef2f600a921f1dded2c8bf8d27",
+  "tree_sha256": "f241ef3abd69d853306b7e06c26dc7a539bbf989e37b85c91082c3af84bac406",
   "interface": {
     "orchestrator": "scripts/v15_orchestrator.py",
     "run_command": "run-continuous",
@@ -21,5 +21,5 @@
     "validate": "scripts/validate_package.py",
     "completion_schema": "semantic-delivery-manifest/v20"
   },
-  "activated_at": "2026-09-24T20:15:08+08:00"
+  "activated_at": "2026-09-28T11:44:03+08:00"
 }

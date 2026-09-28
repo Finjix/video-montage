@@ -7,6 +7,7 @@ import argparse
 import ctypes
 import hashlib
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -48,9 +49,23 @@ def valid_existing(path: Path, source: dict) -> bool:
     return value.get("schema") == "semantic-source-asr/v9" and value.get("source_id") == source.get("source_id") and value.get("source_sha256", "").lower() == source.get("source_sha256", "").lower() and bool(value.get("asr", {}).get("segments"))
 
 
+_CUDA_DLL_DIRECTORY_HANDLES = []
+
+
 def cuda_runtime_available() -> bool:
     if sys.platform != "win32":
         return True
+    suite_root = Path(__file__).resolve().parents[3]
+    bundled_cuda_bin = suite_root / "dependencies" / "cuda" / "bin"
+    if bundled_cuda_bin.is_dir():
+        cuda_path = str(bundled_cuda_bin)
+        path_entries = os.environ.get("PATH", "").split(os.pathsep)
+        if not any(entry.casefold() == cuda_path.casefold() for entry in path_entries):
+            os.environ["PATH"] = cuda_path + os.pathsep + os.environ.get("PATH", "")
+        try:
+            _CUDA_DLL_DIRECTORY_HANDLES.append(os.add_dll_directory(cuda_path))
+        except (AttributeError, OSError):
+            pass
     for library in ("cublas64_12.dll",):
         try:
             ctypes.WinDLL(library)

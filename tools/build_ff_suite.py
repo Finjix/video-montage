@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse, hashlib, json, os
+from importlib.metadata import distributions
 from datetime import datetime
 from pathlib import Path
 
@@ -32,11 +33,12 @@ def build():
  required_python=("python.exe","python313.dll","python313.zip","python313._pth","msvcp140.dll","msvcp140_1.dll","Lib/site-packages/faster_whisper/__init__.py","Lib/site-packages/onnxruntime/__init__.py","Lib/site-packages/sitecustomize.py")
  missing_python=[name for name in required_python if not (python_root/name).is_file()]
  if missing_python: raise RuntimeError(f"portable Python missing {missing_python}")
- required_dependencies=("ffmpeg/bin/ffmpeg.exe","ffmpeg/bin/ffprobe.exe","models/models--mobiuslabsgmbh--faster-whisper-large-v3-turbo/snapshots/0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf/model.bin")
+ required_dependencies=("ffmpeg/bin/ffmpeg.exe","ffmpeg/bin/ffprobe.exe","models/models--mobiuslabsgmbh--faster-whisper-large-v3-turbo/snapshots/0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf/model.bin","cuda/bin/cublas64_12.dll","cuda/bin/cublasLt64_12.dll","cuda/bin/cudart64_12.dll")
  missing_dependencies=[name for name in required_dependencies if not (dependencies_root/name).is_file()]
  if missing_dependencies: raise RuntimeError(f"portable dependencies missing {missing_dependencies}")
  dependency_rows=members(dependencies_root)
- dependency_manifest={"schema":"ff-suite-dependencies-manifest/v1","python_version":"3.13.15","root":str(dependencies_root.resolve()),"file_count":len(dependency_rows),"tree_sha256":tree_hash(dependency_rows),"files":dependency_rows}
+ package_rows={dist.metadata["Name"]:dist.version for dist in distributions(path=[str(python_root/"Lib"/"site-packages")]) if dist.metadata.get("Name")}
+ dependency_manifest={"schema":"ff-suite-dependencies-manifest/v1","python_version":"3.13.15","python_packages":dict(sorted(package_rows.items(),key=lambda item:item[0].casefold())),"root":str(dependencies_root.resolve()),"file_count":len(dependency_rows),"tree_sha256":tree_hash(dependency_rows),"files":dependency_rows}
  dependency_manifest_path=ROOT/".manifests"/"dependencies.json"; atomic(dependency_manifest_path,dependency_manifest)
  for name,spec in COMPONENTS.items():
   root=ROOT/spec["relative_path"]; missing=[x for x in spec["required"] if not (root/x).is_file()]
@@ -58,6 +60,9 @@ def build():
   "ffmpeg":dependencies_root/"ffmpeg/bin/ffmpeg.exe",
   "ffprobe":dependencies_root/"ffmpeg/bin/ffprobe.exe",
   "model":dependencies_root/required_dependencies[2],
+  "cuda_cublas":dependencies_root/"cuda/bin/cublas64_12.dll",
+  "cuda_cublas_lt":dependencies_root/"cuda/bin/cublasLt64_12.dll",
+  "cuda_runtime":dependencies_root/"cuda/bin/cudart64_12.dll",
  }
  runtime_lock={"schema":"ff-suite-portable-runtime-lock/v1","version":"20.2.5","created_at":now,"render_mode":"source_frame_ranges/v1","seconds_only_fallback":False,"files":{name:{"relative_path":str(path.relative_to(ROOT)).replace("\\","/"),"sha256":sha(path),"size":path.stat().st_size} for name,path in runtime_files.items()}}
  runtime_lock_path=ROOT/"runtime-lock.json"; atomic(runtime_lock_path,runtime_lock)

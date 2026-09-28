@@ -23,7 +23,7 @@ def get_pix_fmt(name: cython.p_const_char) -> lib.AVPixelFormat:
 
     pix_fmt: lib.AVPixelFormat = lib.av_get_pix_fmt(name)
     if pix_fmt == lib.AV_PIX_FMT_NONE:
-        raise ValueError("not a pixel format: %r" % name)
+        raise ValueError(f"not a pixel format: {name!r}")
     return pix_fmt
 
 
@@ -143,7 +143,7 @@ class VideoFormat:
 @cython.final
 @cython.cclass
 class VideoFormatComponent:
-    def __cinit__(self, format: VideoFormat, index: cython.size_t):
+    def __cinit__(self, format: VideoFormat, index: cython.uint):
         self.format = format
         self.index = index
         self.ptr = cython.address(format.ptr.comp[index])

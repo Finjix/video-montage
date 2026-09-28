@@ -1,16 +1,16 @@
 {
   "schema": "montage-control-three-suite-ff/v20.2",
   "version": "20.2.5",
-  "created_at": "2026-09-24T20:15:08+08:00",
+  "created_at": "2026-09-28T11:44:03+08:00",
   "suite_root": "D:\\codex-montage",
   "runtime_lock_relative_path": "runtime-lock.json",
-  "runtime_lock_sha256": "7e27a8d4ce64b28f44362c2a5a58c37884deee21ebf4b4d8f1d415b6d28f9306",
+  "runtime_lock_sha256": "3278d933e635a128581bfc77854b2db709ba3eaae3fc4876d2ca361569c5bdd1",
   "dependencies": {
     "relative_path": "dependencies",
     "python_version": "3.13.15",
     "manifest_relative_path": ".manifests/dependencies.json",
-    "manifest_sha256": "55fc00a5a847f7d935969b688425b726c8d5f5a3f2b80a1beb3f4744e6fc5913",
-    "tree_sha256": "c7ffbdf50215e9bbf45bcc5f264fc04594d81856af32ac72a0cd8f0dc2f560ed"
+    "manifest_sha256": "8b37679aa9961cdee4abc578de2927aaa2a00a38a7c34511197cd8d0bd3e5952",
+    "tree_sha256": "c56bfb71682c0e51098790a4ac845a70e980fae937f5af902f37ad4c8673eb1b"
   },
   "components": {
     "controller": {
@@ -33,8 +33,8 @@
     "semantic": {
       "relative_path": "components/semantic-analysis-training-backup-v20",
       "manifest_relative_path": ".manifests/semantic.json",
-      "manifest_sha256": "cc675f768c78a7a400a00eb3ab89c11c03dd459261ace020e38cbd8997c3e2ac",
-      "tree_sha256": "16f4d4088b333d7f2cfe841e1ade89eb5865afef2f600a921f1dded2c8bf8d27",
+      "manifest_sha256": "cc6d977d377fe95c4fefbca71c9f45ad15943edb35753cc2cbc0ea258eb6d7b1",
+      "tree_sha256": "f241ef3abd69d853306b7e06c26dc7a539bbf989e37b85c91082c3af84bac406",
       "interface": {
         "orchestrator": "scripts/v15_orchestrator.py",
         "run_command": "run-continuous",
