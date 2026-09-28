@@ -29,7 +29,7 @@
   "inherited_approval_evidence_accepted": false,
   "rolling_group_size": 5,
   "content_grounded_gate": "scripts/v15_content_gate.py",
-  "content_grounding_reference": "references/v20-fail-closed-boundaries.md",
+  "content_grounding_reference": "references/semantic-contract.md",
   "gate_runtime": "scripts/v9_gate_runtime.py",
   "gate_artifact_compatibility": "v260928 task evidence with exhaustive precheck, internal-silence evidence, final opening-family release gate and speech alignment",
   "opening_visual_family_release_gate": "scripts/v20_opening_visual_family_gate.py",

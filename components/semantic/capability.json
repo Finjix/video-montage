@@ -104,7 +104,7 @@
   },
   "content_grounded_gate": {
     "entrypoint": "scripts/v15_content_gate.py",
-    "contract_reference": "references/v19-feedback-repair-gate.md",
+    "contract_reference": "references/semantic-contract.md",
     "wuzimu_profile": "references/wuzimu-v19-feedback-contract.json",
     "model_pass_is_sufficient": false,
     "quote_grounded_transition_evidence_required": true,

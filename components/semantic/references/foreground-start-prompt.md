@@ -1,7 +1,5 @@
-# Foreground production prompt for V18
+# Foreground production prompt
 
-Start or resume the V18 production task in the current active Codex turn. Validate the job contract, explicit style profile, V18 content-grounding contract and explicit witness/exhaustive source manifest before initialization. Run `scripts/v15_orchestrator.py run-continuous` without a positive `--budget-seconds`; normal foreground mode is unbounded and must continue until model handoff, `COMPLETE`, or a genuine blocker.
+Start or resume the current production task in the active Codex turn through the bundled executor. Validate the work order, style profile, source manifest, and content-grounding contract before initialization. Continue each durable local slice immediately until model handoff, completion, or a genuine blocker; an exit code of 22 means progress, not failure.
 
-When the command returns `WAITING_MODEL`, perform the exact pending Terra or Sol phase, write `semantic-model-phase-response/v18`, call `supply-model`, and immediately return to unbounded `run-continuous`. Do not send a final response because a local chunk completed, because exit 22 was returned, or because a watchdog automation exists. Exit 22 in the foreground means immediately call the command again in the same turn.
-
-The scheduled heartbeat is watchdog-only. It must not become the normal production clock. Keep the task active until the delivery manifest exists or a genuine authority/capacity/failure stop is reached.
+At a model handoff, perform only the named semantic or independent-review phase, supply the exact hash-bound response, and resume foreground execution. Do not stop because a local chunk completed or a watchdog exists. The watchdog is recovery-only and cannot become the normal production clock.

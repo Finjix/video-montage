@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -232,6 +233,20 @@ class PackagingTests(unittest.TestCase):
             (root / "skill/video-montage/SKILL.md").write_text('  version: "v260928"\n', encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "Archive version"):
                 packager.build_archive(root, "../wrong")
+
+
+class DocumentationTests(unittest.TestCase):
+    def test_current_markdown_has_no_release_history_or_broken_links(self):
+        legacy = re.compile(r"(?i)\bv(?:[6-9]|1[0-9]|20)(?:\.\d+)*\b|旧版|旧版本|旧安装|历史版本|兼容旧|迁移")
+        links = re.compile(r"\]\(([^)]+\.md)\)")
+        for path in ROOT.rglob("*.md"):
+            if "dependencies" in path.parts or "release" in path.parts or path == ROOT / "docs/版本更新.md":
+                continue
+            self.assertNotRegex(path.as_posix(), legacy.pattern)
+            content = path.read_text(encoding="utf-8-sig")
+            self.assertNotRegex(content, legacy)
+            for link in links.findall(content):
+                self.assertTrue((path.parent / link).is_file(), f"Broken Markdown link in {path}: {link}")
 
 
 if __name__ == "__main__":
