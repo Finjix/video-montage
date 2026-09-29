@@ -86,6 +86,19 @@ class AutonomousContractTests(unittest.TestCase):
         self.assertEqual("pass", repaired["decision"])
         self.assertEqual("reject", auto.visual_boundary_metrics(visual[:-1], 3, 26)["decision"])
 
+    def test_visual_boundary_rejects_transition_just_outside_last_13_frames(self):
+        visual = []
+        for frame in range(70):
+            color = (25, 110, 195) if frame < 56 else (200, 35, 35)
+            path = self.root / f"late_frame_{frame}.png"
+            Image.new("RGB", (64, 114), color).save(path)
+            visual.append({"frame": frame, **auto.ref(path)})
+        result = auto.visual_boundary_metrics(visual, 0, 70)
+        self.assertEqual("pass", result["entry"]["decision"])
+        self.assertEqual("reject", result["exit"]["decision"])
+        self.assertLess(result["exit"]["largest_adjacent_difference"], .07)
+        self.assertGreater(result["exit"]["largest_nearby_adjacent_difference"], .07)
+
     def test_cut_pcm_rejects_loud_tail_and_abrupt_music_change(self):
         samples = np.zeros(32000, dtype=np.float32)
         samples[15000:16000] = .1

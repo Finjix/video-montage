@@ -485,33 +485,39 @@ def frames(path: Path, frame_numbers: list[int], output: Path) -> list[dict]:
 
 
 def visual_boundary_metrics(visual: list[dict], start: int, end: int) -> dict:
-    """Compare the first and last 13 native frames inside a candidate.
+    """Compare the first/last 13 frames and scan a half-second around each edge.
 
     A transition may leave the first few frames looking like the previous shot
-    even when speech and PCM boundaries are clean. Preserve the per-frame scores
-    so Codex can inspect the actual frames as well as the automatic decision.
+    or arrive just before the last 13 frames. Preserve both sets of per-frame
+    scores so Codex can inspect position, scale, and shot continuity.
     """
     by_frame = {row["frame"]: Path(row["path"]) for row in visual}
 
-    def inspect(numbers: list[int]) -> dict:
-        if len(numbers) < 2 or any(number not in by_frame for number in numbers):
+    def inspect(numbers: list[int], nearby: list[int]) -> dict:
+        if len(numbers) < 2 or any(number not in by_frame for number in nearby):
             return {"decision": "reject", "reason": "boundary frame evidence incomplete"}
-        pictures = []
-        for number in numbers:
+        pictures = {}
+        for number in nearby:
             with Image.open(by_frame[number]) as picture:
-                pictures.append(np.asarray(picture.convert("RGB").resize((64, 114)), dtype=np.float32) / 255.0)
-        adjacent = [round(float(np.mean(np.abs(left - right))), 4)
-                    for left, right in zip(pictures, pictures[1:])]
-        endpoint_distance = round(float(np.mean(np.abs(pictures[0] - pictures[-1]))), 4)
-        suspected = max(adjacent) > 0.07 or endpoint_distance > 0.12
+                pictures[number] = np.asarray(picture.convert("RGB").resize((64, 114)), dtype=np.float32) / 255.0
+        def differences(sequence: list[int]) -> list[float]:
+            return [round(float(np.mean(np.abs(pictures[left] - pictures[right]))), 4)
+                    for left, right in zip(sequence, sequence[1:])]
+        adjacent = differences(numbers)
+        nearby_adjacent = differences(nearby)
+        endpoint_distance = round(float(np.mean(np.abs(pictures[numbers[0]] - pictures[numbers[-1]]))), 4)
+        suspected = max(nearby_adjacent) > 0.07 or endpoint_distance > 0.12
         return {"frames": numbers, "adjacent_mean_absolute_differences": adjacent,
                 "endpoint_distance": endpoint_distance, "largest_adjacent_difference": max(adjacent),
+                "nearby_frames": nearby, "nearby_adjacent_mean_absolute_differences": nearby_adjacent,
+                "largest_nearby_adjacent_difference": max(nearby_adjacent),
                 "decision": "reject" if suspected else "pass"}
 
     head = list(range(start, min(end, start + 13)))
     tail = list(range(max(start, end - 13), end))
-    entry = inspect(head)
-    exit_ = inspect(tail)
+    nearby_count = min(30, max(13, (end - start) // 2))
+    entry = inspect(head, list(range(start, min(end, start + nearby_count))))
+    exit_ = inspect(tail, list(range(max(start, end - nearby_count), end)))
     return {"schema": "video-montage-visual-boundary/v260929", "entry": entry, "exit": exit_,
             "decision": "pass" if entry["decision"] == exit_["decision"] == "pass" else "reject"}
 
