@@ -18,6 +18,8 @@ configuration, then run `packaging-finalize` and `packaging-validate` after
 `controller-validate` and before `complete`. Read the
 [packaging workflow](../../components/packaging/README.md). Without packaging,
 keep the clean delivery behavior.
+Packaging burns the calibrated WenYue W8 yellow, black-outlined subtitle style
+by default, using the fixed OTF in `components/packaging/assets/fonts`.
 Burn subtitles into the video picture only. Put the packaged MP4, editable
 `subtitle-xx.txt`, configuration, manifest, and validation JSON directly in one output directory.
 Do not make `packaged/` or `subtitles/` subdirectories or duplicate config/subtitle snapshots.
