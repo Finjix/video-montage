@@ -2,7 +2,7 @@
 
 Use the bundled Python, FFmpeg, FFprobe, and Whisper model. Run controller `preflight`, then `finalize`, create exact-cut evidence, obtain separate independent post-encode review, and run `validate` last. A passing full-batch semantic release authorization is required before finalization; every premaster item must hash-bind its renderer evidence.
 
-The premaster manifest and every result must declare `render_mode: source_frame_ranges/v1` and `seconds_only_fallback: false`. The controller accepts only the bundled portable frame renderer and frame repair tools. Refuse overwrites, stale partial files, incomplete plan sets, and delivery subsets whose plan IDs differ from the locked index.
+The premaster manifest and every result must declare `render_mode: source_frame_ranges/v1` and `seconds_only_fallback: false`. The controller accepts only the bundled portable frame renderer and frame repair tools. Refuse overwrites and stale partial files; a previous successful item may be reused only when its item receipt, input hash, render evidence, encoding settings, and output hash all still match. Reject incomplete plan sets and delivery subsets whose plan IDs differ from the locked index.
 
 At every output start, concat cut, and output end, bind dense decoded frames, frame-derived PCM, machine signal findings, and an independent review of the original evidence. Inspect at least 72 frames on both sides of each cut. Thirty consecutive stable frames are a technical floor; a 30-59-frame microshot needs separate semantic justification, while an unreviewed shot needs at least 60 stable frames. Reject extra transitions within 12 frames of an intended cut.
 

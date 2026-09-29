@@ -246,7 +246,7 @@ class PackagingContractTests(unittest.TestCase):
              patch.object(packaging.importlib.util, "spec_from_file_location", return_value=spec), \
              patch.object(packaging.importlib.util, "module_from_spec", return_value=asr):
             packaging.draft_one(self.video, "P1", output)
-        cues = packaging.parse_srt(output / "subtitle-P1.txt", 5000)
+        cues = packaging.parse_srt(output / "subtitles" / "subtitle-P1.txt", 5000)
         self.assertTrue(any("无尽冬日" in cue["text"] for cue in cues))
 
     def test_ffmpeg_font_fallback_is_rejected(self):
@@ -294,35 +294,36 @@ class PackagingContractTests(unittest.TestCase):
         manifest = output / "packaging_manifest.json"
         with patch.object(packaging, "video_spec", return_value=self.spec), patch.object(packaging, "render_one", return_value={"plan_id": "P1", "subtitles": {"path": str(self.srt), "sha256": packaging.sha(self.srt)}}):
             result = packaging.render(self.config, output, manifest)
-        self.assertEqual(self.srt.read_bytes(), (output / "subtitle-P1.txt").read_bytes())
-        self.assertEqual(self.config.read_bytes(), (output / "packaging.json").read_bytes())
-        self.assertEqual(str(output / "subtitle-P1.txt"), result["results"][0]["subtitle_snapshot"]["path"])
-        self.assertEqual(str(output / "packaging.json"), result["config_snapshot_path"])
-        self.assertEqual({"packaging.json", "packaging_manifest.json", "subtitle-P1.txt"},
+            reopened = packaging.prepared_rows(output / "config" / "packaging.json")
+        self.assertEqual(self.srt.read_bytes(), (output / "subtitles" / "subtitle-P1.txt").read_bytes())
+        self.assertEqual(str(output / "subtitles" / "subtitle-P1.txt"), reopened[0]["subtitles"]["path"])
+        self.assertEqual(packaging.sha(self.video), reopened[0]["input"]["sha256"])
+        self.assertEqual(packaging.sha(self.pin), reopened[0]["text_pins"][0]["sha256"])
+        self.assertEqual(str(output / "subtitles" / "subtitle-P1.txt"), result["results"][0]["subtitle_snapshot"]["path"])
+        self.assertEqual(str(output / "config" / "packaging.json"), result["config_snapshot_path"])
+        self.assertEqual({"config", "packaging_manifest.json", "subtitles"},
                          {path.name for path in output.iterdir()})
         self.assertFalse(list(output.glob("*.srt")))
 
-    def test_render_reuses_config_and_subtitle_already_in_output_root(self):
+    def test_render_moves_config_and_subtitle_into_categories(self):
         output = self.root
         manifest = output / "packaging_manifest.json"
         with patch.object(packaging, "video_spec", return_value=self.spec), patch.object(packaging, "render_one", return_value={"plan_id": "P1", "subtitles": {"path": str(self.srt), "sha256": packaging.sha(self.srt)}}):
             result = packaging.render(self.config, output, manifest)
-        self.assertEqual(str(self.config), result["config_snapshot_path"])
-        self.assertEqual(str(self.srt), result["results"][0]["subtitle_snapshot"]["path"])
+        self.assertEqual(str(output / "config" / "packaging.json"), result["config_snapshot_path"])
+        self.assertEqual(str(output / "subtitles" / "subtitle-P1.txt"), result["results"][0]["subtitle_snapshot"]["path"])
         self.assertFalse((output / "packaging_config_snapshot.json").exists())
-        self.assertFalse((output / "subtitles").exists())
+        self.assertTrue((output / "subtitles").is_dir())
 
-    def test_render_rejects_colliding_flat_output_paths_before_encoding(self):
-        renamed_config = self.root / "P1.mp4"
-        renamed_config.write_bytes(self.config.read_bytes())
+    def test_render_rejects_colliding_output_paths_before_encoding(self):
         output = self.root / "collision-output"
         with patch.object(packaging, "video_spec", return_value=self.spec), \
              patch.object(packaging, "render_one") as encode:
             with self.assertRaisesRegex(ValueError, "paths collide"):
-                packaging.render(renamed_config, output, output / "manifest.json")
+                packaging.render(self.config, output, output / "config" / self.config.name)
             encode.assert_not_called()
             with self.assertRaisesRegex(ValueError, "paths collide"):
-                packaging.render(self.config, output, output / self.config.name)
+                packaging.render(self.config, output, output / "subtitles" / "subtitle-P1.txt")
             encode.assert_not_called()
 
     def test_reburn_uses_edited_srt_and_new_config(self):
@@ -339,13 +340,13 @@ class PackagingContractTests(unittest.TestCase):
         manifest = output / "packaging_manifest.json"
         with patch.object(packaging, "render", return_value={"schema": "video-montage-packaging-delivery/v1"}) as mock_render:
             result = packaging.reburn(previous, "P1", self.srt, output, manifest)
-        config = json.loads((output / "reburn_config.json").read_text(encoding="utf-8"))
+        config = json.loads((output / "config" / "reburn_config.json").read_text(encoding="utf-8"))
         self.assertEqual(str(self.srt), config["outputs"][0]["subtitle_txt"])
         self.assertEqual(packaging.sha(self.srt), config["outputs"][0]["subtitle_sha256"])
         self.assertEqual(str(self.video), config["outputs"][0]["input_path"])
         self.assertNotIn("subtitle_font_path", config)
         self.assertEqual(str(self.font), packaging.subtitle_style(config, output)["font"]["path"])
-        self.assertEqual((output / "reburn_config.json", output, manifest, None, None), mock_render.call_args.args)
+        self.assertEqual((output / "config" / "reburn_config.json", output, manifest, None, None), mock_render.call_args.args)
         self.assertEqual(packaging.sha(previous), result["reburn_source"]["manifest_sha256"])
         with self.assertRaisesRegex(FileExistsError, "non-empty"):
             packaging.reburn(previous, "P1", self.srt, output, self.root / "another.json")
@@ -359,7 +360,7 @@ class PackagingContractTests(unittest.TestCase):
         output = self.root / "old-reburn"
         with patch.object(packaging, "render", return_value={"schema": "video-montage-packaging-delivery/v1"}):
             packaging.reburn(previous, "P1", self.srt, output, output / "manifest.json")
-        config = packaging.read(output / "reburn_config.json")
+        config = packaging.read(output / "config" / "reburn_config.json")
         self.assertNotIn("subtitle_font_path", config)
         self.assertEqual(str(self.font), packaging.subtitle_style(config, output)["font"]["path"])
 

@@ -10,6 +10,7 @@ import os
 import shutil
 import signal
 import subprocess
+import threading
 import sys
 import time
 import uuid
@@ -599,7 +600,7 @@ def write_foreground_lease(config: dict, state: dict, mode: str, status_value: s
         "mode": mode,
         "status": status_value,
         "started_at": started_at or now_iso(),
-        "renewed_at": now_iso(),
+        "renewed_at": datetime.now().astimezone().isoformat(timespec="microseconds"),
         "state_revision": int(state.get("revision", 0)),
         "state_status": state.get("status"),
         "phase": state.get("current_phase"),
@@ -653,7 +654,25 @@ def run_continuous(config_path: Path, state_path: Path, budget_seconds: float, r
     write_front_status(config, initial, run_id, lease["started_at"], "foreground_active")
     last = initial
     while deadline is None or time.monotonic() < deadline:
-        code, last = resume(config_path, state_path)
+        stop_renewal = threading.Event()
+        renewal_errors: list[Exception] = []
+        renewal_interval = max(0.05, min(30.0, float(execution["heartbeat_stale_after_seconds"]) / 3))
+        def renew_while_phase_runs() -> None:
+            while not stop_renewal.wait(renewal_interval):
+                try:
+                    write_foreground_lease(config, last, mode, "running", lease["started_at"])
+                except Exception as exc:
+                    renewal_errors.append(exc)
+                    return
+        renewal = threading.Thread(target=renew_while_phase_runs, daemon=True)
+        renewal.start()
+        try:
+            code, last = resume(config_path, state_path)
+        finally:
+            stop_renewal.set()
+            renewal.join()
+        if renewal_errors:
+            raise RuntimeError("foreground lease renewal failed") from renewal_errors[0]
         terminal = "running" if code == 22 else ("waiting_model" if code == 20 else str(last.get("status", "stopped")).lower())
         write_foreground_lease(config, last, mode, terminal, lease["started_at"])
         write_front_status(config, last, run_id, lease["started_at"], terminal)

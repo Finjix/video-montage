@@ -7,6 +7,8 @@ import json
 import os
 import re
 import subprocess
+import sys
+from tempfile import TemporaryDirectory
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
@@ -20,6 +22,10 @@ evidence_module = importlib.util.module_from_spec(EVIDENCE_SPEC)
 assert EVIDENCE_SPEC.loader
 EVIDENCE_SPEC.loader.exec_module(evidence_module)
 verify_boundary_files = evidence_module.verify_boundary_files
+OPENING_SPEC = importlib.util.spec_from_file_location("opening_visual_family_gate", CONTROLLER_ROOT.parent / "semantic/scripts/v20_opening_visual_family_gate.py")
+opening_module = importlib.util.module_from_spec(OPENING_SPEC)
+assert OPENING_SPEC.loader
+OPENING_SPEC.loader.exec_module(opening_module)
 
 
 def read(path: Path) -> dict:
@@ -106,16 +112,45 @@ def preflight(output: Path) -> int:
 def finalize_one(item: dict, output_dir: Path, width: int, height: int, fps: int, encoder: str) -> dict:
     source=Path(item["export_path"]).resolve(); plan_id=item["plan_id"]
     target=output_dir/f"{plan_id}.mp4"; partial=target.with_suffix(".partial.mp4")
-    if target.exists() or partial.exists(): raise RuntimeError(f"refusing overwrite: {target}")
+    receipt_path=output_dir/".finalize_receipts"/f"{plan_id}.json"
+    parameters={"width":width,"height":height,"fps":fps,"encoder":encoder}
+    source_hash=sha(source)
+    if partial.exists(): raise RuntimeError(f"refusing stale partial output: {partial}")
+    if target.exists():
+        if receipt_path.is_file():
+            receipt=read(receipt_path)
+            result=receipt.get("result") if isinstance(receipt.get("result"),dict) else {}
+            if (receipt.get("schema")=="ffmpeg-controller-item-receipt/v260928"
+                    and receipt.get("parameters")==parameters
+                    and receipt.get("source_sha256")==source_hash
+                    and Path(str(result.get("premaster_path") or "")).resolve()==source
+                    and result.get("premaster_sha256")==source_hash
+                    and Path(str(result.get("output_path") or "")).resolve()==target.resolve()
+                    and result.get("output_sha256")==sha(target)
+                    and Path(str(result.get("render_evidence_path") or "")).resolve()==Path(item["render_evidence_path"]).resolve()
+                    and result.get("render_evidence_sha256")==item["render_evidence_sha256"]
+                    and all(result.get("checks",{}).get(key) is True for key in ("h264","dimensions","fps","aac","audio_rate"))):
+                return result
+        raise RuntimeError(f"refusing overwrite without matching receipt: {target}")
     codec=["-c:v","h264_nvenc","-preset","p4","-tune","hq","-rc","vbr","-cq","19","-b:v","0"] if encoder=="h264_nvenc" else ["-c:v","libx264","-preset","veryfast","-crf","18"]
     command=[FFMPEG,"-hide_banner","-nostdin","-y","-i",str(source),"-map","0:v:0","-map","0:a:0","-vf",f"fps={fps},scale={width}:{height}:flags=lanczos,setsar=1,format=yuv420p","-r",str(fps),"-fps_mode","cfr",*codec,"-c:a","copy","-movflags","+faststart",str(partial)]
-    run=subprocess.run(command,capture_output=True,text=True,encoding="utf-8",errors="replace")
-    if run.returncode: raise RuntimeError(run.stderr[-3000:])
-    info=probe(partial); video=next(x for x in info["streams"] if x["codec_type"]=="video"); audio=next(x for x in info["streams"] if x["codec_type"]=="audio")
-    checks={"h264":video["codec_name"]=="h264","dimensions":int(video["width"])==width and int(video["height"])==height,"fps":video["avg_frame_rate"]==f"{fps}/1","aac":audio["codec_name"]=="aac","audio_rate":int(audio["sample_rate"])==48000}
-    if not all(checks.values()): raise RuntimeError(f"technical validation failed: {checks}")
+    try:
+        run=subprocess.run(command,capture_output=True,text=True,encoding="utf-8",errors="replace")
+        if run.returncode: raise RuntimeError(run.stderr[-3000:])
+        info=probe(partial); video=next(x for x in info["streams"] if x["codec_type"]=="video"); audio=next(x for x in info["streams"] if x["codec_type"]=="audio")
+        checks={"h264":video["codec_name"]=="h264","dimensions":int(video["width"])==width and int(video["height"])==height,"fps":video["avg_frame_rate"]==f"{fps}/1","aac":audio["codec_name"]=="aac","audio_rate":int(audio["sample_rate"])==48000}
+        if not all(checks.values()): raise RuntimeError(f"technical validation failed: {checks}")
+    except Exception:
+        partial.unlink(missing_ok=True)
+        raise
     partial.replace(target)
-    return {"plan_id":plan_id,"premaster_path":str(source),"premaster_sha256":sha(source),"output_path":str(target),"output_sha256":sha(target),"duration":float(info["format"]["duration"]),"render_evidence_path":str(Path(item["render_evidence_path"]).resolve()),"render_evidence_sha256":item["render_evidence_sha256"],"command":command,"checks":checks}
+    result={"plan_id":plan_id,"premaster_path":str(source),"premaster_sha256":source_hash,"output_path":str(target),"output_sha256":sha(target),"duration":float(info["format"]["duration"]),"render_evidence_path":str(Path(item["render_evidence_path"]).resolve()),"render_evidence_sha256":item["render_evidence_sha256"],"command":command,"checks":checks}
+    try:
+        atomic(receipt_path,{"schema":"ffmpeg-controller-item-receipt/v260928","parameters":parameters,"source_sha256":source_hash,"result":result})
+    except Exception:
+        target.unlink(missing_ok=True)
+        raise
+    return result
 
 
 def finalize(args) -> int:
@@ -138,12 +173,60 @@ def finalize(args) -> int:
     atomic(args.manifest,manifest); print(json.dumps({"decision":"pass","count":len(results),"manifest":str(args.manifest)},ensure_ascii=False)); return 0
 
 
+def recheck_post_review(post: dict, exact_path: Path, machine_path: Path, independent_path: Path, authority_path: Path) -> bool:
+    reviewer=post.get("reviewer") if isinstance(post.get("reviewer"),dict) else {}
+    review_id=reviewer.get("review_id")
+    if not review_id or reviewer.get("role")!="independent_post_encode_reviewer":
+        return False
+    with TemporaryDirectory(prefix="video-montage-post-recheck-") as temporary:
+        recheck_path=Path(temporary)/"recheck.json"
+        command=[sys.executable,str(CONTROLLER_ROOT/"scripts/review_post_encode.py"),"--evidence",str(exact_path),
+                 "--signal-scan",str(machine_path),"--findings",str(independent_path),
+                 "--review-authority",str(authority_path),"--review-id",str(review_id),
+                 "--output",str(recheck_path)]
+        checked=subprocess.run(command,capture_output=True,text=True,encoding="utf-8",errors="replace")
+        return checked.returncode==0 and recheck_path.is_file() and read(recheck_path).get("decision")=="pass"
+
+
+def output_spec_matches(path: Path, manifest: dict) -> bool:
+    declared_video=manifest.get("video_spec") if isinstance(manifest.get("video_spec"),dict) else {}
+    declared_audio=manifest.get("audio_spec") if isinstance(manifest.get("audio_spec"),dict) else {}
+    if (declared_video.get("codec")!="h264" or declared_audio.get("codec")!="aac"
+            or declared_audio.get("sample_rate")!=48000):
+        return False
+    try:
+        info=probe(path)
+        videos=[item for item in info["streams"] if item.get("codec_type")=="video"]
+        audios=[item for item in info["streams"] if item.get("codec_type")=="audio"]
+        if len(videos)!=1 or len(audios)!=1 or len(info["streams"])!=2:
+            return False
+        video,audio=videos[0],audios[0]
+        return (video.get("codec_name")=="h264" and audio.get("codec_name")=="aac"
+                and int(video["width"])==int(declared_video["width"])
+                and int(video["height"])==int(declared_video["height"])
+                and video.get("avg_frame_rate")==declared_video.get("fps")
+                and int(audio["sample_rate"])==48000)
+    except (KeyError,TypeError,ValueError,subprocess.CalledProcessError):
+        return False
+
+
 def validate(args) -> int:
     manifest,release,post=read(args.manifest),read(args.semantic_release),read(args.post_qc)
     opening=read(args.opening_family_report)
     failures=[]
-    if release.get("decision")!="pass": failures.append("semantic_release")
-    if {str(item.get("plan_id")) for item in manifest.get("results",[])}!={str(item) for item in release.get("authorized_outputs",[])}: failures.append("authorized_output_scope")
+    results=manifest.get("results") if isinstance(manifest.get("results"),list) else []
+    ids=[str(item.get("plan_id") or "") for item in results if isinstance(item,dict)]
+    authorized=release.get("authorized_outputs") if isinstance(release.get("authorized_outputs"),list) else []
+    if (manifest.get("schema")!="ffmpeg-controller-delivery/v260928" or not results
+            or len(ids)!=len(results) or len(set(ids))!=len(ids) or any(not item for item in ids)
+            or manifest.get("output_count")!=len(results)):
+        failures.append("delivery_scope")
+    if (release.get("schema")!="semantic-delivery-manifest/v260928" or release.get("decision")!="pass"
+            or release.get("package_version")!="v260928"
+            or Path(str(manifest.get("semantic_release_path") or "")).resolve()!=args.semantic_release.resolve()
+            or manifest.get("semantic_release_sha256")!=sha(args.semantic_release)):
+        failures.append("semantic_release")
+    if sorted(ids)!=sorted(str(item) for item in authorized): failures.append("authorized_output_scope")
     machine=post.get("machine_signal_gate") if isinstance(post.get("machine_signal_gate"),dict) else {}
     machine_path=Path(str(machine.get("path", "")))
     independent=post.get("independent_findings") if isinstance(post.get("independent_findings"),dict) else {}
@@ -153,19 +236,62 @@ def validate(args) -> int:
     if post.get("schema")!="ffmpeg-post-encode-qc/v260928" or post.get("decision")!="pass" or post.get("delivery_manifest_sha256")!=sha(args.manifest): failures.append("post_encode_qc")
     if machine.get("decision")!="pass" or not machine_path.is_file() or sha(machine_path)!=str(machine.get("sha256", "")).lower(): failures.append("machine_signal_gate")
     if not independent_path.is_file() or sha(independent_path)!=str(independent.get("sha256", "")).lower(): failures.append("independent_findings")
+    authority=post.get("review_authority") if isinstance(post.get("review_authority"),dict) else {}
+    authority_path=Path(str(authority.get("path", "")))
+    if not authority_path.is_file() or sha(authority_path)!=str(authority.get("sha256", "")).lower(): failures.append("review_authority")
     if not exact_path.is_file() or sha(exact_path)!=str(exact.get("sha256", "")).lower(): failures.append("exact_cut_evidence")
     else:
-        for cut in read(exact_path).get("cuts", []):
+        exact_value=read(exact_path)
+        cuts=exact_value.get("cuts") if isinstance(exact_value.get("cuts"),list) else []
+        if (exact_value.get("schema")!="ffmpeg-post-encode-evidence/v260928"
+                or exact_value.get("delivery_manifest_sha256")!=sha(args.manifest)
+                or exact_value.get("boundary_count")!=len(cuts)):
+            failures.append("exact_cut_scope")
+        by_plan={pid:[] for pid in ids}
+        for cut in cuts:
+            if not isinstance(cut,dict) or cut.get("plan_id") not in by_plan:
+                failures.append("exact_cut_scope")
+                continue
+            by_plan[cut["plan_id"]].append(cut)
             if verify_boundary_files(cut):
                 failures.append(f"exact_cut_files:{cut.get('plan_id')}:{cut.get('cut_index')}")
-    if opening.get("schema")!="opening-visual-family-release-gate/v260928" or opening.get("decision")!="pass" or opening.get("delivery_manifest_sha256")!=sha(args.manifest): failures.append("opening_visual_family_gate")
-    for item in manifest.get("results",[]):
+        for item in results:
+            render_path=Path(str(item.get("render_evidence_path") or ""))
+            if not render_path.is_file() or sha(render_path)!=str(item.get("render_evidence_sha256") or "").lower():
+                failures.append(f"render_evidence:{item.get('plan_id')}")
+                continue
+            try:
+                segments=read(render_path).get("segments",[])
+                plan_cuts=by_plan.get(item.get("plan_id"),[])
+                valid_scope=(isinstance(segments,list) and bool(segments) and len(plan_cuts)==len(segments)+1
+                    and sorted((cut.get("cut_index"),cut.get("boundary_kind")) for cut in plan_cuts)
+                    == [(0,"output_start"),*[(index,"concat_cut") for index in range(1,len(segments))],(len(segments),"output_end")])
+            except (OSError,ValueError,TypeError,KeyError):
+                valid_scope=False
+            if not valid_scope:
+                failures.append(f"exact_cut_scope:{item.get('plan_id')}")
+    if not any(name in failures for name in ("post_encode_qc","machine_signal_gate","independent_findings","exact_cut_evidence","exact_cut_scope","review_authority")):
+        if not recheck_post_review(post,exact_path,machine_path,independent_path,authority_path):
+            failures.append("post_encode_review_recheck")
+    request_path=Path(str(opening.get("request_path") or ""))
+    opening_recheck=False
+    if request_path.is_file() and sha(request_path)==opening.get("request_sha256"):
+        try:
+            opening_recheck=opening_module.audit(request_path).get("decision")=="pass"
+        except (OSError,ValueError,TypeError,KeyError):
+            opening_recheck=False
+    if (opening.get("schema")!="opening-visual-family-release-gate/v260928" or opening.get("decision")!="pass"
+            or opening.get("delivery_manifest_sha256")!=sha(args.manifest)
+            or not opening_recheck):
+        failures.append("opening_visual_family_gate")
+    for item in results:
         for segment in item.get("applied_repairs",[]):
             if float((segment.get("profile") or {}).get("video_hold",0.0) or 0.0)>0:
                 failures.append(f"artificial_video_hold:{item.get('plan_id')}:{segment.get('candidate_id')}")
         path=Path(item["output_path"])
         if not path.is_file() or sha(path)!=item["output_sha256"]: failures.append(f"output:{item.get('plan_id')}")
         else:
+            if not output_spec_matches(path,manifest): failures.append(f"output_spec:{item.get('plan_id')}")
             run=subprocess.run([FFMPEG,"-v","error","-i",str(path),"-f","null","NUL"],capture_output=True,text=True)
             if run.returncode: failures.append(f"decode:{item.get('plan_id')}")
     report={"schema":"ffmpeg-controller-validation/v260928","decision":"pass" if not failures else "reject","failures":failures,"manifest_path":str(args.manifest.resolve()),"manifest_sha256":sha(args.manifest),"opening_visual_family_report_path":str(args.opening_family_report.resolve()),"opening_visual_family_report_sha256":sha(args.opening_family_report),"validated_outputs":len(manifest.get("results",[]))}

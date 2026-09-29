@@ -203,24 +203,27 @@ def render(plan_path: Path, output: Path, evidence: Path, width: int, height: in
             "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart", str(partial),
         ]
     )
-    run = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
-    if run.returncode:
-        raise RuntimeError(run.stderr[-5000:])
-    output_info = probe(ffprobe, partial)
-    video = next(item for item in output_info["streams"] if item["codec_type"] == "video")
-    audio = next(item for item in output_info["streams"] if item["codec_type"] == "audio")
-    actual_frames = int(video.get("nb_frames") or round(float(output_info["format"]["duration"]) * fps))
-    checks = {
-        "render_mode_frame_only": True,
-        "h264": video["codec_name"] == "h264",
-        "dimensions": (int(video["width"]), int(video["height"])) == (width, height),
-        "fps": video["avg_frame_rate"] == f"{fps}/1",
-        "aac_48k": audio["codec_name"] == "aac" and audio["sample_rate"] == "48000",
-        "frame_count_close": abs(actual_frames - expected_frames) <= len(segments),
-    }
-    if not all(checks.values()):
+    try:
+        run = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if run.returncode:
+            raise RuntimeError(run.stderr[-5000:])
+        output_info = probe(ffprobe, partial)
+        video = next(item for item in output_info["streams"] if item["codec_type"] == "video")
+        audio = next(item for item in output_info["streams"] if item["codec_type"] == "audio")
+        actual_frames = int(video.get("nb_frames") or round(float(output_info["format"]["duration"]) * fps))
+        checks = {
+            "render_mode_frame_only": True,
+            "h264": video["codec_name"] == "h264",
+            "dimensions": (int(video["width"]), int(video["height"])) == (width, height),
+            "fps": video["avg_frame_rate"] == f"{fps}/1",
+            "aac_48k": audio["codec_name"] == "aac" and audio["sample_rate"] == "48000",
+            "frame_count_close": abs(actual_frames - expected_frames) <= len(segments),
+        }
+        if not all(checks.values()):
+            raise RuntimeError(f"render validation failed: {checks}")
+    except Exception:
         partial.unlink(missing_ok=True)
-        raise RuntimeError(f"render validation failed: {checks}")
+        raise
     os.replace(partial, output)
     value = {
         "schema": "portable-frame-render-evidence/v260928",

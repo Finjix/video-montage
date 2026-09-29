@@ -91,6 +91,8 @@ def audit(request_path: Path) -> dict:
     return {
         "schema": "opening-visual-family-release-gate/v260928",
         "decision": "pass" if not failures else "reject",
+        "request_path": str(request_path.resolve()),
+        "request_sha256": sha(request_path),
         "delivery_manifest_path": str(manifest_path.resolve()),
         "delivery_manifest_sha256": sha(manifest_path),
         "checked_outputs": len(items),

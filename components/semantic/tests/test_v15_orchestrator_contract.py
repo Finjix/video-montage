@@ -3,7 +3,10 @@ from __future__ import annotations
 import importlib.util
 import json
 import tempfile
+import threading
+import time
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -15,6 +18,29 @@ SPEC.loader.exec_module(runtime)
 
 
 class V15OrchestratorContractTests(unittest.TestCase):
+    def test_long_running_phase_keeps_foreground_lease_fresh(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            old = (datetime.now(timezone.utc) - timedelta(seconds=2)).isoformat()
+            config = {"task_root": str(root), "execution": {"foreground_required": True,
+                        "heartbeat_stale_after_seconds": 0.15, "recovery_budget_seconds": 1}}
+            state = {"task_id": "task", "status": "READY", "current_phase": "RENDER", "updated_at": old}
+            observed = []
+            def observe():
+                time.sleep(0.27)
+                observed.append(runtime.watchdog(root / "config.json", root / "state.json")[1]["action"])
+            def slow_resume(*_):
+                time.sleep(0.4)
+                state["status"] = "COMPLETE"
+                return 0, state
+            with patch.object(runtime, "load_bound", return_value=(config, state)), \
+                 patch.object(runtime, "resume", side_effect=slow_resume):
+                observer = threading.Thread(target=observe)
+                observer.start()
+                runtime.run_continuous(root / "config.json", root / "state.json", 0)
+                observer.join()
+            self.assertEqual(["foreground_active"], observed)
+
     def test_repair_discards_rewound_phase_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

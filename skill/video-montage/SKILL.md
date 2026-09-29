@@ -20,9 +20,10 @@ configuration, then run `packaging-finalize` and `packaging-validate` after
 keep the clean delivery behavior.
 Packaging burns the calibrated WenYue W8 yellow, black-outlined subtitle style
 by default, using the fixed OTF in `components/packaging/assets/fonts`.
-Burn subtitles into the video picture only. Put the packaged MP4, editable
-`subtitle-xx.txt`, configuration, manifest, and validation JSON directly in one output directory.
-Do not make `packaged/` or `subtitles/` subdirectories or duplicate config/subtitle snapshots.
+Burn subtitles into the video picture only. Put MP4 files at the task output root.
+Keep editable `subtitle-xx.txt` files in `subtitles/`, configuration in `config/`,
+manifests in `manifests/`, and validation or draft reports in `reports/`.
+Do not duplicate config/subtitle snapshots.
 When the user edits that TXT, run `packaging-reburn` (or the standalone packager's
 `reburn`) into a new directory, then validate the new MP4.
 

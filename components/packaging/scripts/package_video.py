@@ -51,6 +51,27 @@ def subtitle_filename(plan_id: str) -> str:
     return f"subtitle-{plan_id}.txt"
 
 
+def subtitle_output(output_dir: Path, plan_id: str) -> Path:
+    return output_dir / "subtitles" / subtitle_filename(plan_id)
+
+
+def relocated_config(config_path: Path, rows: list[dict], snapshots: list[Path], target: Path) -> dict:
+    """Keep a copied config usable after moving it into the output directory."""
+    config = read(config_path)
+    if config.get("subtitle_font_path"):
+        config["subtitle_font_path"] = rows[0]["subtitle_style"]["font"]["path"]
+    for original, prepared, subtitle in zip(config["outputs"], rows, snapshots):
+        original["input_path"] = prepared["input"]["path"]
+        subtitle_key = "subtitle_txt" if original.get("subtitle_txt") else "subtitle_srt"
+        original[subtitle_key] = os.path.relpath(subtitle, target.parent)
+        for key in ("nameplate", "disclaimer", "bgm"):
+            if prepared[key]:
+                original[key]["path"] = prepared[key]["path"]
+        for item, resolved in zip(original.get("text_pins", []), prepared["text_pins"]):
+            item["path"] = resolved["path"]
+    return config
+
+
 def sha(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -243,7 +264,7 @@ def draft_one(input_path: Path, plan_id: str, output_dir: Path) -> dict:
     if not PLAN_ID.fullmatch(plan_id):
         raise ValueError(f"unsafe plan ID: {plan_id}")
     video_spec(input_path)
-    output = output_dir / subtitle_filename(plan_id)
+    output = subtitle_output(output_dir, plan_id)
     if output.exists():
         raise FileExistsError(output)
     source_script = ROOT / "components/semantic/scripts/v9_source_asr.py"
@@ -314,7 +335,7 @@ def draft_batch(delivery_manifest: Path, output_dir: Path) -> dict:
     rows = [draft_one(Path(row["output_path"]), row["plan_id"], output_dir) for row in manifest["results"]]
     report = {"schema": "video-montage-subtitle-draft/v1", "delivery_manifest_path": str(delivery_manifest.resolve()),
               "delivery_manifest_sha256": sha(delivery_manifest), "results": rows}
-    atomic(output_dir / "subtitle_draft.json", report)
+    atomic(output_dir / "reports" / "subtitle_draft.json", report)
     return report
 
 
@@ -567,8 +588,8 @@ def render(config_path: Path, output_dir: Path, manifest_path: Path, delivery_ma
             raise ValueError("passing controller validation bound to clean delivery required")
         expected = {item["plan_id"]: item["output_sha256"] for item in delivery["results"]}
     rows = prepared_rows(config_path, expected)
-    snapshots = [output_dir / subtitle_filename(row["plan_id"]) for row in rows]
-    config_snapshot = output_dir / config_path.name
+    snapshots = [subtitle_output(output_dir, row["plan_id"]) for row in rows]
+    config_snapshot = output_dir / "config" / config_path.name
     copies = [(config_path, config_snapshot)] + [
         (Path(row["subtitles"]["path"]), snapshot) for row, snapshot in zip(rows, snapshots)
     ]
@@ -586,10 +607,11 @@ def render(config_path: Path, output_dir: Path, manifest_path: Path, delivery_ma
     results = [render_one(row, output_dir) for row in rows]
     for row, result, snapshot in zip(rows, results, snapshots):
         if Path(row["subtitles"]["path"]).resolve() != snapshot.resolve():
+            snapshot.parent.mkdir(parents=True, exist_ok=True)
             snapshot.write_bytes(Path(row["subtitles"]["path"]).read_bytes())
         result["subtitle_snapshot"] = {"path": str(snapshot.resolve()), "sha256": sha(snapshot)}
     if config_path.resolve() != config_snapshot.resolve():
-        config_snapshot.write_bytes(config_path.read_bytes())
+        atomic(config_snapshot, relocated_config(config_path, rows, snapshots, config_snapshot))
     manifest = {"schema": "video-montage-packaging-delivery/v1", "mode": "complete_montage" if delivery_manifest else "standalone_test",
                 "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
                 "subtitle_style": rows[0]["subtitle_style"],
@@ -636,7 +658,7 @@ def reburn(previous_manifest_path: Path, plan_id: str, subtitle_txt: Path, outpu
         if font["sha256"] != SUBTITLE_FONT_SHA256:
             raise ValueError("previous subtitle font differs from the bundled W8 font")
     output_dir.mkdir(parents=True, exist_ok=True)
-    config_path = output_dir / "reburn_config.json"
+    config_path = output_dir / "config" / "reburn_config.json"
     config = {"schema": SCHEMA, "outputs": rows}
     atomic(config_path, config)
     delivery = Path(previous["clean_delivery_path"]) if previous.get("clean_delivery_path") else None
@@ -718,7 +740,7 @@ def validate(manifest_path: Path, report_path: Path, review_path: Path | None = 
     if not config_path.is_file() or sha(config_path) != manifest.get("config_sha256"):
         failures.append("config_changed")
     config_snapshot = Path(str(manifest.get("config_snapshot_path") or ""))
-    if not config_snapshot.is_file() or sha(config_snapshot) != manifest.get("config_snapshot_sha256") or manifest.get("config_snapshot_sha256") != manifest.get("config_sha256"):
+    if not config_snapshot.is_file() or sha(config_snapshot) != manifest.get("config_snapshot_sha256"):
         failures.append("config_snapshot_changed")
     clean_path = manifest.get("clean_delivery_path")
     if clean_path:
