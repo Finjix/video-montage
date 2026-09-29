@@ -184,13 +184,14 @@ def parse_srt(path: Path, total_ms: int) -> list[dict]:
             raise ValueError("invalid SRT cue")
         start_text, end_text = lines[0].split(" --> ", 1)
         start, end = parse_timestamp(start_text), parse_timestamp(end_text)
-        text = "\n".join(lines[1:]).strip()
-        if (not text or len(text.splitlines()) > 2 or any(display_width(line) > 28 for line in text.splitlines())
+        caption_lines = [line.strip() for line in lines[1:]]
+        if (not caption_lines or any(not line or display_width(line) > 28 for line in caption_lines)
                 or not 0 <= start < end <= total_ms + 20):
-            raise ValueError("subtitle cue is empty, over two lines, too wide, or outside video")
+            raise ValueError("subtitle cue is empty, too wide, or outside video")
         if cues and start < cues[-1]["end_ms"]:
             raise ValueError("subtitle cues overlap or are out of order")
-        cues.append({"start_ms": start, "end_ms": end, "text": text})
+        for line_start, line_end, line in timed_lines(caption_lines, start, end):
+            cues.append({"start_ms": line_start, "end_ms": line_end, "text": line})
     return cues
 
 
@@ -198,18 +199,42 @@ def display_width(text: str) -> int:
     return sum(2 if ord(char) > 127 else 1 for char in text)
 
 
-def wrap_text(text: str) -> str:
+def single_line_chunks(text: str) -> list[str]:
     text = re.sub(r"\s+", "", text)
-    if display_width(text) <= 28:
-        return text
-    midpoint = len(text) // 2
-    choices = [index for index in range(1, len(text))
-               if max(display_width(text[:index]), display_width(text[index:])) <= 28]
-    if not choices:
-        raise ValueError("subtitle text is too wide for two lines")
-    boundary = min(choices, key=lambda index: abs(display_width(text[:index]) - display_width(text[index:]))
-                   + (0 if abs(index-midpoint) <= 3 else 4))
-    return text[:boundary] + "\n" + text[boundary:]
+    chunks = []
+    while text:
+        width = 0
+        index = 0
+        for char in text:
+            char_width = display_width(char)
+            if width + char_width > 28:
+                break
+            width += char_width
+            index += 1
+        word = SUBTITLE_EMPHASIS["text"]
+        word_start = text.find(word, max(0, index - len(word) + 1))
+        if 0 < word_start < index and word_start + len(word) > index:
+            index = word_start
+        chunks.append(text[:index])
+        text = text[index:]
+    return chunks
+
+
+def timed_lines(lines: list[str], start_ms: int, end_ms: int) -> list[tuple[int, int, str]]:
+    if end_ms - start_ms < len(lines):
+        raise ValueError("subtitle cue is too short to show each line")
+    total_width = sum(display_width(line) for line in lines)
+    result = []
+    elapsed_width = 0
+    cursor = start_ms
+    for index, line in enumerate(lines):
+        elapsed_width += display_width(line)
+        remaining = len(lines) - index - 1
+        boundary = end_ms if not remaining else min(end_ms - remaining,
+            max(cursor + 1, start_ms + round((end_ms - start_ms) * elapsed_width / total_width)))
+        result.append((cursor, boundary, line))
+        cursor = boundary
+    return result
 
 
 def draft_one(input_path: Path, plan_id: str, output_dir: Path) -> dict:
@@ -238,27 +263,32 @@ def draft_one(input_path: Path, plan_id: str, output_dir: Path) -> dict:
         words = segment.get("words") or [{"start": segment["start"], "end": segment["end"], "word": segment["text"]}]
         current = []
         for word in words:
-            next_text = "".join(item["word"] for item in current) + word["word"]
-            if current and (display_width(next_text) > 54 or float(word["end"]) - float(current[0]["start"]) > 3.5):
-                rows.append({"start": float(current[0]["start"]), "end": float(current[-1]["end"]), "text": wrap_text("".join(item["word"] for item in current))})
+            current_text = "".join(item["word"] for item in current)
+            candidate = current_text + word["word"]
+            title_start = candidate.find(SUBTITLE_EMPHASIS["text"])
+            cuts_title = 0 <= title_start < len(current_text) < title_start + len(SUBTITLE_EMPHASIS["text"])
+            if current and not cuts_title and float(word["end"]) - float(current[0]["start"]) > 3.5:
+                rows.append({"start": float(current[0]["start"]), "end": float(current[-1]["end"]), "text": "".join(item["word"] for item in current)})
                 current = []
             current.append(word)
             if re.search(r"[。！？!?]$", str(word["word"])) and float(word["end"]) - float(current[0]["start"]) >= 0.7:
-                rows.append({"start": float(current[0]["start"]), "end": float(current[-1]["end"]), "text": wrap_text("".join(item["word"] for item in current))})
+                rows.append({"start": float(current[0]["start"]), "end": float(current[-1]["end"]), "text": "".join(item["word"] for item in current)})
                 current = []
         if current:
-            rows.append({"start": float(current[0]["start"]), "end": float(current[-1]["end"]), "text": wrap_text("".join(item["word"] for item in current))})
+            rows.append({"start": float(current[0]["start"]), "end": float(current[-1]["end"]), "text": "".join(item["word"] for item in current)})
     if not rows:
         raise RuntimeError("Whisper produced no subtitle cues")
     duration_ms = round(video_spec(input_path)["duration"] * 1000)
     blocks = []
     previous_end = 0
-    for index, row in enumerate(rows, 1):
+    for row in rows:
         start = max(previous_end, round(row["start"] * 1000))
         end = min(duration_ms, max(start + 100, round(row["end"] * 1000)))
         if start >= end:
             continue
-        blocks.append(f"{index}\n{format_timestamp(start)} --> {format_timestamp(end)}\n{row['text']}")
+        chunks = single_line_chunks(row["text"])
+        for chunk_start, chunk_end, chunk in timed_lines(chunks, start, end):
+            blocks.append(f"{len(blocks) + 1}\n{format_timestamp(chunk_start)} --> {format_timestamp(chunk_end)}\n{chunk}")
         previous_end = end
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text("\n\n".join(blocks) + "\n", encoding="utf-8")
@@ -353,6 +383,8 @@ def pad_flower_word(clean: str, word: str, ass: dict, emphasis: dict) -> str:
 
 
 def write_ass(path: Path, cues: list[dict], style: dict, *, render_width: int = 1440) -> None:
+    if any("\n" in cue["text"] or "\r" in cue["text"] for cue in cues):
+        raise ValueError("ASS subtitle cues must contain one line")
     ass = style["ass"]
     header = f"""[Script Info]
 ScriptType: v4.00+

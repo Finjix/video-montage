@@ -112,7 +112,7 @@ class PackagingContractTests(unittest.TestCase):
         with_subtitle_track = {**self.spec, "subtitle_streams": 1}
         self.assertFalse(packaging.packaged_streams_ok(with_subtitle_track))
 
-    def test_default_subtitle_style_and_multiline_ass(self):
+    def test_default_subtitle_style_and_single_line_ass(self):
         style = self.prepare()[0]["subtitle_style"]
         self.assertEqual({"path": str(self.font), "sha256": packaging.sha(self.font)}, style["font"])
         self.assertEqual(-1300, style["capcut_reference"]["y"])
@@ -122,29 +122,33 @@ class PackagingContractTests(unittest.TestCase):
         self.assertEqual(203, style["emphasis"]["ass_font_size"])
         self.assertEqual("pastel_cyan_extrusion_v3", style["emphasis"]["effect"])
         ass = self.root / "sample.ass"
-        packaging.write_ass(ass, [{"start_ms": 0, "end_ms": 900, "text": "是兄弟就来\n第二行"}], style)
+        packaging.write_ass(ass, [{"start_ms": 0, "end_ms": 900, "text": "是兄弟就来"}], style)
         content = ass.read_text(encoding="utf-8-sig")
         self.assertIn("PlayResX: 1920\nPlayResY: 3414", content)
         self.assertIn("WenYue XinQingNianTi J W8,187,&H0000DEFF", content)
         self.assertIn(",1,10,0,5,0,0,0,1", content)
-        self.assertIn(r"{\pos(960,2357)}是兄弟就来\N第二行", content)
+        self.assertIn(r"{\pos(960,2357)}是兄弟就来", content)
+        with self.assertRaisesRegex(ValueError, "one line"):
+            packaging.write_ass(ass, [{"start_ms": 0, "end_ms": 900, "text": "第一行\n第二行"}], style)
 
     def test_every_game_title_occurrence_uses_size_13(self):
         style = self.prepare()[0]["subtitle_style"]
         ass = self.root / "emphasis.ass"
         packaging.write_ass(ass, [
             {"start_ms": 0, "end_ms": 900, "text": "玩无尽冬日，再玩无尽冬日"},
-            {"start_ms": 900, "end_ms": 1800, "text": "普通字幕\n无尽冬日"},
+            {"start_ms": 900, "end_ms": 1350, "text": "普通字幕"},
+            {"start_ms": 1350, "end_ms": 1800, "text": "无尽冬日"},
         ], style)
         content = ass.read_text(encoding="utf-8-sig")
         base_lines = [line for line in content.splitlines() if line.startswith("Dialogue: 0,")]
-        self.assertEqual(2, len(base_lines))
+        self.assertEqual(3, len(base_lines))
         enlarged = r"{\fs203\alpha&HFF&}无尽冬日{\fs187\alpha&H00&}"
         self.assertEqual(3, "\n".join(base_lines).count(enlarged))
         gap = r"{\fs100\fscx280}\h{\fs187\fscx100}"
         self.assertIn(f"玩{gap}{enlarged}{gap}，再玩{gap}{enlarged}", base_lines[0])
-        self.assertIn(f"普通字幕\\N{enlarged}", base_lines[1])
-        self.assertEqual(30, content.count("Dialogue: "))
+        self.assertIn("普通字幕", base_lines[1])
+        self.assertIn(enlarged, base_lines[2])
+        self.assertEqual(31, content.count("Dialogue: "))
         self.assertIn(r"\clip(1,m ", content)
         self.assertIn(r"{\alpha&H00&}无{\alpha&HFF&}尽", content)
 
@@ -155,7 +159,7 @@ class PackagingContractTests(unittest.TestCase):
         font_dir.mkdir()
         (font_dir / "font.otf").write_bytes((packaging.ROOT / "components/packaging/assets/fonts/WenYue-XinQingNianTi-W8.otf").read_bytes())
         style = self.prepare()[0]["subtitle_style"]
-        for text in ["玩无尽冬日啊", "我也是刷着广告\n才入坑的无尽冬日"]:
+        for text in ["玩无尽冬日啊", "才入坑的无尽冬日"]:
             ass = self.root / "full.ass"
             packaging.write_ass(ass, [dict(start_ms=0, end_ms=100, text=text)], style)
             content = ass.read_text(encoding="utf-8-sig")
@@ -189,7 +193,7 @@ class PackagingContractTests(unittest.TestCase):
         other.write_bytes(self.font.read_bytes())
         self.assertEqual(str(other), self.prepare()[0]["subtitle_style"]["font"]["path"])
 
-    def test_overlong_cue_is_rejected_and_two_lines_are_allowed(self):
+    def test_overlong_cue_is_rejected_and_multiple_lines_are_sequential(self):
         self.srt.write_text("1\n00:00:00,000 --> 00:00:00,900\n" + "中" * 15 + "\n", encoding="utf-8")
         self.row["subtitle_sha256"] = packaging.sha(self.srt)
         self.write_config()
@@ -198,14 +202,19 @@ class PackagingContractTests(unittest.TestCase):
         self.srt.write_text("1\n00:00:00,000 --> 00:00:00,900\n第一行\n第二行\n", encoding="utf-8")
         self.row["subtitle_sha256"] = packaging.sha(self.srt)
         self.write_config()
-        self.assertEqual("第一行\n第二行", self.prepare()[0]["cues"][0]["text"])
+        self.assertEqual(["第一行", "第二行"], [cue["text"] for cue in self.prepare()[0]["cues"]])
+        self.assertEqual([(0, 450), (450, 900)],
+                         [(cue["start_ms"], cue["end_ms"]) for cue in self.prepare()[0]["cues"]])
 
-    def test_wrap_text_keeps_each_line_within_new_limit(self):
-        wrapped = packaging.wrap_text("中" * 27)
-        self.assertEqual(2, len(wrapped.splitlines()))
-        self.assertTrue(all(packaging.display_width(line) <= 28 for line in wrapped.splitlines()))
-        with self.assertRaisesRegex(ValueError, "too wide"):
-            packaging.wrap_text("中" * 29)
+    def test_long_draft_text_is_split_into_timed_single_lines(self):
+        chunks = packaging.single_line_chunks("中" * 29)
+        self.assertEqual(["中" * 14, "中" * 14, "中"], chunks)
+        self.assertEqual(["中" * 12, "无尽冬日后续"], packaging.single_line_chunks("中" * 12 + "无尽冬日后续"))
+        self.assertTrue(all(packaging.display_width(line) <= 28 for line in chunks))
+        timed = packaging.timed_lines(chunks, 0, 900)
+        self.assertEqual(0, timed[0][0])
+        self.assertEqual(900, timed[-1][1])
+        self.assertTrue(all(a[1] == b[0] for a, b in zip(timed, timed[1:])))
 
     def test_ffmpeg_font_fallback_is_rejected(self):
         with self.assertRaisesRegex(RuntimeError, "did not select"):
