@@ -69,7 +69,7 @@ def decode_frame(ffmpeg: str, source: str, requested_time: float, output: Path, 
     # Input is decoded through the target timestamp. The select filter emits the
     # first decoded frame at or after the requested point, then showinfo exposes its source PTS.
     filter_value = f"select='gte(t\\,{requested_time:.6f})',showinfo"
-    command = [ffmpeg, "-hide_banner", "-loglevel", "info", "-nostdin", "-i", source, "-an", "-vf", filter_value, "-frames:v", "1", "-vsync", "0", "-q:v", "2", "-y", str(output)]
+    command = [ffmpeg, "-hide_banner", "-loglevel", "info", "-nostdin", "-i", source, "-an", "-vf", filter_value, "-frames:v", "1", "-fps_mode", "passthrough", "-q:v", "2", "-y", str(output)]
     result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace", shell=False)
     if result.returncode != 0 or not output.is_file():
         raise RuntimeError(f"FFMPEG_FRAME_EXTRACTION_FAILED: exit={result.returncode} stderr={result.stderr[-500:]}")

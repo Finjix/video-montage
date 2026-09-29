@@ -79,7 +79,7 @@ def extract_boundary(video: Path, pid: str, cut_index: int, kind: str, boundary:
     frames_dir.mkdir(parents=True, exist_ok=True)
     pattern = frames_dir / "%06d.jpg"
     vf = f"select='between(n\\,{start}\\,{end})'"
-    subprocess.run([FFMPEG, "-v", "error", "-i", str(video), "-vf", vf, "-vsync", "0", "-q:v", "3", "-y", str(pattern)], check=True)
+    subprocess.run([FFMPEG, "-v", "error", "-i", str(video), "-vf", vf, "-fps_mode", "passthrough", "-q:v", "3", "-y", str(pattern)], check=True)
     files = sorted(frames_dir.glob("*.jpg"))
     expected = end - start + 1
     if len(files) != expected:

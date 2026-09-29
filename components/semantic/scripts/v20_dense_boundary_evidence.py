@@ -54,7 +54,7 @@ def build_window(source: Path, boundary: int, side: str, root: Path, fps_num: in
     frame_dir.mkdir(parents=True, exist_ok=True)
     pattern = frame_dir / "%06d.png"
     vf = f"select='between(n\\,{start}\\,{end})'"
-    subprocess.run([FFMPEG, "-v", "error", "-i", str(source), "-vf", vf, "-vsync", "0", "-y", str(pattern)], check=True)
+    subprocess.run([FFMPEG, "-v", "error", "-i", str(source), "-vf", vf, "-fps_mode", "passthrough", "-y", str(pattern)], check=True)
     files = sorted(frame_dir.glob("*.png"))
     expected = end - start + 1
     if len(files) != expected:

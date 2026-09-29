@@ -570,11 +570,14 @@ def render_one(row: dict, output_dir: Path) -> dict:
 
 
 def render(config_path: Path, output_dir: Path, manifest_path: Path, delivery_manifest: Path | None = None,
-           controller_validation: Path | None = None) -> dict:
+           controller_validation: Path | None = None, autonomous_clean: Path | None = None,
+           autonomous_clean_qc: Path | None = None) -> dict:
     if manifest_path.exists():
         raise FileExistsError(manifest_path)
     if bool(delivery_manifest) != bool(controller_validation):
         raise ValueError("complete montage packaging requires both clean delivery and controller validation")
+    if bool(autonomous_clean) != bool(autonomous_clean_qc) or (autonomous_clean and delivery_manifest):
+        raise ValueError("choose one complete montage delivery contract")
     expected = None
     if delivery_manifest:
         delivery = read(delivery_manifest)
@@ -587,6 +590,16 @@ def render(config_path: Path, output_dir: Path, manifest_path: Path, delivery_ma
                 or validation.get("manifest_sha256") != sha(delivery_manifest)):
             raise ValueError("passing controller validation bound to clean delivery required")
         expected = {item["plan_id"]: item["output_sha256"] for item in delivery["results"]}
+    if autonomous_clean:
+        delivery = read(autonomous_clean)
+        validation = read(autonomous_clean_qc)
+        if (delivery.get("schema") != "video-montage-autonomous-clean/v260929"
+                or validation.get("schema") != "video-montage-autonomous-clean-qc/v260929"
+                or validation.get("decision") != "pass"
+                or validation.get("clean_delivery", {}).get("sha256") != sha(autonomous_clean)
+                or Path(str(validation.get("clean_delivery", {}).get("path") or "")).resolve() != autonomous_clean.resolve()):
+            raise ValueError("passing autonomous clean QC bound to delivery required")
+        expected = {item["plan_id"]: item["output"]["sha256"] for item in delivery["results"]}
     rows = prepared_rows(config_path, expected)
     snapshots = [subtitle_output(output_dir, row["plan_id"]) for row in rows]
     config_snapshot = output_dir / "config" / config_path.name
@@ -612,15 +625,16 @@ def render(config_path: Path, output_dir: Path, manifest_path: Path, delivery_ma
         result["subtitle_snapshot"] = {"path": str(snapshot.resolve()), "sha256": sha(snapshot)}
     if config_path.resolve() != config_snapshot.resolve():
         atomic(config_snapshot, relocated_config(config_path, rows, snapshots, config_snapshot))
-    manifest = {"schema": "video-montage-packaging-delivery/v1", "mode": "complete_montage" if delivery_manifest else "standalone_test",
+    mode = "complete_montage" if delivery_manifest else "complete_autonomous" if autonomous_clean else "standalone_test"
+    manifest = {"schema": "video-montage-packaging-delivery/v1", "mode": mode,
                 "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
                 "subtitle_style": rows[0]["subtitle_style"],
                 "config_path": str(config_path.resolve()), "config_sha256": sha(config_path),
                 "config_snapshot_path": str(config_snapshot.resolve()), "config_snapshot_sha256": sha(config_snapshot),
-                "clean_delivery_path": str(delivery_manifest.resolve()) if delivery_manifest else None,
-                "clean_delivery_sha256": sha(delivery_manifest) if delivery_manifest else None,
-                "controller_validation_path": str(controller_validation.resolve()) if controller_validation else None,
-                "controller_validation_sha256": sha(controller_validation) if controller_validation else None,
+                "clean_delivery_path": str((delivery_manifest or autonomous_clean).resolve()) if delivery_manifest or autonomous_clean else None,
+                "clean_delivery_sha256": sha(delivery_manifest or autonomous_clean) if delivery_manifest or autonomous_clean else None,
+                "controller_validation_path": str((controller_validation or autonomous_clean_qc).resolve()) if controller_validation or autonomous_clean_qc else None,
+                "controller_validation_sha256": sha(controller_validation or autonomous_clean_qc) if controller_validation or autonomous_clean_qc else None,
                 "output_count": len(results), "results": results}
     atomic(manifest_path, manifest)
     return manifest
@@ -690,11 +704,14 @@ def pcm_stats(path: Path) -> dict:
 
 
 def validate(manifest_path: Path, report_path: Path, review_path: Path | None = None,
-             authority_path: Path | None = None) -> dict:
+             authority_path: Path | None = None, autonomous_evidence: Path | None = None,
+             autonomous_review: Path | None = None) -> dict:
     manifest = read(manifest_path)
     failures = []
     if bool(review_path) != bool(authority_path):
         raise ValueError("review and independent review authority must be provided together")
+    if bool(autonomous_evidence) != bool(autonomous_review) or (autonomous_evidence and review_path):
+        raise ValueError("choose one packaging review contract")
     review = read(review_path) if review_path else None
     authority = read(authority_path) if authority_path else None
     reviews = {}
@@ -720,6 +737,54 @@ def validate(manifest_path: Path, report_path: Path, review_path: Path | None = 
             reviews = {row["plan_id"]: row for row in review_rows}
             if len(reviews) != len(review_rows):
                 failures.append("review_scope")
+    automatic = read(autonomous_evidence) if autonomous_evidence else None
+    codex = read(autonomous_review) if autonomous_review else None
+    auto_findings = {}
+    if automatic is not None:
+        if (manifest.get("mode") != "complete_autonomous"
+                or automatic.get("schema") != "video-montage-autonomous-final-evidence/v260929"
+                or automatic.get("decision") != "pass"
+                or automatic.get("manifest", {}).get("sha256") != sha(manifest_path)
+                or Path(str(automatic.get("manifest", {}).get("path") or "")).resolve() != manifest_path.resolve()
+                or codex.get("schema") != "video-montage-codex-review/v260929"
+                or codex.get("stage") != "final" or codex.get("reviewer_role") != "codex"
+                or codex.get("evidence_sha256") != sha(autonomous_evidence)):
+            failures.append("autonomous_review_binding")
+        auto_rows = automatic.get("results", [])
+        codex_rows = codex.get("outputs", [])
+        if (not isinstance(auto_rows, list) or not isinstance(codex_rows, list)
+                or len(auto_rows) != len(manifest.get("results", []))
+                or len(codex_rows) != len(auto_rows)):
+            failures.append("autonomous_review_scope")
+        else:
+            auto_by_id = {row.get("plan_id"): row for row in auto_rows}
+            codex_by_id = {row.get("plan_id"): row for row in codex_rows}
+            ids = {row.get("plan_id") for row in manifest.get("results", [])}
+            if len(auto_by_id) != len(auto_rows) or len(codex_by_id) != len(codex_rows) or set(auto_by_id) != ids or set(codex_by_id) != ids:
+                failures.append("autonomous_review_scope")
+            else:
+                auto_findings = codex_by_id
+                for item in manifest["results"]:
+                    pid = item["plan_id"]
+                    measured, finding = auto_by_id[pid], codex_by_id[pid]
+                    if (measured.get("decision") != "pass" or measured.get("asr_match") is not True
+                            or measured.get("subtitle_timing_pass") is not True
+                            or not isinstance(measured.get("cut_pcm"), list)
+                            or any(cut.get("decision") != "pass" for cut in measured["cut_pcm"])
+                            or measured.get("output", {}).get("sha256") != item.get("output_sha256")
+                            or Path(str(measured.get("output", {}).get("path") or "")).resolve() != Path(item["output_path"]).resolve()
+                            or measured.get("metrics", {}).get("clipped_samples") != 0
+                            or measured.get("subtitle_cue_count") != item.get("subtitles", {}).get("cue_count")
+                            or (measured.get("voice_over_bgm_db") is not None and measured["voice_over_bgm_db"] < 6)
+                            or finding.get("output_sha256") != item.get("output_sha256")
+                            or any(finding.get(name) is not True for name in ("visual_pass", "subtitle_pass", "overlay_pass"))
+                            or not finding.get("reason")):
+                        failures.append(f"autonomous_review:{pid}")
+                    for frame in measured.get("frames", []):
+                        path = Path(str(frame.get("path") or ""))
+                        if not path.is_file() or sha(path) != frame.get("sha256"):
+                            failures.append(f"autonomous_frame:{pid}")
+                            break
     if manifest.get("schema") != "video-montage-packaging-delivery/v1":
         failures.append("schema")
     style = manifest.get("subtitle_style")
@@ -750,9 +815,17 @@ def validate(manifest_path: Path, report_path: Path, review_path: Path | None = 
         controller = Path(str(manifest.get("controller_validation_path") or ""))
         if not controller.is_file() or sha(controller) != manifest.get("controller_validation_sha256"):
             failures.append("controller_validation_changed")
-        elif (read(controller).get("decision") != "pass"
-              or read(controller).get("manifest_sha256") != manifest.get("clean_delivery_sha256")):
-            failures.append("controller_validation_binding")
+        else:
+            clean_report = read(controller)
+            if manifest.get("mode") == "complete_autonomous":
+                if (read(clean).get("schema") != "video-montage-autonomous-clean/v260929"
+                        or clean_report.get("schema") != "video-montage-autonomous-clean-qc/v260929"
+                        or clean_report.get("decision") != "pass"
+                        or clean_report.get("clean_delivery", {}).get("sha256") != manifest.get("clean_delivery_sha256")):
+                    failures.append("autonomous_clean_validation_binding")
+            elif (clean_report.get("decision") != "pass"
+                  or clean_report.get("manifest_sha256") != manifest.get("clean_delivery_sha256")):
+                failures.append("controller_validation_binding")
     checks = []
     results = manifest.get("results", [])
     if manifest.get("output_count") != len(results) or not results:
@@ -789,7 +862,7 @@ def validate(manifest_path: Path, report_path: Path, review_path: Path | None = 
             except Exception as exc:
                 changes.append(f"decode:{exc}")
                 audio = None
-        finding = reviews.get(plan_id)
+        finding = reviews.get(plan_id) or auto_findings.get(plan_id)
         if review is not None and (not finding or finding.get("output_sha256") != row.get("output_sha256")
                                    or finding.get("visual_pass") is not True or finding.get("audio_pass") is not True
                                    or finding.get("subtitle_pass") is not True or finding.get("overlay_pass") is not True):
@@ -799,18 +872,21 @@ def validate(manifest_path: Path, report_path: Path, review_path: Path | None = 
                        "visual_review": {"subtitle_cues": row["subtitles"]["cue_count"], "nameplate": bool(row.get("nameplate")),
                                          "text_pins": len(row.get("text_pins", [])), "disclaimer": bool(row.get("disclaimer")),
                                          "status": "pass" if finding and finding.get("visual_pass") is True else "pending_review"},
-                       "sound_review": {"bgm": bool(row.get("bgm")), "status": "pass" if finding and finding.get("audio_pass") is True else "pending_review"}})
+                       "sound_review": {"bgm": bool(row.get("bgm")), "status": "pass" if automatic is not None and not any(f.startswith(f"autonomous_review:{plan_id}") for f in failures) else "pass" if finding and finding.get("audio_pass") is True else "pending_review"}})
         failures += [f"{plan_id}:{change}" for change in changes]
     if review is not None and set(reviews) != {row.get("plan_id") for row in results} and "review_scope" not in failures:
         failures.append("review_scope")
-    decision = "reject" if failures else "pass" if review is not None else "technical_pass_pending_review"
+    decision = "reject" if failures else "pass" if review is not None or automatic is not None else "technical_pass_pending_review"
     report = {"schema": "video-montage-packaging-validation/v1", "decision": decision,
               "manifest_path": str(manifest_path.resolve()), "manifest_sha256": sha(manifest_path),
               "review_path": str(review_path.resolve()) if review_path else None,
               "review_sha256": sha(review_path) if review_path else None,
               "review_authority_path": str(authority_path.resolve()) if authority_path else None,
               "review_authority_sha256": sha(authority_path) if authority_path else None,
-              "independent_review": "pass" if review is not None and not any("review" in failure for failure in failures) else "pending_or_rejected",
+              "autonomous_evidence_sha256": sha(autonomous_evidence) if autonomous_evidence else None,
+              "autonomous_review_sha256": sha(autonomous_review) if autonomous_review else None,
+              "independent_review": "not_applicable" if automatic is not None else "pass" if review is not None and not any("review" in failure for failure in failures) else "pending_or_rejected",
+              "autonomous_review": "pass" if automatic is not None and not failures else "pending_or_rejected" if automatic is not None else "not_applicable",
               "failures": failures, "results": checks}
     atomic(report_path, report)
     return report
@@ -832,6 +908,8 @@ def main() -> int:
     render_cmd.add_argument("--manifest", type=Path, required=True)
     render_cmd.add_argument("--delivery-manifest", type=Path)
     render_cmd.add_argument("--controller-validation", type=Path)
+    render_cmd.add_argument("--autonomous-clean", type=Path)
+    render_cmd.add_argument("--autonomous-clean-qc", type=Path)
     reburn_cmd = sub.add_parser("reburn")
     reburn_cmd.add_argument("--previous-manifest", type=Path, required=True)
     reburn_cmd.add_argument("--plan-id", required=True)
@@ -843,6 +921,8 @@ def main() -> int:
     check.add_argument("--report", type=Path, required=True)
     check.add_argument("--review", type=Path)
     check.add_argument("--review-authority", type=Path)
+    check.add_argument("--autonomous-evidence", type=Path)
+    check.add_argument("--autonomous-review", type=Path)
     args = parser.parse_args()
     if args.command == "draft":
         result = draft_one(args.input.resolve(), args.plan_id, args.output_dir.resolve())
@@ -851,14 +931,18 @@ def main() -> int:
     elif args.command == "render":
         result = render(args.config.resolve(), args.output_dir.resolve(), args.manifest.resolve(),
                         args.delivery_manifest.resolve() if args.delivery_manifest else None,
-                        args.controller_validation.resolve() if args.controller_validation else None)
+                        args.controller_validation.resolve() if args.controller_validation else None,
+                        args.autonomous_clean.resolve() if args.autonomous_clean else None,
+                        args.autonomous_clean_qc.resolve() if args.autonomous_clean_qc else None)
     elif args.command == "reburn":
         result = reburn(args.previous_manifest.resolve(), args.plan_id, args.subtitle_txt.resolve(),
                         args.output_dir.resolve(), args.manifest.resolve())
     else:
         result = validate(args.manifest.resolve(), args.report.resolve(),
                           args.review.resolve() if args.review else None,
-                          args.review_authority.resolve() if args.review_authority else None)
+                          args.review_authority.resolve() if args.review_authority else None,
+                          args.autonomous_evidence.resolve() if args.autonomous_evidence else None,
+                          args.autonomous_review.resolve() if args.autonomous_review else None)
     print(json.dumps(result, ensure_ascii=False))
     return 0 if result.get("decision") != "reject" else 2
 
