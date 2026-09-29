@@ -4,7 +4,7 @@
 
 ## 单条视频
 
-以下命令从项目根目录运行，使用随包 Python。先在输出目录根部生成 `subtitle-demo-01.txt`，检查并修改文字和时间；再在同一目录编写配置。TXT 内使用带时间码的字幕格式，仅供编辑和烧录。每个时间点最多显示一行；同一条时间码内手工写入多行时，会按文字显示宽度分配时长，依次显示。
+以下命令从项目根目录运行，使用随包 Python。先在输出目录根部生成 `subtitle-demo-01.txt`，检查并修改文字和时间；再在同一目录编写配置。TXT 内使用带时间码的字幕格式，仅供编辑和烧录。每个时间点最多显示一行；同一条时间码内手工写入多行时，会按文字显示宽度分配时长，依次显示。每行至少需要 20 毫秒，不足时会拒绝该时间码。
 
 ```powershell
 dependencies\python\python.exe components\packaging\scripts\package_video.py draft --input D:\input.mp4 --plan-id demo-01 --output-dir D:\job\output

@@ -8,9 +8,11 @@ import hashlib
 import json
 import os
 import subprocess
+import sys
 from fractions import Fraction
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 from v20_frame_plan_gate import validate_plan_value
 
 

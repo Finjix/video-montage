@@ -94,6 +94,59 @@ class FrameNativeContractTests(unittest.TestCase):
         }
         self.assertEqual([], gate.validate_plan_value(plan))
 
+    def test_interleaved_return_cannot_replay_source_frames(self):
+        first = {
+            "source_path": "first.mp4", "source_sha256": "a" * 64,
+            "source_in_frame": 137, "speech_end_frame": 913,
+            "source_out_frame_exclusive": 915, "source_fps_num": 60,
+            "source_fps_den": 1,
+        }
+        middle = {
+            **first, "source_path": "middle.mp4", "source_sha256": "b" * 64,
+            "source_in_frame": 620, "speech_end_frame": 1147,
+            "source_out_frame_exclusive": 1154,
+        }
+        returned = {
+            **first, "source_path": "renamed-first.mp4",
+            "source_in_frame": 912, "speech_end_frame": 1197,
+            "source_out_frame_exclusive": 1202,
+        }
+        self.assertIn(
+            "segment[2]:source_frames_replayed:segment[0]:912-914",
+            gate.validate_plan_value({"segments": [first, middle, returned]}),
+        )
+        self.assertEqual([], gate.validate_plan_value({"segments": [first, middle]}))
+
+    def test_forward_same_source_ranges_remain_valid(self):
+        base = {
+            "source_path": "source.mp4", "source_sha256": "a" * 64,
+            "source_fps_num": 60, "source_fps_den": 1,
+        }
+        first = {**base, "source_in_frame": 100, "speech_end_frame": 148, "source_out_frame_exclusive": 150}
+        adjacent = {**base, "source_in_frame": 148, "speech_end_frame": 198, "source_out_frame_exclusive": 200}
+        other = {**base, "source_path": "other.mp4", "source_sha256": "b" * 64,
+                 "source_in_frame": 0, "speech_end_frame": 48, "source_out_frame_exclusive": 50}
+        later = {**base, "source_in_frame": 210, "speech_end_frame": 258, "source_out_frame_exclusive": 260}
+        self.assertEqual([], gate.validate_plan_value({"segments": [first, adjacent, other, later]}))
+        renamed_adjacent = {**adjacent, "source_path": "renamed-source.mp4"}
+        self.assertTrue(any("source_frames_replayed" in error for error in
+                            gate.validate_plan_value({"segments": [first, renamed_adjacent]})))
+        different_speed = {**adjacent, "speed": 1.1}
+        self.assertTrue(any("source_frames_replayed" in error for error in
+                            gate.validate_plan_value({"segments": [first, different_speed]})))
+        contained = {**base, "source_in_frame": 120, "speech_end_frame": 138, "source_out_frame_exclusive": 140}
+        self.assertTrue(any("source_frames_replayed" in error for error in
+                            gate.validate_plan_value({"segments": [first, contained]})))
+
+    def test_source_return_is_marked_for_visual_review(self):
+        segments = [
+            {"source_path": "first.mp4", "source_sha256": "a" * 64},
+            {"source_path": "middle.mp4", "source_sha256": "b" * 64},
+            {"source_path": "renamed-first.mp4", "source_sha256": "a" * 64},
+        ]
+        self.assertIsNone(cut_smoke.prior_source_segment_index(segments, 1))
+        self.assertEqual(1, cut_smoke.prior_source_segment_index(segments, 2))
+
     def test_frame_delete_registry_merges_adjacent_ranges(self):
         value = {"schema": repair.SCHEMA, "fps": 60, "ranges": [[10, 11], [12, 15], [30, 30]], "protected_spoken_ranges_60fps_inclusive": []}
         self.assertEqual([[10, 15], [30, 30]], repair.normalize_ranges(value, 100, 60))

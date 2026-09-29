@@ -4,6 +4,7 @@ import importlib.util
 import json
 import subprocess
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -206,6 +207,17 @@ class PackagingContractTests(unittest.TestCase):
         self.assertEqual([(0, 450), (450, 900)],
                          [(cue["start_ms"], cue["end_ms"]) for cue in self.prepare()[0]["cues"]])
 
+    def test_subtitle_lines_must_be_visible_at_60_fps(self):
+        self.srt.write_text("1\n00:00:00,000 --> 00:00:00,003\nA\nB\nC\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "too short"):
+            packaging.parse_srt(self.srt, 1000)
+        self.srt.write_text("1\n00:00:01,000 --> 00:00:01,020\nA\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "outside video"):
+            packaging.parse_srt(self.srt, 1000)
+        lines = packaging.timed_lines(["A", "B", "C"], 3, 63)
+        self.assertEqual([(3, 23), (23, 43), (43, 63)], [(start, end) for start, end, _ in lines])
+        self.assertTrue(all(packaging.ass_time(start) != packaging.ass_time(end) for start, end, _ in lines))
+
     def test_long_draft_text_is_split_into_timed_single_lines(self):
         chunks = packaging.single_line_chunks("中" * 29)
         self.assertEqual(["中" * 14, "中" * 14, "中"], chunks)
@@ -215,6 +227,27 @@ class PackagingContractTests(unittest.TestCase):
         self.assertEqual(0, timed[0][0])
         self.assertEqual(900, timed[-1][1])
         self.assertTrue(all(a[1] == b[0] for a, b in zip(timed, timed[1:])))
+
+    def test_draft_preserves_english_word_spaces(self):
+        self.assertEqual(["This is a test"], packaging.single_line_chunks("This   is a test"))
+
+    def test_draft_keeps_emphasis_word_together_across_time_limit(self):
+        words = [{"start": 0.0, "end": 3.4, "word": "前"},
+                 {"start": 3.4, "end": 3.45, "word": "无"},
+                 {"start": 3.45, "end": 3.6, "word": "尽"},
+                 {"start": 3.6, "end": 3.7, "word": "冬"},
+                 {"start": 3.7, "end": 3.8, "word": "日"}]
+        asr = types.SimpleNamespace(
+            build_model=lambda *args: (None, "cpu", None),
+            transcribe=lambda *args: ({"segments": [{"words": words}]}, None))
+        spec = types.SimpleNamespace(loader=types.SimpleNamespace(exec_module=lambda module: None))
+        output = self.root / "draft"
+        with patch.object(packaging, "video_spec", return_value={"duration": 5.0}), \
+             patch.object(packaging.importlib.util, "spec_from_file_location", return_value=spec), \
+             patch.object(packaging.importlib.util, "module_from_spec", return_value=asr):
+            packaging.draft_one(self.video, "P1", output)
+        cues = packaging.parse_srt(output / "subtitle-P1.txt", 5000)
+        self.assertTrue(any("无尽冬日" in cue["text"] for cue in cues))
 
     def test_ffmpeg_font_fallback_is_rejected(self):
         with self.assertRaisesRegex(RuntimeError, "did not select"):
@@ -278,6 +311,19 @@ class PackagingContractTests(unittest.TestCase):
         self.assertEqual(str(self.srt), result["results"][0]["subtitle_snapshot"]["path"])
         self.assertFalse((output / "packaging_config_snapshot.json").exists())
         self.assertFalse((output / "subtitles").exists())
+
+    def test_render_rejects_colliding_flat_output_paths_before_encoding(self):
+        renamed_config = self.root / "P1.mp4"
+        renamed_config.write_bytes(self.config.read_bytes())
+        output = self.root / "collision-output"
+        with patch.object(packaging, "video_spec", return_value=self.spec), \
+             patch.object(packaging, "render_one") as encode:
+            with self.assertRaisesRegex(ValueError, "paths collide"):
+                packaging.render(renamed_config, output, output / "manifest.json")
+            encode.assert_not_called()
+            with self.assertRaisesRegex(ValueError, "paths collide"):
+                packaging.render(self.config, output, output / self.config.name)
+            encode.assert_not_called()
 
     def test_reburn_uses_edited_srt_and_new_config(self):
         previous = self.root / "previous.json"
@@ -352,6 +398,12 @@ class PackagingContractTests(unittest.TestCase):
                                                "audio_pass": True, "subtitle_pass": True, "overlay_pass": True}]})
         with patch.object(packaging, "video_spec", return_value=self.spec), patch.object(packaging, "run"), patch.object(packaging, "pcm_stats", return_value={"clipped_samples": 0}):
             self.assertEqual("pass", packaging.validate(manifest, self.root / "report.json", review, authority)["decision"])
+            original_review = review.read_bytes()
+            duplicate = packaging.read(review)
+            duplicate["results"].insert(0, {**duplicate["results"][0], "visual_pass": False})
+            packaging.atomic(review, duplicate)
+            self.assertIn("review_scope", packaging.validate(manifest, self.root / "report.json", review, authority)["failures"])
+            review.write_bytes(original_review)
             saved_font = self.font.read_bytes()
             self.font.write_bytes(b"changed font")
             self.assertIn("subtitle_font_changed", packaging.validate(manifest, self.root / "report.json", review, authority)["failures"])

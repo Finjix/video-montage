@@ -38,6 +38,21 @@ def audio(source: str, start: float, duration: float, output: Path) -> dict:
     return {"path": str(output.resolve()), "sha256": gate.sha_file(output), "source_start": round(start, 6), "duration": round(duration, 6)}
 
 
+def prior_source_segment_index(segments: list[dict], right_index: int) -> int | None:
+    """Find an earlier source use separated from the current cut by another clip."""
+    returned = segments[right_index]
+    source_hash = str(returned.get("source_sha256") or "").lower()
+    source_path = str(Path(returned.get("source_path") or "").resolve()).casefold()
+    for index in range(right_index - 2, -1, -1):
+        earlier = segments[index]
+        earlier_hash = str(earlier.get("source_sha256") or "").lower()
+        same_source = (source_hash == earlier_hash if source_hash and earlier_hash else
+                       source_path == str(Path(earlier.get("source_path") or "").resolve()).casefold())
+        if same_source:
+            return index + 1
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--locked-index", type=Path, required=True)
@@ -55,6 +70,7 @@ def main(argv: list[str] | None = None) -> int:
         plan = gate.load_json(plan_path)
         segments = plan["segments"]
         for cut_index, (left, right) in enumerate(zip(segments, segments[1:]), 1):
+            return_index = prior_source_segment_index(segments, cut_index)
             cut_dir = args.evidence_dir / entry["plan_id"] / f"cut_{cut_index:02d}"
             left_out = float(left["source_out"])
             right_in = float(right["source_in"])
@@ -70,7 +86,7 @@ def main(argv: list[str] | None = None) -> int:
                 {"side": "left", **audio(left["source_path"], left_audio_start, left_out - left_audio_start, cut_dir / "left_tail.wav")},
                 {"side": "right", **audio(right["source_path"], right_in, min(0.30, float(right["source_out"]) - right_in), cut_dir / "right_head.wav")},
             ]
-            rows.append({"plan_id": entry["plan_id"], "plan_sha256": entry["sha256"], "cut_index": cut_index, "left_candidate_id": left["candidate_id"], "right_candidate_id": right["candidate_id"], "left_boundary_person_id": left["boundary_close_person_id"], "right_boundary_person_id": right["boundary_open_person_id"], "frames": frames, "audio": audio_rows})
+            rows.append({"plan_id": entry["plan_id"], "plan_sha256": entry["sha256"], "cut_index": cut_index, "left_candidate_id": left["candidate_id"], "right_candidate_id": right["candidate_id"], "left_boundary_person_id": left["boundary_close_person_id"], "right_boundary_person_id": right["boundary_open_person_id"], "source_return_visual_risk": return_index is not None, "prior_source_segment_index": return_index, "frames": frames, "audio": audio_rows})
     manifest = {"schema": "semantic-cut-smoke-manifest/v260928", "created_at": datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds"), "locked_index_path": str(args.locked_index.resolve()), "locked_index_sha256": gate.sha_file(args.locked_index), "gate_report_sha256": gate.sha_file(args.gate_report), "decision": "pending_independent_review", "cuts": rows}
     gate.atomic_json(args.output, manifest)
     return 0

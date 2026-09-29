@@ -193,6 +193,23 @@ class V7RuntimeTests(unittest.TestCase):
         self.assertFalse(passed)
         self.assertIn("ADJACENT_SAME_VISIBLE_PERSON", {item["code"] for item in report["failures"]})
 
+    def test_prelock_rejects_interleaved_source_frame_replay(self):
+        first, _, returned = self.fixture.candidates
+        returned.update({
+            "source_id": first["source_id"],
+            "source_path": first["source_path"],
+            "source_sha256": first["source_sha256"],
+            "source_in": 5.0, "speech_end": 9.9, "source_out": 10.0,
+            "source_in_frame": 150, "speech_end_frame": 297,
+            "source_out_frame_exclusive": 300,
+            "first_voiced_source_time": 5.0, "last_voiced_source_time": 9.9,
+        })
+        self.fixture.plan["transitions"][1]["to_candidate_fingerprint"] = runtime.candidate_fingerprint(returned)
+        self.fixture.refresh()
+        passed, report, _ = self.run_gate("source-frame-replay")
+        self.assertFalse(passed)
+        self.assertIn("SOURCE_FRAME_REPLAY", {item["code"] for item in report["failures"]})
+
     def test_duplicate_plan_sequence_rejected(self):
         duplicate = copy.deepcopy(self.fixture.plan)
         duplicate["plan_id"] = "plan-2"

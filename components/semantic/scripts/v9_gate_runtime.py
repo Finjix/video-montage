@@ -22,6 +22,7 @@ if str(SCRIPT_ROOT) not in sys.path:
     sys.path.insert(0, str(SCRIPT_ROOT))
 
 from v20_fail_closed import audit_request_value
+from v20_frame_plan_gate import validate_source_progression
 
 try:
     from v15_content_gate import audit_plan as audit_v15_plan, audit_sol_review
@@ -524,6 +525,8 @@ def validate_and_lock(request_path: Path, output_dir: Path) -> tuple[bool, dict,
             resolved_segment["visible_person_ids"] = candidates[resolved_segment["candidate_id"]].get("visible_person_ids")
         if len(resolved) != len(segments):
             continue
+        for error in validate_source_progression(resolved):
+            gate.fail("SOURCE_FRAME_REPLAY", scope, error)
         if policy.get("max_opening_visual_family_uses") is not None:
             opening_candidate = candidates[resolved[0]["candidate_id"]]
             opening_family = str(opening_candidate.get("opening_visual_family_id") or "")

@@ -186,7 +186,7 @@ def parse_srt(path: Path, total_ms: int) -> list[dict]:
         start, end = parse_timestamp(start_text), parse_timestamp(end_text)
         caption_lines = [line.strip() for line in lines[1:]]
         if (not caption_lines or any(not line or display_width(line) > 28 for line in caption_lines)
-                or not 0 <= start < end <= total_ms + 20):
+                or not 0 <= start < end <= total_ms):
             raise ValueError("subtitle cue is empty, too wide, or outside video")
         if cues and start < cues[-1]["end_ms"]:
             raise ValueError("subtitle cues overlap or are out of order")
@@ -200,7 +200,7 @@ def display_width(text: str) -> int:
 
 
 def single_line_chunks(text: str) -> list[str]:
-    text = re.sub(r"\s+", "", text)
+    text = re.sub(r"\s+", " ", text).strip()
     chunks = []
     while text:
         width = 0
@@ -215,23 +215,25 @@ def single_line_chunks(text: str) -> list[str]:
         word_start = text.find(word, max(0, index - len(word) + 1))
         if 0 < word_start < index and word_start + len(word) > index:
             index = word_start
-        chunks.append(text[:index])
-        text = text[index:]
+        chunks.append(text[:index].rstrip())
+        text = text[index:].lstrip()
     return chunks
 
 
 def timed_lines(lines: list[str], start_ms: int, end_ms: int) -> list[tuple[int, int, str]]:
-    if end_ms - start_ms < len(lines):
+    minimum_line_ms = 20  # ASS uses centiseconds; each line must span a 60 fps frame.
+    if end_ms - start_ms < minimum_line_ms * len(lines):
         raise ValueError("subtitle cue is too short to show each line")
     total_width = sum(display_width(line) for line in lines)
+    flexible_ms = end_ms - start_ms - minimum_line_ms * len(lines)
     result = []
     elapsed_width = 0
     cursor = start_ms
     for index, line in enumerate(lines):
         elapsed_width += display_width(line)
         remaining = len(lines) - index - 1
-        boundary = end_ms if not remaining else min(end_ms - remaining,
-            max(cursor + 1, start_ms + round((end_ms - start_ms) * elapsed_width / total_width)))
+        boundary = end_ms if not remaining else (start_ms + minimum_line_ms * (index + 1)
+            + round(flexible_ms * elapsed_width / total_width))
         result.append((cursor, boundary, line))
         cursor = boundary
     return result
@@ -266,7 +268,10 @@ def draft_one(input_path: Path, plan_id: str, output_dir: Path) -> dict:
             current_text = "".join(item["word"] for item in current)
             candidate = current_text + word["word"]
             title_start = candidate.find(SUBTITLE_EMPHASIS["text"])
-            cuts_title = 0 <= title_start < len(current_text) < title_start + len(SUBTITLE_EMPHASIS["text"])
+            title = SUBTITLE_EMPHASIS["text"]
+            cuts_title = (0 <= title_start < len(current_text) < title_start + len(title)
+                          or any(current_text.endswith(title[:prefix]) and str(word["word"]).startswith(title[prefix])
+                                 for prefix in range(1, len(title))))
             if current and not cuts_title and float(word["end"]) - float(current[0]["start"]) > 3.5:
                 rows.append({"start": float(current[0]["start"]), "end": float(current[-1]["end"]), "text": "".join(item["word"] for item in current)})
                 current = []
@@ -567,6 +572,14 @@ def render(config_path: Path, output_dir: Path, manifest_path: Path, delivery_ma
     copies = [(config_path, config_snapshot)] + [
         (Path(row["subtitles"]["path"]), snapshot) for row, snapshot in zip(rows, snapshots)
     ]
+    reserved = {}
+    for path, label in [(manifest_path, "manifest"), *[(target, "snapshot") for _, target in copies],
+                        *[(output_dir / f"{row['plan_id']}{suffix}", "render")
+                          for row in rows for suffix in (".mp4", ".partial.mp4", ".ass")]]:
+        resolved = path.resolve()
+        if resolved in reserved:
+            raise ValueError(f"packaging paths collide: {reserved[resolved]} and {label}: {resolved}")
+        reserved[resolved] = label
     for source, target in copies:
         if source.resolve() != target.resolve() and target.exists():
             raise FileExistsError(f"refusing to overwrite packaging file: {target}")
@@ -677,7 +690,14 @@ def validate(manifest_path: Path, report_path: Path, review_path: Path | None = 
                 or review.get("reviewer_role") != "independent_packaging_reviewer"
                 or not review.get("reviewer_id")):
             failures.append("review_binding")
-        reviews = {row.get("plan_id"): row for row in review.get("results", []) if isinstance(row, dict)}
+        review_rows = review.get("results")
+        if (not isinstance(review_rows, list)
+                or any(not isinstance(row, dict) or not isinstance(row.get("plan_id"), str) for row in review_rows)):
+            failures.append("review_scope")
+        else:
+            reviews = {row["plan_id"]: row for row in review_rows}
+            if len(reviews) != len(review_rows):
+                failures.append("review_scope")
     if manifest.get("schema") != "video-montage-packaging-delivery/v1":
         failures.append("schema")
     style = manifest.get("subtitle_style")
@@ -759,7 +779,7 @@ def validate(manifest_path: Path, report_path: Path, review_path: Path | None = 
                                          "status": "pass" if finding and finding.get("visual_pass") is True else "pending_review"},
                        "sound_review": {"bgm": bool(row.get("bgm")), "status": "pass" if finding and finding.get("audio_pass") is True else "pending_review"}})
         failures += [f"{plan_id}:{change}" for change in changes]
-    if review is not None and set(reviews) != {row.get("plan_id") for row in results}:
+    if review is not None and set(reviews) != {row.get("plan_id") for row in results} and "review_scope" not in failures:
         failures.append("review_scope")
     decision = "reject" if failures else "pass" if review is not None else "technical_pass_pending_review"
     report = {"schema": "video-montage-packaging-validation/v1", "decision": decision,

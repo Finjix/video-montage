@@ -57,6 +57,49 @@ def _overlaps(left: int, right: int, ranges: list) -> bool:
     return any(left <= int(item[1]) and right >= int(item[0]) for item in ranges if isinstance(item, list) and len(item) == 2)
 
 
+def validate_source_progression(segments: list[dict]) -> list[str]:
+    """Reject replayed source frames while allowing adjacent forward coalescing."""
+    errors: list[str] = []
+    last_by_source: dict[str, tuple[int, int, int, int, int]] = {}
+    for index, segment in enumerate(segments):
+        if not isinstance(segment, dict) or any(
+            type(segment.get(field)) is not int for field in REQUIRED_INTEGER_FIELDS
+        ):
+            continue
+        source_hash = str(segment.get("source_sha256") or "").strip().lower()
+        source_path = str(segment.get("source_path") or "").strip()
+        if not source_hash and not source_path:
+            continue
+        identity = source_hash or str(Path(source_path).resolve()).casefold()
+        start = segment["source_in_frame"]
+        end = segment["source_out_frame_exclusive"]
+        fps = (segment["source_fps_num"], segment["source_fps_den"])
+        previous = last_by_source.get(identity)
+        if previous:
+            previous_index, previous_start, previous_end, fps_num, fps_den = previous
+            if fps != (fps_num, fps_den):
+                errors.append(f"segment[{index}]:source_fps_changed:segment[{previous_index}]")
+            elif start < previous_end:
+                previous_segment = segments[previous_index]
+                same_path = str(Path(previous_segment["source_path"]).resolve()).casefold() == str(Path(source_path).resolve()).casefold()
+                same_speed = abs(float(previous_segment.get("speed", 1.0)) - float(segment.get("speed", 1.0))) <= 1e-12
+                adjacent_forward_extension = (
+                    previous_index == index - 1
+                    and start >= previous_start
+                    and end > previous_end
+                    and same_path
+                    and same_speed
+                )
+                if not adjacent_forward_extension:
+                    errors.append(
+                        f"segment[{index}]:source_frames_replayed:segment[{previous_index}]:"
+                        f"{start}-{min(end, previous_end) - 1}"
+                    )
+        if not previous or end > previous[2]:
+            last_by_source[identity] = (index, start, end, *fps)
+    return errors
+
+
 def validate_internal_silence_compactions(plan: dict, plan_root: Path | None = None) -> list[str]:
     errors: list[str] = []
     segments = {str(item.get("segment_id") or ""): item for item in plan.get("segments", []) if isinstance(item, dict)}
@@ -144,6 +187,7 @@ def validate_plan_value(plan: dict, plan_root: Path | None = None) -> list[str]:
             errors.append(f"segment[{index}]:must_be_object")
             continue
         errors.extend(validate_segment(segment, index))
+    errors.extend(validate_source_progression(segments))
     errors.extend(validate_internal_silence_compactions(plan, plan_root))
     return errors
 
