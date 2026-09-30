@@ -26,7 +26,10 @@ try {
             throw "Installation path is not a regular directory: $target"
         }
         $marker = Join-Path $target 'SKILL.md'
-        $executor = Join-Path $target 'components\executor\scripts\three_suite_ff.py'
+        $executor = Join-Path $target 'scripts\executor\scripts\three_suite_ff.py'
+        if (-not (Test-Path -LiteralPath $executor -PathType Leaf)) {
+            $executor = Join-Path $target 'components\executor\scripts\three_suite_ff.py'
+        }
         if (-not (Test-Path -LiteralPath $marker -PathType Leaf) -or
             -not (Test-Path -LiteralPath $executor -PathType Leaf) -or
             -not (Select-String -LiteralPath $marker -Pattern '^name: video-montage$' -Quiet)) {

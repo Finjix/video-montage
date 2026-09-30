@@ -1,7 +1,6 @@
-dependencies/ffmpeg/bin/ffmpeg.exe filter=lfs diff=lfs merge=lfs -text
-dependencies/ffmpeg/bin/ffprobe.exe filter=lfs diff=lfs merge=lfs -text
-dependencies/models/models--mobiuslabsgmbh--faster-whisper-large-v3-turbo/snapshots/0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf/model.bin filter=lfs diff=lfs merge=lfs -text
-dependencies/python/Lib/site-packages/ctranslate2/ctranslate2.dll filter=lfs diff=lfs merge=lfs -text
-dependencies/python/Lib/site-packages/cv2/cv2.pyd filter=lfs diff=lfs merge=lfs -text
-dependencies/cuda/bin/*.dll filter=lfs diff=lfs merge=lfs -text
-components/semantic-analysis-training-backup-v20/PACKAGE_MANIFEST.json whitespace=cr-at-eol
+assets/dependencies/ffmpeg/bin/ffmpeg.exe filter=lfs diff=lfs merge=lfs -text
+assets/dependencies/ffmpeg/bin/ffprobe.exe filter=lfs diff=lfs merge=lfs -text
+assets/dependencies/models/models--mobiuslabsgmbh--faster-whisper-large-v3-turbo/snapshots/0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf/model.bin filter=lfs diff=lfs merge=lfs -text
+assets/dependencies/python/Lib/site-packages/ctranslate2/ctranslate2.dll filter=lfs diff=lfs merge=lfs -text
+assets/dependencies/python/Lib/site-packages/cv2/cv2.pyd filter=lfs diff=lfs merge=lfs -text
+assets/dependencies/cuda/bin/*.dll filter=lfs diff=lfs merge=lfs -text

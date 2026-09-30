@@ -10,12 +10,12 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent.parent
-PYTHON = ROOT / "dependencies/python/python.exe"
-SEMANTIC = ROOT / "components/semantic"
-CONTROLLER = ROOT / "components/controller"
-PACKAGING = ROOT / "components/packaging"
-EXECUTOR = ROOT / "components/executor"
-AUTONOMOUS = ROOT / "components/autonomous"
+PYTHON = ROOT / "assets/dependencies/python/python.exe"
+SEMANTIC = ROOT / "scripts/semantic"
+CONTROLLER = ROOT / "scripts/controller"
+PACKAGING = ROOT / "scripts/packaging"
+EXECUTOR = ROOT / "scripts/executor"
+AUTONOMOUS = ROOT / "scripts/autonomous"
 
 
 def run(name: str, command: list[str]) -> dict:
@@ -28,14 +28,13 @@ def run(name: str, command: list[str]) -> dict:
 
 def validate() -> dict:
     checks = [
-        run("runtime", [str(PYTHON), str(ROOT / "tools/verify_runtime.py")]),
+        run("runtime", [str(PYTHON), str(ROOT / "scripts/verify_runtime.py")]),
         run("semantic_tests", [str(PYTHON), "-B", "-m", "unittest", "discover", "-s", str(SEMANTIC / "tests"), "-p", "test_*.py"]),
         run("controller_tests", [str(PYTHON), "-B", "-m", "unittest", "discover", "-s", str(CONTROLLER / "tests"), "-p", "test_*.py"]),
         run("packaging_tests", [str(PYTHON), "-B", "-m", "unittest", "discover", "-s", str(PACKAGING / "tests"), "-p", "test_*.py"]),
         run("autonomous_tests", [str(PYTHON), "-B", "-m", "unittest", "discover", "-s", str(AUTONOMOUS / "tests"), "-p", "test_*.py"]),
         run("integrity_tests", [str(PYTHON), "-B", "-m", "unittest", "discover", "-s", str(ROOT / "tools"), "-p", "test_release_integrity.py"]),
-        run("single_skill", [str(PYTHON), str(ROOT / "tools/validate_skill.py"), str(ROOT / "skill/video-montage")]),
-        run("autonomous_skill", [str(PYTHON), str(ROOT / "tools/validate_skill.py"), str(ROOT / "skill/video-montage-autonomous")]),
+        run("single_skill", [str(PYTHON), str(ROOT / "scripts/validate_skill.py"), str(ROOT)]),
         run("suite_preflight", [str(PYTHON), str(EXECUTOR / "scripts/three_suite_ff.py"), "--suite-root", str(ROOT), "preflight"]),
     ]
     with tempfile.TemporaryDirectory(prefix="video-montage-check-") as temporary:

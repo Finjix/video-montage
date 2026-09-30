@@ -15,7 +15,7 @@ from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parent.parent
-EXECUTOR = ROOT / "components/executor/scripts/three_suite_ff.py"
+EXECUTOR = ROOT / "scripts/executor/scripts/three_suite_ff.py"
 PACKAGE = ROOT / "tools/package_release.py"
 
 
@@ -58,8 +58,8 @@ class ExecutorIntegrityTests(unittest.TestCase):
         executor = load_executor()
         with tempfile.TemporaryDirectory() as temporary:
             suite = Path(temporary)
-            (suite / "tools").mkdir()
-            (suite / "tools/verify_runtime.py").write_text("", encoding="utf-8")
+            (suite / "scripts").mkdir()
+            (suite / "scripts/verify_runtime.py").write_text("", encoding="utf-8")
             with patch.object(executor, "run", return_value=types.SimpleNamespace(stdout='{"decision":"reject"}')):
                 with self.assertRaisesRegex(RuntimeError, "runtime verification failed"):
                     executor.verify(suite)
@@ -72,10 +72,10 @@ class InstallationTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.base = Path(self.temporary.name)
         self.source = self.base / "source"
-        (self.source / "skill/video-montage").mkdir(parents=True)
-        (self.source / "skill/video-montage/SKILL.md").write_text("name: video-montage\n", encoding="utf-8")
-        (self.source / "components/executor/scripts").mkdir(parents=True)
-        (self.source / "components/executor/scripts/three_suite_ff.py").write_text("", encoding="utf-8")
+        self.source.mkdir(parents=True)
+        (self.source / "SKILL.md").write_text("name: video-montage\n", encoding="utf-8")
+        (self.source / "scripts/executor/scripts").mkdir(parents=True)
+        (self.source / "scripts/executor/scripts/three_suite_ff.py").write_text("", encoding="utf-8")
         self.target = self.base / "codex/skills/video-montage"
         self.legacy = self.base / "video-montage"
         self.agent_link = self.base / ".agents/skills/video-montage"
@@ -95,17 +95,47 @@ class InstallationTests(unittest.TestCase):
         self.assertFalse(self.agent_link.exists())
 
     def test_installed_skill_keeps_batch_rule_link_readable(self):
-        guide = self.source / "components/autonomous/batch-diversity.md"
+        guide = self.source / "references/autonomous/batch-diversity.md"
         guide.parent.mkdir(parents=True)
         guide.write_text("Batch diversity rules", encoding="utf-8")
-        (self.source / "skill/video-montage/SKILL.md").write_text(
-            "name: video-montage\n[batch rules](../../components/autonomous/batch-diversity.md)\n",
+        (self.source / "SKILL.md").write_text(
+            "name: video-montage\n[batch rules](references/autonomous/batch-diversity.md)\n",
             encoding="utf-8")
         with patch.object(self.deployer, "run_checked"):
             self.deployer.install(self.source, self.target, self.legacy, self.agent_link)
         skill = (self.target / "SKILL.md").read_text(encoding="utf-8")
         target = re.search(r"\]\(([^)]+)\)", skill).group(1)
         self.assertTrue((self.target / target).is_file())
+
+    def test_install_excludes_development_files_and_keeps_runtime_resources(self):
+        excluded = ("docs/guide.md", ".git/config", ".gitignore", ".gitattributes",
+                    "README.md", "install.cmd", "uninstall.cmd", "package.cmd",
+                    "tools/package_release.py", "tools/validate_release.py", "tools/uninstall.ps1",
+                    "tools/test_release_integrity.py", "scripts/autonomous/tests/test_plan.py",
+                    "scripts/semantic/records/job.json", "work/output.mp4", ".runtime/jobs/state.json")
+        required = ("assets/dependencies/python/python.exe", "scripts/verify_runtime.py", "scripts/validate_skill.py",
+                    "scripts/autonomous/scripts/autonomous_montage.py", "references/autonomous/workflow.md",
+                    "assets/packaging/fonts/style.otf", "references/semantic/semantic-contract.md",
+                    "references/workflows/autonomous-workflow.md", "agents/openai.yaml")
+        for name in (*excluded, *required):
+            path = self.source / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("fixture", encoding="utf-8")
+        with patch.object(self.deployer, "run_checked") as checked:
+            self.deployer.install(self.source, self.target, self.legacy, self.agent_link)
+        for name in excluded:
+            self.assertFalse((self.target / name).exists(), name)
+        for name in required:
+            self.assertTrue((self.target / name).is_file(), name)
+        self.assertEqual({"SKILL.md", "agents", "scripts", "references", "assets"},
+                         {path.name for path in self.target.iterdir()})
+        self.assertEqual([self.target / "SKILL.md"], list(self.target.rglob("SKILL.md")))
+        self.assertEqual((self.source / "SKILL.md").read_bytes(),
+                         (self.target / "SKILL.md").read_bytes())
+        self.assertTrue((self.target / "agents/openai.yaml").is_file())
+        commands = [call.args[1] for call in checked.call_args_list]
+        self.assertEqual(str(self.source / "tools/validate_release.py"), commands[0][-1])
+        self.assertTrue(any(command[-1].endswith("scripts\\verify_runtime.py") for command in commands[1:]))
 
     def test_migrates_legacy_install_and_links(self):
         (self.legacy / "skill/video-montage").mkdir(parents=True)
@@ -158,9 +188,9 @@ class InstallationTests(unittest.TestCase):
         self.assertIn("Press any key to close this window.", result.stdout)
 
     def test_uninstall_removes_skill_directory(self):
-        (self.target / "components/executor/scripts").mkdir(parents=True)
+        (self.target / "scripts/executor/scripts").mkdir(parents=True)
         (self.target / "SKILL.md").write_text("name: video-montage\n", encoding="utf-8")
-        (self.target / "components/executor/scripts/three_suite_ff.py").write_text("", encoding="utf-8")
+        (self.target / "scripts/executor/scripts/three_suite_ff.py").write_text("", encoding="utf-8")
         env = os.environ.copy()
         env["USERPROFILE"] = str(self.base)
         env["CODEX_HOME"] = str(self.base / "codex")
@@ -198,9 +228,9 @@ class InstallationTests(unittest.TestCase):
 
     def test_uninstall_from_installed_cmd(self):
         (self.target / "tools").mkdir(parents=True)
-        (self.target / "components/executor/scripts").mkdir(parents=True)
+        (self.target / "scripts/executor/scripts").mkdir(parents=True)
         (self.target / "SKILL.md").write_text("name: video-montage\n", encoding="utf-8")
-        (self.target / "components/executor/scripts/three_suite_ff.py").write_text("", encoding="utf-8")
+        (self.target / "scripts/executor/scripts/three_suite_ff.py").write_text("", encoding="utf-8")
         (self.target / "uninstall.cmd").write_bytes((ROOT / "uninstall.cmd").read_bytes())
         (self.target / "tools/uninstall.ps1").write_bytes((ROOT / "tools/uninstall.ps1").read_bytes())
         env = os.environ.copy()
@@ -246,16 +276,15 @@ class PackagingTests(unittest.TestCase):
                 (root / name).write_text(name, encoding="utf-8")
             for name in packager.DIRS:
                 (root / name).mkdir()
-            skill = root / "skill/video-montage"
-            skill.mkdir()
+            skill = root
             (skill / "SKILL.md").write_text('metadata:\n  version: "v260928"\n', encoding="utf-8")
-            (root / "components/semantic/records/job.json").parent.mkdir(parents=True)
-            (root / "components/semantic/records/job.json").write_text("task", encoding="utf-8")
-            (root / "components/semantic/scripts/__pycache__/cached.pyc").parent.mkdir(parents=True)
-            (root / "components/semantic/scripts/__pycache__/cached.pyc").write_text("cache", encoding="utf-8")
-            (root / "components/semantic/scripts/run.py").write_text("runtime", encoding="utf-8")
-            (root / "dependencies/python").mkdir()
-            (root / "dependencies/python/python.exe").write_text("runtime", encoding="utf-8")
+            (root / "scripts/semantic/records/job.json").parent.mkdir(parents=True)
+            (root / "scripts/semantic/records/job.json").write_text("task", encoding="utf-8")
+            (root / "scripts/semantic/scripts/__pycache__/cached.pyc").parent.mkdir(parents=True)
+            (root / "scripts/semantic/scripts/__pycache__/cached.pyc").write_text("cache", encoding="utf-8")
+            (root / "scripts/semantic/scripts/run.py").write_text("runtime", encoding="utf-8")
+            (root / "assets/dependencies/python").mkdir(parents=True)
+            (root / "assets/dependencies/python/python.exe").write_text("runtime", encoding="utf-8")
             (root / "artifacts").mkdir()
             (root / "artifacts/result.mp4").write_text("task", encoding="utf-8")
             archive_path, count = packager.build_archive(root, "v260929")
@@ -265,8 +294,8 @@ class PackagingTests(unittest.TestCase):
                 names = set(archive.namelist())
                 self.assertEqual(count, len(names))
                 self.assertIn("video-montage-v260928/install.cmd", names)
-                self.assertIn("video-montage-v260928/dependencies/python/python.exe", names)
-                self.assertIn("video-montage-v260928/components/semantic/scripts/run.py", names)
+                self.assertIn("video-montage-v260928/assets/dependencies/python/python.exe", names)
+                self.assertIn("video-montage-v260928/scripts/semantic/scripts/run.py", names)
                 self.assertFalse(any("records" in name or "__pycache__" in name or "artifacts" in name for name in names))
             repeated_path, repeated_count = packager.build_archive(root, "v260929")
             self.assertEqual(archive_path, repeated_path)
@@ -278,8 +307,8 @@ class PackagingTests(unittest.TestCase):
         packager = load_packager()
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "source"
-            (root / "skill/video-montage").mkdir(parents=True)
-            (root / "skill/video-montage/SKILL.md").write_text('  version: "v260928"\n', encoding="utf-8")
+            root.mkdir(parents=True)
+            (root / "SKILL.md").write_text('  version: "v260928"\n', encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "Archive version"):
                 packager.build_archive(root, "../wrong")
 

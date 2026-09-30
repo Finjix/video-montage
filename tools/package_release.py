@@ -14,14 +14,14 @@ from typing import Callable
 
 
 ROOT = Path(__file__).resolve().parent.parent
-DIRS = ("components", "dependencies", "docs", "skill", "tools")
-FILES = ("README.md", "install.cmd", "uninstall.cmd", "package.cmd")
+DIRS = ("agents", "scripts", "references", "assets", "docs", "tools")
+FILES = ("SKILL.md", "README.md", "install.cmd", "uninstall.cmd", "package.cmd")
 SKIP_DIRS = {".git", ".manifests", ".runtime", ".pytest_cache", "__pycache__", "artifacts", "records", "results", "output", "outputs", "work", "cache", "test"}
 SKIP_FILES = {"Thumbs.db", ".DS_Store"}
 
 
 def release_version(root: Path) -> str:
-    skill = root / "skill/video-montage/SKILL.md"
+    skill = root / "SKILL.md"
     text = skill.read_text(encoding="utf-8-sig")
     match = re.search(r'^  version: "(v\d{6})"$', text, flags=re.MULTILINE)
     if not match:
@@ -114,7 +114,7 @@ def main() -> int:
         print(f"[打包中] {message}", flush=True)
 
     progress("正在检查随包运行环境...")
-    verify = runpy.run_path(str(ROOT / "tools/verify_runtime.py"))["verify"]
+    verify = runpy.run_path(str(ROOT / "scripts/verify_runtime.py"))["verify"]
     report = verify()
     if report["decision"] != "pass":
         raise RuntimeError(f"Runtime check failed: {report['failures']}")

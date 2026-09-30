@@ -13,7 +13,7 @@ import cv2
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
-SCRIPT = ROOT / "components/packaging/scripts/package_video.py"
+SCRIPT = ROOT / "scripts/packaging/scripts/package_video.py"
 
 
 def foreground_ssim(reference: np.ndarray, rendered: np.ndarray) -> float:

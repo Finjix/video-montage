@@ -7,15 +7,15 @@ if /I "%~1"=="-NoPause" set "NO_PAUSE=1"
 if /I "%~2"=="-NoPause" set "NO_PAUSE=1"
 if /I "%~1"=="-PreflightOnly" set "ACTION=Preflight"
 if /I "%~2"=="-PreflightOnly" set "ACTION=Preflight"
-if not exist "%SUITE_DIR%dependencies\python\python.exe" (
-  echo Bundled Python is missing: "%SUITE_DIR%dependencies\python\python.exe"
+if not exist "%SUITE_DIR%assets\dependencies\python\python.exe" (
+  echo Bundled Python is missing: "%SUITE_DIR%assets\dependencies\python\python.exe"
   if not defined NO_PAUSE (
     echo Press any key to close this window.
     pause >nul
   )
   exit /b 2
 )
-"%SUITE_DIR%dependencies\python\python.exe" -X utf8 -c "import pathlib,sys; body=pathlib.Path(sys.argv[1]).read_text(encoding='utf-8-sig').split(chr(10)+'# BEGIN PYTHON DEPLOY'+chr(10),1)[1]; exec(compile(body,sys.argv[1],'exec'))" "%~f0" %*
+"%SUITE_DIR%assets\dependencies\python\python.exe" -X utf8 -c "import pathlib,sys; body=pathlib.Path(sys.argv[1]).read_text(encoding='utf-8-sig').split(chr(10)+'# BEGIN PYTHON DEPLOY'+chr(10),1)[1]; exec(compile(body,sys.argv[1],'exec'))" "%~f0" %*
 set "EXIT_CODE=%errorlevel%"
 if "%EXIT_CODE%"=="0" (
   echo %ACTION% completed successfully.
@@ -50,7 +50,9 @@ def progress(message: str) -> None:
 
 
 def run_checked(label: str, command: list[str]) -> None:
-    result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    env = os.environ.copy()
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace", env=env)
     if result.returncode:
         raise RuntimeError(f"{label} failed ({result.returncode})\n{result.stdout[-4000:]}\n{result.stderr[-4000:]}")
     if result.stdout.strip():
@@ -80,18 +82,23 @@ def copy_filter(directory: str, names: list[str], source: Path) -> set[str]:
     ignored = {name for name in names if name in {"__pycache__", ".pytest_cache"} or name.endswith(".pyc")}
     current = Path(directory).resolve()
     if current == source:
-        ignored.update({".git", ".manifests", ".runtime", "artifacts", "release", "test", "work", "output"} & set(names))
-    if current == source / "components" / "semantic":
-        ignored.update({"records"} & set(names))
+        ignored.update(set(names) - {"SKILL.md", "agents", "scripts", "references", "assets"})
+    if current.is_relative_to(source / "scripts") or current.is_relative_to(source / "references"):
+        ignored.update({"tests", "records", "__pycache__", ".pytest_cache"} & set(names))
     return ignored
 
 
 def managed_install(path: Path, *, skill_at_root: bool) -> bool:
     if not path.is_dir() or path.is_junction() or path.is_symlink():
         return False
-    marker = path / ("SKILL.md" if skill_at_root else "skill/video-montage/SKILL.md")
-    executor = path / "components/executor/scripts/three_suite_ff.py"
-    return marker.is_file() and executor.is_file() and "name: video-montage" in marker.read_text(encoding="utf-8-sig")
+    markers = [path / "SKILL.md"]
+    if not skill_at_root:
+        markers.append(path / "skill/video-montage/SKILL.md")
+    executors = [path / "scripts/executor/scripts/three_suite_ff.py",
+                 path / "components/executor/scripts/three_suite_ff.py"]
+    return any(executor.is_file() for executor in executors) and any(
+        marker.is_file() and "name: video-montage" in marker.read_text(encoding="utf-8-sig")
+        for marker in markers)
 
 
 def install(source: Path, target: Path, legacy_target: Path, agent_link: Path) -> None:
@@ -102,17 +109,18 @@ def install(source: Path, target: Path, legacy_target: Path, agent_link: Path) -
     moved: list[tuple[Path, Path]] = []
     promoted = False
     try:
+        progress("正在运行源包发布校验，请稍候...")
+        run_checked("Release validation", [str(source / "assets/dependencies/python/python.exe"),
+                                            "-X", "utf8", str(source / "tools/validate_release.py")])
         target.parent.mkdir(parents=True, exist_ok=True)
-        progress("正在复制文件，请稍候...")
+        progress("正在复制工作流必需文件，请稍候...")
         shutil.copytree(source, stage, ignore=lambda directory, names: copy_filter(directory, names, source))
-        root_skill = (source / "skill" / SKILL / "SKILL.md").read_text(encoding="utf-8-sig")
-        for name in ("semantic-workflow.md", "controller-workflow.md", "executor-workflow.md"):
-            root_skill = root_skill.replace(f"]({name})", f"](skill/{SKILL}/{name})")
-        root_skill = root_skill.replace("](../../components/", "](components/")
-        (stage / "SKILL.md").write_text(root_skill, encoding="utf-8")
-        staged_python = stage / "dependencies/python/python.exe"
-        progress("正在运行发布校验，请稍候...")
-        run_checked("Release validation", [str(staged_python), "-X", "utf8", str(stage / "tools/validate_release.py")])
+        staged_python = stage / "assets/dependencies/python/python.exe"
+        progress("正在检查精简安装副本，请稍候...")
+        run_checked("Staged runtime validation", [str(staged_python), "-X", "utf8", str(stage / "scripts/verify_runtime.py")])
+        run_checked("Staged suite preflight", [str(staged_python), "-X", "utf8",
+                                              str(stage / "scripts/executor/scripts/three_suite_ff.py"),
+                                              "--suite-root", str(stage), "preflight"])
 
         progress("正在启用安装文件...")
         if os.path.lexists(target):
@@ -132,8 +140,8 @@ def install(source: Path, target: Path, legacy_target: Path, agent_link: Path) -
         promoted = True
 
         progress("正在注册 Codex 技能...")
-        run_checked("Installed skill validation", [str(target / "dependencies/python/python.exe"),
-                                                   str(target / "tools/validate_skill.py"), str(target)])
+        run_checked("Installed skill validation", [str(target / "assets/dependencies/python/python.exe"),
+                                                   str(target / "scripts/validate_skill.py"), str(target)])
         if agent_link.is_junction() and agent_link.resolve() in {target, legacy_target / "skill" / SKILL}:
             backup = agent_link.parent / f".{SKILL}.backup-{token}"
             agent_link.rename(backup)
@@ -175,11 +183,11 @@ def main() -> None:
     if legacy_target.is_junction() or legacy_target.is_symlink() or target.is_symlink():
         raise RuntimeError("Installation directories must not be links")
 
-    python = source / "dependencies/python/python.exe"
+    python = source / "assets/dependencies/python/python.exe"
     if sys.version_info[:3] != (3, 13, 15) or sys.maxsize <= 2**32 or Path(sys.executable).resolve() != python.resolve():
         raise RuntimeError("The bundled 64-bit Python 3.13.15 is required")
     progress("正在检查运行环境...")
-    run_checked("Runtime preflight", [str(python), "-X", "utf8", str(source / "tools/verify_runtime.py")])
+    run_checked("Runtime preflight", [str(python), "-X", "utf8", str(source / "scripts/verify_runtime.py")])
     if args.PreflightOnly:
         print(json.dumps({"schema": "video-montage-preflight/v260928", "decision": "pass",
                           "version": VERSION}, ensure_ascii=False))
