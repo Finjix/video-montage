@@ -139,6 +139,16 @@ class AutonomousContractTests(unittest.TestCase):
         self.assertFalse(auto.context_corroborates_asr("欢迎无尽冬日啊", "欢迎无尽度日啊", None))
         self.assertTrue(auto.context_corroborates_asr("欢迎无尽冬日啊", "欢迎无尽度日啊", assets))
 
+    def test_subtitle_early_asr_edge_clamps_to_bound_shot(self):
+        auto.validate_subtitle_timing(2817, 4120, (2560, 3020), (3920, 4120), (2817, 9667))
+        auto.validate_subtitle_timing(11217, 14180, (10860, 11250), (14000, 14180), (11217, 18467))
+        with self.assertRaisesRegex(ValueError, "outside its rendered shot"):
+            auto.validate_subtitle_timing(2560, 4120, (2560, 3020), (3920, 4120), (2817, 9667))
+        with self.assertRaisesRegex(ValueError, "do not overlap"):
+            auto.validate_subtitle_timing(2817, 4120, (2000, 2500), (3920, 4120), (2817, 9667))
+        with self.assertRaisesRegex(ValueError, "does not follow"):
+            auto.validate_subtitle_timing(3200, 4120, (2560, 3020), (3920, 4120), (2817, 9667))
+
     def test_three_repair_rounds_stop_without_pass_receipt(self):
         job = self.root / "job"
         order = self.root / "order.json"

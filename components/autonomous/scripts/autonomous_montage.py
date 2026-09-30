@@ -264,6 +264,22 @@ def character_times(asr: dict) -> list[tuple[int, int]]:
     return times
 
 
+def validate_subtitle_timing(start: int, end: int, first: tuple[int, int],
+                             last: tuple[int, int], shot: tuple[int, int]) -> None:
+    shot_start, shot_end = shot
+    if start < shot_start or end > shot_end:
+        raise ValueError("subtitle cue appears outside its rendered shot")
+    # Word timestamps are provisional. Only clamp an edge when that word's
+    # interval still overlaps the hash-bound rendered shot; unrelated words
+    # or arbitrary timing changes must continue to fail.
+    if first[1] <= shot_start or last[0] >= shot_end:
+        raise ValueError("subtitle ASR words do not overlap their rendered shot")
+    expected_start = max(first[0], shot_start)
+    expected_end = min(last[1], shot_end)
+    if abs(start - expected_start) > 250 or abs(end - expected_end) > 250:
+        raise ValueError("corrected cue does not follow ASR word timestamps")
+
+
 def subtitle_segment_bounds(cues: list[dict], plan_output: dict, render_value: dict) -> list[tuple[int, int]]:
     """Bind each spoken cue to the actual rendered shot that contains its words."""
     segments = plan_output["segments"]
@@ -763,11 +779,8 @@ def subtitle_review(args) -> None:
             if (not isinstance(start, int) or not isinstance(end, int) or start < previous_end
                     or end <= start or cursor + length > len(timings)):
                 raise ValueError(f"{pid}: invalid corrected subtitle timing")
-            if abs(start - timings[cursor][0]) > 250 or abs(end - timings[cursor + length - 1][1]) > 250:
-                raise ValueError(f"{pid}: corrected cue does not follow ASR word timestamps")
-            shot_start, shot_end = shot_bounds[index - 1]
-            if start < shot_start or end > shot_end:
-                raise ValueError(f"{pid}: subtitle cue appears outside its rendered shot")
+            validate_subtitle_timing(start, end, timings[cursor],
+                                     timings[cursor + length - 1], shot_bounds[index - 1])
             blocks.append(f"{index}\n{packager.format_timestamp(start)} --> {packager.format_timestamp(end)}\n{after}")
             previous_end = end
             cursor += length
