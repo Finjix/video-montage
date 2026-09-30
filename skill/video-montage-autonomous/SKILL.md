@@ -10,7 +10,8 @@ metadata:
 Use this skill for **new** jobs. Read [the complete workflow](../../components/autonomous/README.md)
 and run `components/autonomous/scripts/autonomous_montage.py` with
 `dependencies/python/python.exe`. The work order must name original sources,
-the asset pack, requested output count and a D-drive output root.
+the asset pack and requested output count. Deliver under the project work/ directory;
+keep the job state, evidence, reviews and temporary media in the delivery 临时文件/ directory.
 
 Codex itself examines source ASR, native decoded frames, the asset copy pack,
 candidate evidence and final packaged frame evidence. Submit honest,

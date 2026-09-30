@@ -21,13 +21,15 @@ keep the clean delivery behavior.
 Packaging burns the calibrated WenYue W8 yellow, black-outlined subtitle style
 by default, using the fixed OTF in `components/packaging/assets/fonts`.
 Burn subtitles into the video picture only. All new deliveries must use a
-`自动化混剪_YYYYMMDD_HHMMSS_ffffff` directory (Beijing time). Put packaged MP4s in
+`work/自动化混剪_YYYYMMDD_HHMMSS_ffffff` directory (Beijing time). Put packaged MP4s in
 `成片/`, clean MP4s in `混剪（无包装）/`, editable `subtitle-xx.txt` in
-`字幕（可修改）/`, configuration in `日志/配置/`, manifests in `日志/清单/`, and
-reports in `日志/报告/`. Always keep the extensionless file
-`字幕（可修改）/修改字幕后让AI重新烧录`. Put job evidence in `日志/任务记录/`
+`字幕（可修改）/`, configuration in `临时文件/配置/`, manifests in `临时文件/清单/`, and
+reports in `临时文件/报告/`. Always keep the extensionless file
+`字幕（可修改）/修改字幕后让AI重新烧录`. Put job evidence in `临时文件/`
 on completion. Do not leave MP4s or loose reports at the delivery root.
-For new autonomous jobs, work-order `output_root` specifies the parent directory;
+For new autonomous jobs, work-order `output_root` must be the project work/ directory;
+init can generate the delivery and returns its 临时文件/ directory as job_dir.
+Keep all job state, evidence, reviews and intermediate files there;
 init records the generated timestamped delivery path in state. Read that path
 from status when composing packaging configs. Repair rounds and reburns overwrite
 the existing delivery directory without creating another timestamped directory.

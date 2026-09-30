@@ -196,9 +196,12 @@ def render(plan_path: Path, output: Path, evidence: Path, width: int, height: in
         )
     filters.append("".join(concat_inputs) + f"concat=n={len(segments)}:v=1:a=1[vout][aout]")
     partial = output.with_suffix(".partial.mp4")
+    if output.parent.name == "混剪（无包装）" and output.parent.parent.name.startswith("自动化混剪_"):
+        partial = output.parent.parent / "临时文件" / partial.name
     if partial.exists() or (output.exists() and not overwrite):
         raise FileExistsError(f"refusing overwrite: {output}")
     output.parent.mkdir(parents=True, exist_ok=True)
+    partial.parent.mkdir(parents=True, exist_ok=True)
     codec = (
         ["-c:v", "h264_nvenc", "-preset", "p4", "-tune", "hq", "-rc", "vbr", "-cq", "21", "-b:v", "0"]
         if encoder == "h264_nvenc"

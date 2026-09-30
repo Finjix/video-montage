@@ -54,8 +54,8 @@ def delivery_category(root: Path, kind: str) -> Path:
     """Keep existing jobs readable while using the required layout for new jobs."""
     if OUTPUT_NAME.fullmatch(root.name):
         return root / {"video": "成片", "clean": "混剪（无包装）",
-                       "subtitles": "字幕（可修改）", "config": "日志/配置",
-                       "manifests": "日志/清单", "reports": "日志/报告"}[kind]
+                       "subtitles": "字幕（可修改）", "config": "临时文件/配置",
+                       "manifests": "临时文件/清单", "reports": "临时文件/报告"}[kind]
     return root if kind == "video" else root / kind
 
 
@@ -68,13 +68,16 @@ def ensure_delivery_layout(root: Path) -> None:
     generated_prefix = "修改本目录 subtitle-*.txt 的文字或时间码后，把本输出目录交给 AI，要求重新烧录。"
     if not marker.exists() or marker.read_text(encoding="utf-8").startswith(generated_prefix):
         marker.write_text(generated_prefix + "\n"
-                          "保留混剪（无包装）和日志目录，AI 使用日志/清单中的包装清单及日志/配置中的配置重新烧录并校验。\n"
+                          "保留混剪（无包装）和临时文件目录，AI 使用临时文件/清单中的包装清单及临时文件/配置中的配置重新烧录并校验。\n"
                           "重新烧录在本目录覆盖成片、字幕、配置和清单，不新建交付文件夹；旧质检回执失效，重新校验后交付。\n", encoding="utf-8")
 
 
 def invalidate_delivery_receipts(root: Path) -> None:
     """Remove only known completion receipts that overwrite makes obsolete."""
     paths = [delivery_category(root, "reports") / "packaging_validation.json",
+             root / "临时文件" / "最终审核.json",
+             root / "临时文件" / "video_montage_autonomous_completion.json",
+             root / "临时文件" / "reports" / "packaging_technical.json",
              delivery_category(root, "reports") / "packaging_technical.json",
              root / "日志" / "最终审核.json",
              root / "日志" / "任务记录" / "video_montage_autonomous_completion.json",
@@ -546,15 +549,17 @@ def prepared_rows(config_path: Path, expected_inputs: dict[str, str] | None = No
 
 def render_one(row: dict, output_dir: Path) -> dict:
     plan_id = row["plan_id"]
+    temporary_dir = output_dir / "临时文件" if OUTPUT_NAME.fullmatch(output_dir.name) else output_dir
     output_dir = delivery_category(output_dir, "video")
     output = output_dir / f"{plan_id}.mp4"
-    partial = output_dir / f"{plan_id}.partial.mp4"
-    ass = output_dir / f"{plan_id}.ass"
+    partial = temporary_dir / f"{plan_id}.partial.mp4"
+    ass = temporary_dir / f"{plan_id}.ass"
     if partial.exists() or ass.exists() or (output.exists() and not row.get("_overwrite", False)):
         raise FileExistsError(f"refusing overwrite: {output}")
     output_dir.mkdir(parents=True, exist_ok=True)
+    temporary_dir.mkdir(parents=True, exist_ok=True)
     try:
-        with TemporaryDirectory(prefix=f".{plan_id}.subtitle-font-", dir=output_dir) as font_directory:
+        with TemporaryDirectory(prefix=f".{plan_id}.subtitle-font-", dir=temporary_dir) as font_directory:
             local_font = Path(font_directory) / "subtitle.otf"
             shutil.copyfile(row["subtitle_style"]["font"]["path"], local_font)
             if sha(local_font) != row["subtitle_style"]["font"]["sha256"]:
@@ -590,7 +595,7 @@ def render_one(row: dict, output_dir: Path) -> dict:
                         "-r", "60", "-fps_mode", "cfr", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
                         "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
                         "-t", f"{frames / 60:.6f}", "-movflags", "+faststart", str(partial)]
-            completed = run(command, cwd=output_dir)
+            completed = run(command, cwd=temporary_dir)
             require_subtitle_font(completed.stderr)
             spec = video_spec(partial)
             if (spec["frames"] != frames or (spec["width"], spec["height"]) != (1440, 2560)
@@ -1013,10 +1018,12 @@ def main() -> int:
     if hasattr(args, "output_dir"):
         if not OUTPUT_NAME.fullmatch(args.output_dir.name):
             parser.error("--output-dir 必须命名为 自动化混剪_YYYYMMDD_HHMMSS（可追加六位微秒）")
+        if args.output_dir.resolve().parent.name != "work":
+            parser.error("--output-dir 必须位于 work 目录下")
         if hasattr(args, "manifest"):
             expected_parent = delivery_category(args.output_dir.resolve(), "manifests")
             if args.manifest.resolve().parent != expected_parent:
-                parser.error("--manifest 必须位于输出目录的 日志/清单/ 下")
+                parser.error("--manifest 必须位于输出目录的 临时文件/清单/ 下")
     if args.command == "draft":
         result = draft_one(args.input.resolve(), args.plan_id, args.output_dir.resolve())
     elif args.command == "draft-batch":

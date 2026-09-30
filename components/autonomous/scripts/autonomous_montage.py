@@ -431,9 +431,6 @@ def repair(args) -> None:
 
 
 def init(args) -> None:
-    job = args.job_dir.resolve()
-    if job.exists() and any(job.iterdir()):
-        raise ValueError("refusing non-empty job directory")
     order = read(args.work_order)
     sources = order.get("sources")
     if order.get("schema") != ORDER_SCHEMA or not isinstance(sources, list) or not sources or int(order.get("requested_outputs", 0)) < 1:
@@ -452,19 +449,28 @@ def init(args) -> None:
     asset = Path(order["asset_root"]).resolve()
     if not asset.is_dir():
         raise ValueError("asset root missing")
-    output = Path(order["output_root"]).resolve()
-    # output_root is the destination parent for a fresh timestamped delivery.
-    output = output / ("自动化混剪_" + datetime.now(timezone(timedelta(hours=8))).strftime("%Y%m%d_%H%M%S_%f"))
-    if job == output or output in job.parents:
-        raise ValueError("job directory and delivery must not contain each other")
-    if output.exists():
-        raise FileExistsError(output)
+    parent = Path(order.get("output_root", ROOT / "work")).resolve()
+    if parent.name != "work":
+        raise ValueError("output_root must be the work directory")
+    if args.job_dir is not None:
+        job = args.job_dir.resolve()
+        output = job.parent
+        if job.name != "临时文件" or output.parent != parent or not output.name.startswith("自动化混剪_"):
+            raise ValueError("job-dir must be work/自动化混剪_xx/临时文件")
+    else:
+        output = parent / ("自动化混剪_" + datetime.now(timezone(timedelta(hours=8))).strftime("%Y%m%d_%H%M%S_%f"))
+        job = output / "临时文件"
+    if output.exists() and any(output.iterdir()):
+        raise FileExistsError(f"refusing non-empty delivery directory: {output}")
     job.mkdir(parents=True)
-    save(job, {"schema": STATE_SCHEMA, "review_mode": "codex_asr_pcm", "work_order": ref(args.work_order),
+    order_snapshot = job / "work_order.json"
+    shutil.copyfile(args.work_order, order_snapshot)
+    save(job, {"schema": STATE_SCHEMA, "review_mode": "codex_asr_pcm", "work_order": ref(order_snapshot),
                "source_hashes": {str(Path(row["path"]).resolve()): sha(Path(row["path"])) for row in sources},
                "asset_root": str(asset), "output_root": str(output), "delivery_directory": str(output),
                "repair_delivery_policy": "overwrite", "delivery_layout": "chinese/v1", "repair_round": 0,
                "max_repair_rounds": MAX_ROUNDS}, "initialized")
+    print(json.dumps({"job_dir": str(job), "delivery_directory": str(output)}, ensure_ascii=False))
 
 
 def prepare(args) -> None:
@@ -1087,14 +1093,15 @@ def complete(args) -> None:
         output = attempt_dir(value)
         packager.ensure_delivery_layout(output)
         # Archive evidence without moving hash-bound originals.
-        archive = output / "日志" / "任务记录"
-        if job == output or output in job.parents:
-            raise ValueError("job directory and delivery must not contain each other")
-        shutil.copytree(job, archive, dirs_exist_ok=True,
+        archive = output / "临时文件"
+        if job != archive:
+            shutil.copytree(job, archive, dirs_exist_ok=True,
                         ignore=lambda directory, names: [name for name in names
                             if (Path(directory) / name).resolve() == output.resolve()
                             or (Path(directory) / name).resolve() in output.resolve().parents])
-        shutil.copyfile(args.review, output / "日志" / "最终审核.json")
+        review_copy = archive / "最终审核.json"
+        if args.review.resolve() != review_copy.resolve():
+            shutil.copyfile(args.review, review_copy)
     print(str(receipt))
 
 
@@ -1104,7 +1111,7 @@ def main() -> None:
     for name in ("init", "prepare", "asset-copy", "plan-evidence", "approve-plan", "render-clean",
                  "clean-qc", "subtitle-draft", "subtitle-review", "package", "final-evidence", "complete", "repair", "status"):
         action = sub.add_parser(name)
-        action.add_argument("--job-dir", type=Path, required=True)
+        action.add_argument("--job-dir", type=Path, required=name != "init")
         if name == "init": action.add_argument("--work-order", type=Path, required=True)
         if name == "asset-copy": action.add_argument("--copy-text", type=Path, required=True)
         if name == "plan-evidence": action.add_argument("--plan", type=Path, required=True)

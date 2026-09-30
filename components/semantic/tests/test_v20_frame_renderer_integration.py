@@ -51,7 +51,8 @@ class FrameRendererIntegrationTests(unittest.TestCase):
                 ],
             }
             plan_path.write_text(json.dumps(plan), encoding="utf-8")
-            rendered = root / "rendered.mp4"
+            delivery = root / "work" / "自动化混剪_20260930_153000_123456"
+            rendered = delivery / "混剪（无包装）" / "rendered.mp4"
             render_evidence = root / "render.json"
             previous_ffmpeg = os.environ.get("MONTAGE_FFMPEG")
             previous_ffprobe = os.environ.get("MONTAGE_FFPROBE")
@@ -60,6 +61,7 @@ class FrameRendererIntegrationTests(unittest.TestCase):
             try:
                 evidence = portable_frame_renderer.render(plan_path, rendered, render_evidence, 160, 284, 60, "libx264")
                 self.assertEqual(120, evidence["actual_output_frames"])
+                self.assertEqual(delivery / "临时文件" / "rendered.partial.mp4", Path(evidence["command"][-1]))
                 original_hash = portable_frame_renderer.sha256(rendered)
                 plan["segments"][0]["audio_gain_db"] = -3
                 plan_path.write_text(json.dumps(plan), encoding="utf-8")

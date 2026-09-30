@@ -10,13 +10,13 @@ Codex 在同一个任务中完成语义与画面判断，不委派独立代理�
 
 ## 阶段
 
-1. `init --job-dir <新目录> --work-order <JSON>`，然后 `prepare --job-dir <目录>`。工作单使用 `video-montage-autonomous-work-order/v260929`，包含 `requested_outputs`、`sources: [{"path": "原片绝对路径", "sha256": "可选校验值"}]`、`asset_root` 和 D 盘的 `output_root`。`prepare` 对每条原片重新转写，记录原生帧率、源哈希、说明文字和图片哈希。
+1. `init --work-order <JSON>`，程序返回 `work/自动化混剪_xx/临时文件` 的任务路径，然后 `prepare --job-dir <返回的任务路径>`。也可显式传入符合该结构的 `--job-dir`。工作单使用 `video-montage-autonomous-work-order/v260929`，包含 `requested_outputs`、`sources: [{"path": "原片绝对路径", "sha256": "可选校验值"}]`、`asset_root` ，可选 `output_root` 必须指向项目的 `work` 目录，省略时自动使用项目 `work`。`prepare` 对每条原片重新转写，记录原生帧率、源哈希、说明文字和图片哈希。
 2. Codex 查看素材图片并提交 `video-montage-codex-asset-copy/v260929`：`reviewer_role: "codex"`、`sources_sha256` 指向 `asset_copy_sources.json`，`assets` 对每个素材哈希给出可见文字。说明文件必须逐字保留；看不清的图片填空，不能猜测。
 3. Codex 依据原片转写与画面提交 `video-montage-autonomous-plan/v260929`，其中 `outputs` 每条含 `plan_id` 和源帧范围 `segments`。依次运行 `plan-evidence --plan <JSON>`、`approve-plan --review <JSON>`。后者的 `video-montage-codex-review/v260929` 需声明 `stage: "plan"`、`reviewer_role: "codex"`、`evidence_sha256`、`plan_sha256`，并逐片段给出 `semantic_pass`、`visual_pass`、`entry_visual_pass`、`exit_visual_pass`、具体 `reason` 和 `boundary_reason`。机器另查完整转写、首尾 40 毫秒低能量、削波、孤立突发声和逐帧证据；比较片段首尾各 13 帧，并扫描首尾半秒内是否藏有原片转场。Codex 必须看首尾连续 30 帧及相邻片段交界，比较人物位置、景别和画面尺寸；成片后逐帧复查每个拼接点，避免短时间内连续跳镜。不合格片段不可批准。
 4. `render-clean` 用原生整数帧范围渲染 1440×2560、60 fps 的纯净成片；`clean-qc` 复转写并检查口播、削波和每处切点前后 40 毫秒的残音与突发声。`subtitle-draft` 生成草稿及不可变快照。Codex 提交 `video-montage-codex-subtitle-review/v260929`，其中 `draft_sha256`、`asset_copy_sha256`、每条字幕的原文、新文、原时间码和更改依据都完整绑定；运行 `subtitle-review` 后才允许烧录。改字必须援引实际源转写、计划口播或素材文案的哈希和文字；全片字幕归一化后必须与原片口播一致，不能照抄与口播相异的广告文案。字幕不能跨越对应口播的渲染镜头边界，ASR 词时间戳偏早时以镜头边界为准。
 5. `package --config <JSON>` 使用已纠错的 `subtitle-<plan_id>.txt` 及其哈希，按现有包装配置叠加铭牌、文字钉、免责和 BGM。包装版清单标记为 `complete_autonomous`，并绑定纯净成片及自动 QC。`final-evidence` 对包装版再次转写，检查削波、切点 PCM 和口播对 BGM 的声级差；抓取每条字幕中间帧与起止前后帧、每处切点前后 72 帧、片头片尾及图层起止帧。Codex 检查这些画面并提交 `stage: "final"` 的逐成片审核。`complete --review <JSON>` 重新执行包装器技术与自动审核校验，全部通过才写 `video_montage_autonomous_completion.json`。
 
-所有命令都带 `--job-dir`。某阶段拒绝后记录 `reports/repair_round_N.json`；Codex 可以在新一轮重选片段，或在纯净成片已通过时重做包装。第三次仍无法确认即停机。`status` 可读取当前阶段和失败原因。工作单 `output_root` 是输出父目录。初始化自动生成北京时间命名的 `自动化混剪_YYYYMMDD_HHMMSS_ffffff/`，实际路径写入状态 `output_root`；状态 delivery_directory 固定实际交付路径，修复轮次和字幕重烧均在该目录覆盖。包装 MP4 放 `成片/`，纯净 MP4 放 `混剪（无包装）/`，字幕放 `字幕（可修改）/`，固定保留无扩展名文件 `修改字幕后让AI重新烧录`。配置、清单、报告分别放 `日志/配置/`、`日志/清单/`、`日志/报告/`；完成时将任务审核及证据归档至 `日志/任务记录/`。旧状态仍按原有路径运行，不迁移哈希绑定文件。
+除 `init` 可自动生成任务路径外，所有命令都带 `--job-dir work/自动化混剪_xx/临时文件`。某阶段拒绝后记录 `reports/repair_round_N.json`；Codex 可以在新一轮重选片段，或在纯净成片已通过时重做包装。第三次仍无法确认即停机。`status` 可读取当前阶段和失败原因。工作单 `output_root` 是项目 `work` 目录，不再创建或使用 `output` 目录。初始化自动生成北京时间命名的 `自动化混剪_YYYYMMDD_HHMMSS_ffffff/`，实际路径写入状态 `output_root`；状态 delivery_directory 固定实际交付路径，修复轮次和字幕重烧均在该目录覆盖。包装 MP4 放 `成片/`，纯净 MP4 放 `混剪（无包装）/`，字幕放 `字幕（可修改）/`，固定保留无扩展名文件 `修改字幕后让AI重新烧录`。配置、清单、报告分别放 `临时文件/配置/`、`临时文件/清单/`、`临时文件/报告/`；任务状态、审核、证据、中间视频、ASS 和临时字体均放在交付目录的 `临时文件/`，不另建任务目录或重复归档。旧状态仍按原有路径运行，不迁移哈希绑定文件。
 
 ## 审核文件示例
 
