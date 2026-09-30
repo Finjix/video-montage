@@ -47,12 +47,49 @@ SUBTITLE_EMPHASIS = {
 }
 
 
+OUTPUT_NAME = re.compile(r"自动化混剪_\d{8}_\d{6}(?:_\d{6})?\Z")
+
+
+def delivery_category(root: Path, kind: str) -> Path:
+    """Keep existing jobs readable while using the required layout for new jobs."""
+    if OUTPUT_NAME.fullmatch(root.name):
+        return root / {"video": "成片", "clean": "混剪（无包装）",
+                       "subtitles": "字幕（可修改）", "config": "日志/配置",
+                       "manifests": "日志/清单", "reports": "日志/报告"}[kind]
+    return root if kind == "video" else root / kind
+
+
+def ensure_delivery_layout(root: Path) -> None:
+    if not OUTPUT_NAME.fullmatch(root.name):
+        return
+    for kind in ("video", "clean", "subtitles", "config", "manifests", "reports"):
+        delivery_category(root, kind).mkdir(parents=True, exist_ok=True)
+    marker = delivery_category(root, "subtitles") / "修改字幕后让AI重新烧录"
+    generated_prefix = "修改本目录 subtitle-*.txt 的文字或时间码后，把本输出目录交给 AI，要求重新烧录。"
+    if not marker.exists() or marker.read_text(encoding="utf-8").startswith(generated_prefix):
+        marker.write_text(generated_prefix + "\n"
+                          "保留混剪（无包装）和日志目录，AI 使用日志/清单中的包装清单及日志/配置中的配置重新烧录并校验。\n"
+                          "重新烧录在本目录覆盖成片、字幕、配置和清单，不新建交付文件夹；旧质检回执失效，重新校验后交付。\n", encoding="utf-8")
+
+
+def invalidate_delivery_receipts(root: Path) -> None:
+    """Remove only known completion receipts that overwrite makes obsolete."""
+    paths = [delivery_category(root, "reports") / "packaging_validation.json",
+             delivery_category(root, "reports") / "packaging_technical.json",
+             root / "日志" / "最终审核.json",
+             root / "日志" / "任务记录" / "video_montage_autonomous_completion.json",
+             root / "日志" / "任务记录" / "reports" / "packaging_technical.json"]
+    for path in paths:
+        path.unlink(missing_ok=True)
+
+
 def subtitle_filename(plan_id: str) -> str:
     return f"subtitle-{plan_id}.txt"
 
 
 def subtitle_output(output_dir: Path, plan_id: str) -> Path:
-    return output_dir / "subtitles" / subtitle_filename(plan_id)
+    ensure_delivery_layout(output_dir)
+    return delivery_category(output_dir, "subtitles") / subtitle_filename(plan_id)
 
 
 def relocated_config(config_path: Path, rows: list[dict], snapshots: list[Path], target: Path) -> dict:
@@ -260,12 +297,12 @@ def timed_lines(lines: list[str], start_ms: int, end_ms: int) -> list[tuple[int,
     return result
 
 
-def draft_one(input_path: Path, plan_id: str, output_dir: Path) -> dict:
+def draft_one(input_path: Path, plan_id: str, output_dir: Path, *, overwrite: bool = False) -> dict:
     if not PLAN_ID.fullmatch(plan_id):
         raise ValueError(f"unsafe plan ID: {plan_id}")
     video_spec(input_path)
     output = subtitle_output(output_dir, plan_id)
-    if output.exists():
+    if output.exists() and not overwrite:
         raise FileExistsError(output)
     source_script = ROOT / "components/semantic/scripts/v9_source_asr.py"
     spec = importlib.util.spec_from_file_location("packaging_source_asr", source_script)
@@ -335,7 +372,7 @@ def draft_batch(delivery_manifest: Path, output_dir: Path) -> dict:
     rows = [draft_one(Path(row["output_path"]), row["plan_id"], output_dir) for row in manifest["results"]]
     report = {"schema": "video-montage-subtitle-draft/v1", "delivery_manifest_path": str(delivery_manifest.resolve()),
               "delivery_manifest_sha256": sha(delivery_manifest), "results": rows}
-    atomic(output_dir / "reports" / "subtitle_draft.json", report)
+    atomic(delivery_category(output_dir, "reports") / "subtitle_draft.json", report)
     return report
 
 
@@ -509,10 +546,11 @@ def prepared_rows(config_path: Path, expected_inputs: dict[str, str] | None = No
 
 def render_one(row: dict, output_dir: Path) -> dict:
     plan_id = row["plan_id"]
+    output_dir = delivery_category(output_dir, "video")
     output = output_dir / f"{plan_id}.mp4"
     partial = output_dir / f"{plan_id}.partial.mp4"
     ass = output_dir / f"{plan_id}.ass"
-    if output.exists() or partial.exists() or ass.exists():
+    if partial.exists() or ass.exists() or (output.exists() and not row.get("_overwrite", False)):
         raise FileExistsError(f"refusing overwrite: {output}")
     output_dir.mkdir(parents=True, exist_ok=True)
     try:
@@ -571,8 +609,8 @@ def render_one(row: dict, output_dir: Path) -> dict:
 
 def render(config_path: Path, output_dir: Path, manifest_path: Path, delivery_manifest: Path | None = None,
            controller_validation: Path | None = None, autonomous_clean: Path | None = None,
-           autonomous_clean_qc: Path | None = None) -> dict:
-    if manifest_path.exists():
+           autonomous_clean_qc: Path | None = None, *, overwrite: bool = False) -> dict:
+    if manifest_path.exists() and not overwrite:
         raise FileExistsError(manifest_path)
     if bool(delivery_manifest) != bool(controller_validation):
         raise ValueError("complete montage packaging requires both clean delivery and controller validation")
@@ -602,28 +640,48 @@ def render(config_path: Path, output_dir: Path, manifest_path: Path, delivery_ma
         expected = {item["plan_id"]: item["output"]["sha256"] for item in delivery["results"]}
     rows = prepared_rows(config_path, expected)
     snapshots = [subtitle_output(output_dir, row["plan_id"]) for row in rows]
-    config_snapshot = output_dir / "config" / config_path.name
+    config_snapshot = delivery_category(output_dir, "config") / config_path.name
     copies = [(config_path, config_snapshot)] + [
         (Path(row["subtitles"]["path"]), snapshot) for row, snapshot in zip(rows, snapshots)
     ]
     reserved = {}
     for path, label in [(manifest_path, "manifest"), *[(target, "snapshot") for _, target in copies],
-                        *[(output_dir / f"{row['plan_id']}{suffix}", "render")
+                        *[(delivery_category(output_dir, "video") / f"{row['plan_id']}{suffix}", "render")
                           for row in rows for suffix in (".mp4", ".partial.mp4", ".ass")]]:
         resolved = path.resolve()
         if resolved in reserved:
             raise ValueError(f"packaging paths collide: {reserved[resolved]} and {label}: {resolved}")
         reserved[resolved] = label
     for source, target in copies:
-        if source.resolve() != target.resolve() and target.exists():
+        if source.resolve() != target.resolve() and target.exists() and not overwrite:
             raise FileExistsError(f"refusing to overwrite packaging file: {target}")
+    if OUTPUT_NAME.fullmatch(output_dir.name):
+        # Preserve the clean inputs with the delivery, so subtitle reburns do not
+        # depend on an internal job directory surviving.
+        for row in rows:
+            source = Path(row["input"]["path"])
+            target = delivery_category(output_dir, "clean") / f"{row['plan_id']}.mp4"
+            if source.resolve() != target.resolve() and target.exists() and not overwrite:
+                raise FileExistsError(f"refusing overwrite: {target}")
+        for row in rows:
+            source = Path(row["input"]["path"])
+            target = delivery_category(output_dir, "clean") / f"{row['plan_id']}.mp4"
+            if source.resolve() != target.resolve():
+                shutil.copyfile(source, target)
+            if sha(target) != row["input"]["sha256"]:
+                raise ValueError("clean input changed during delivery copy")
+            row["input"]["path"] = str(target.resolve())
+    if overwrite:
+        invalidate_delivery_receipts(output_dir)
+        for row in rows:
+            row["_overwrite"] = True
     results = [render_one(row, output_dir) for row in rows]
     for row, result, snapshot in zip(rows, results, snapshots):
         if Path(row["subtitles"]["path"]).resolve() != snapshot.resolve():
             snapshot.parent.mkdir(parents=True, exist_ok=True)
             snapshot.write_bytes(Path(row["subtitles"]["path"]).read_bytes())
         result["subtitle_snapshot"] = {"path": str(snapshot.resolve()), "sha256": sha(snapshot)}
-    if config_path.resolve() != config_snapshot.resolve():
+    if config_path.resolve() != config_snapshot.resolve() or OUTPUT_NAME.fullmatch(output_dir.name):
         atomic(config_snapshot, relocated_config(config_path, rows, snapshots, config_snapshot))
     mode = "complete_montage" if delivery_manifest else "complete_autonomous" if autonomous_clean else "standalone_test"
     manifest = {"schema": "video-montage-packaging-delivery/v1", "mode": mode,
@@ -642,17 +700,14 @@ def render(config_path: Path, output_dir: Path, manifest_path: Path, delivery_ma
 
 def reburn(previous_manifest_path: Path, plan_id: str, subtitle_txt: Path, output_dir: Path,
            manifest_path: Path) -> dict:
-    """Render a fresh version from the clean inputs and recorded overlay choices."""
+    """Reburn in the requested directory, atomically replacing finished videos."""
     previous = read(previous_manifest_path)
     if previous.get("schema") != "video-montage-packaging-delivery/v1":
         raise ValueError("previous packaging manifest required")
     results = previous.get("results", [])
     if not results or plan_id not in {row.get("plan_id") for row in results}:
         raise ValueError(f"unknown plan ID in previous packaging: {plan_id}")
-    if output_dir.exists() and any(output_dir.iterdir()):
-        raise FileExistsError(f"refusing non-empty reburn output directory: {output_dir}")
-    if manifest_path.exists():
-        raise FileExistsError(f"reburn manifest must be a new file: {manifest_path}")
+    previous_sha256 = sha(previous_manifest_path)
     edited = resolve_file(Path.cwd(), str(subtitle_txt))
     rows = []
     for old in results:
@@ -672,14 +727,19 @@ def reburn(previous_manifest_path: Path, plan_id: str, subtitle_txt: Path, outpu
         if font["sha256"] != SUBTITLE_FONT_SHA256:
             raise ValueError("previous subtitle font differs from the bundled W8 font")
     output_dir.mkdir(parents=True, exist_ok=True)
-    config_path = output_dir / "config" / "reburn_config.json"
+    config_path = delivery_category(output_dir, "config") / "reburn_config.json"
     config = {"schema": SCHEMA, "outputs": rows}
     atomic(config_path, config)
     delivery = Path(previous["clean_delivery_path"]) if previous.get("clean_delivery_path") else None
     controller = Path(previous["controller_validation_path"]) if previous.get("controller_validation_path") else None
-    result = render(config_path, output_dir, manifest_path, delivery, controller)
+    if previous.get("mode") == "complete_autonomous":
+        result = render(config_path, output_dir, manifest_path, autonomous_clean=delivery,
+                        autonomous_clean_qc=controller, overwrite=True)
+    else:
+        result = render(config_path, output_dir, manifest_path, delivery, controller, overwrite=True)
     result["reburn_source"] = {"manifest_path": str(previous_manifest_path.resolve()),
-                               "manifest_sha256": sha(previous_manifest_path), "edited_plan_id": plan_id}
+                               "manifest_sha256": previous_sha256, "edited_plan_id": plan_id,
+                               "overwritten_in_place": previous_manifest_path.resolve() == manifest_path.resolve()}
     atomic(manifest_path, result)
     return result
 
@@ -701,6 +761,29 @@ def pcm_stats(path: Path) -> dict:
     if process.wait():
         raise RuntimeError(f"audio decode failed: {stderr[-1000:]!r}")
     return {"samples_per_channel": count // 2, "channels_checked": 2, "clipped_samples": clipped, "peak_fraction": round(peak / 32768, 6)}
+
+
+def verify_autonomous_speech(measured: dict, item: dict, manifest: dict) -> bool:
+    if measured.get("asr_match") is True:
+        return True
+    if measured.get("speech_preserved") is not True:
+        return False
+    # Recompute the signal proof, rather than trusting a declared pass flag.
+    spec = importlib.util.spec_from_file_location("packaging_mix_verifier", ROOT / "components/autonomous/scripts/autonomous_montage.py")
+    verifier = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(verifier)
+    qc_path = Path(str(manifest.get("controller_validation_path") or ""))
+    if not qc_path.is_file() or sha(qc_path) != manifest.get("controller_validation_sha256"):
+        return False
+    qc = read(qc_path)
+    clean_row = next((r for r in qc.get("results", []) if r.get("plan_id") == item["plan_id"]), {})
+    if qc.get("decision") != "pass" or clean_row.get("text_match") is not True or clean_row.get("output", {}).get("sha256") != item["input"]["sha256"]:
+        return False
+    output = verifier.pcm(Path(item["output_path"]))
+    clean = verifier.pcm(Path(item["input"]["path"]))
+    music = verifier.pcm(Path(item["bgm"]["path"])) if item.get("bgm") else None
+    proof = verifier.packaged_mix_evidence(output, clean, music, float(item["bgm"]["gain_db"]) if item.get("bgm") else 0)
+    return proof.get("decision") == "pass" and proof == measured.get("mix_evidence")
 
 
 def validate(manifest_path: Path, report_path: Path, review_path: Path | None = None,
@@ -767,7 +850,7 @@ def validate(manifest_path: Path, report_path: Path, review_path: Path | None = 
                 for item in manifest["results"]:
                     pid = item["plan_id"]
                     measured, finding = auto_by_id[pid], codex_by_id[pid]
-                    if (measured.get("decision") != "pass" or measured.get("asr_match") is not True
+                    if (measured.get("decision") != "pass" or not verify_autonomous_speech(measured, item, manifest)
                             or measured.get("subtitle_timing_pass") is not True
                             or not isinstance(measured.get("cut_pcm"), list)
                             or any(cut.get("decision") != "pass" for cut in measured["cut_pcm"])
@@ -799,7 +882,10 @@ def validate(manifest_path: Path, report_path: Path, review_path: Path | None = 
     source = manifest.get("reburn_source")
     if source:
         previous_path = Path(str(source.get("manifest_path") or ""))
-        if not previous_path.is_file() or sha(previous_path) != source.get("manifest_sha256"):
+        in_place = source.get("overwritten_in_place") is True
+        if in_place and (previous_path.resolve() != manifest_path.resolve() or not re.fullmatch(r"[0-9a-f]{64}", str(source.get("manifest_sha256", "")))):
+            failures.append("reburn_source_changed")
+        elif not in_place and (not previous_path.is_file() or sha(previous_path) != source.get("manifest_sha256")):
             failures.append("reburn_source_changed")
     config_path = Path(str(manifest.get("config_path") or ""))
     if not config_path.is_file() or sha(config_path) != manifest.get("config_sha256"):
@@ -924,6 +1010,13 @@ def main() -> int:
     check.add_argument("--autonomous-evidence", type=Path)
     check.add_argument("--autonomous-review", type=Path)
     args = parser.parse_args()
+    if hasattr(args, "output_dir"):
+        if not OUTPUT_NAME.fullmatch(args.output_dir.name):
+            parser.error("--output-dir 必须命名为 自动化混剪_YYYYMMDD_HHMMSS（可追加六位微秒）")
+        if hasattr(args, "manifest"):
+            expected_parent = delivery_category(args.output_dir.resolve(), "manifests")
+            if args.manifest.resolve().parent != expected_parent:
+                parser.error("--manifest 必须位于输出目录的 日志/清单/ 下")
     if args.command == "draft":
         result = draft_one(args.input.resolve(), args.plan_id, args.output_dir.resolve())
     elif args.command == "draft-batch":

@@ -20,12 +20,23 @@ configuration, then run `packaging-finalize` and `packaging-validate` after
 keep the clean delivery behavior.
 Packaging burns the calibrated WenYue W8 yellow, black-outlined subtitle style
 by default, using the fixed OTF in `components/packaging/assets/fonts`.
-Burn subtitles into the video picture only. Put MP4 files at the task output root.
-Keep editable `subtitle-xx.txt` files in `subtitles/`, configuration in `config/`,
-manifests in `manifests/`, and validation or draft reports in `reports/`.
+Burn subtitles into the video picture only. All new deliveries must use a
+`自动化混剪_YYYYMMDD_HHMMSS_ffffff` directory (Beijing time). Put packaged MP4s in
+`成片/`, clean MP4s in `混剪（无包装）/`, editable `subtitle-xx.txt` in
+`字幕（可修改）/`, configuration in `日志/配置/`, manifests in `日志/清单/`, and
+reports in `日志/报告/`. Always keep the extensionless file
+`字幕（可修改）/修改字幕后让AI重新烧录`. Put job evidence in `日志/任务记录/`
+on completion. Do not leave MP4s or loose reports at the delivery root.
+For new autonomous jobs, work-order `output_root` specifies the parent directory;
+init records the generated timestamped delivery path in state. Read that path
+from status when composing packaging configs. Repair rounds and reburns overwrite
+the existing delivery directory without creating another timestamped directory.
+Bind older jobs to their actual delivered path and keep their layout readable.
 Do not duplicate config/subtitle snapshots.
 When the user edits that TXT, run `packaging-reburn` (or the standalone packager's
-`reburn`) into a new directory, then validate the new MP4.
+`reburn`) into the same directory, then validate the replacement MP4. Render and
+check temporary video files before replacing existing MP4s. Invalidate stale
+completion receipts and refresh manifests and verification before delivery.
 
 The semantic component owns source ASR, candidate evidence, independent candidate
 review, batch planning, frame-plan validation, and the portable frame renderer.

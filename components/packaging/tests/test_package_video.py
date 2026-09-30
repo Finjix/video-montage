@@ -56,6 +56,46 @@ class PackagingContractTests(unittest.TestCase):
         with patch.object(packaging, "video_spec", return_value=self.spec):
             return packaging.prepared_rows(self.config)
 
+    def test_in_place_reburn_keeps_clean_inputs_and_updates_the_existing_manifest(self):
+        first = self.root / "自动化混剪_20260930_153000_123456"
+        manifest = first / "日志" / "清单" / "packaging_manifest.json"
+
+        def encode(row, root):
+            target = packaging.delivery_category(root, "video") / f"{row['plan_id']}.mp4"
+            target.write_bytes(b"packaged video")
+            return {"plan_id": row["plan_id"], "input": row["input"],
+                    "subtitles": row["subtitles"], "text_pins": row["text_pins"]}
+
+        with patch.object(packaging, "video_spec", return_value=self.spec), \
+             patch.object(packaging, "render_one", side_effect=encode):
+            result = packaging.render(self.config, first, manifest)
+            self.assertEqual({"成片", "混剪（无包装）", "字幕（可修改）", "日志"},
+                             {p.name for p in first.iterdir()})
+            self.assertEqual(self.video.read_bytes(), (first / "混剪（无包装）" / "P1.mp4").read_bytes())
+            self.assertEqual(str(first / "混剪（无包装）" / "P1.mp4"), result["results"][0]["input"]["path"])
+            marker = first / "字幕（可修改）" / "修改字幕后让AI重新烧录"
+            self.assertTrue(marker.is_file())
+            marker.write_text("用户保留的说明", encoding="utf-8")
+            packaging.ensure_delivery_layout(first)
+            self.assertEqual("用户保留的说明", marker.read_text(encoding="utf-8"))
+            edited = first / "字幕（可修改）" / "subtitle-P1.txt"
+            edited.write_text("1\n00:00:00,000 --> 00:00:00,900\n新字幕\n", encoding="utf-8")
+            self.video.unlink()  # Reburn must use the delivered clean copy.
+            previous_hash = packaging.sha(manifest)
+            second = first
+            new_manifest = manifest
+            updated = packaging.reburn(manifest, "P1", edited, second, new_manifest)
+            self.assertEqual(edited.read_bytes(), (second / "字幕（可修改）" / edited.name).read_bytes())
+            self.assertTrue((second / "字幕（可修改）" / marker.name).is_file())
+            reopened = packaging.prepared_rows(second / "日志" / "配置" / "reburn_config.json")
+            self.assertEqual(str(second / "混剪（无包装）" / "P1.mp4"), reopened[0]["input"]["path"])
+            self.assertEqual(packaging.sha(edited), updated["results"][0]["subtitle_snapshot"]["sha256"])
+            self.assertEqual(b"packaged video", (first / "成片" / "P1.mp4").read_bytes())
+            self.assertTrue(updated["reburn_source"]["overwritten_in_place"])
+            self.assertEqual(previous_hash, updated["reburn_source"]["manifest_sha256"])
+            self.assertNotEqual(previous_hash, packaging.sha(manifest))
+            self.assertEqual([first], list(self.root.glob("自动化混剪_*")))
+
     def test_missing_asset_and_wrong_hash_rejected(self):
         self.pin.unlink()
         with self.assertRaises(FileNotFoundError):
@@ -348,8 +388,18 @@ class PackagingContractTests(unittest.TestCase):
         self.assertEqual(str(self.font), packaging.subtitle_style(config, output)["font"]["path"])
         self.assertEqual((output / "config" / "reburn_config.json", output, manifest, None, None), mock_render.call_args.args)
         self.assertEqual(packaging.sha(previous), result["reburn_source"]["manifest_sha256"])
-        with self.assertRaisesRegex(FileExistsError, "non-empty"):
-            packaging.reburn(previous, "P1", self.srt, output, self.root / "another.json")
+        self.assertTrue(mock_render.call_args.kwargs["overwrite"])
+
+    def test_failed_overwrite_encoding_preserves_existing_video(self):
+        row = self.prepare()[0]
+        row["_overwrite"] = True
+        output = self.root / "out"; output.mkdir()
+        target = output / "P1.mp4"; target.write_bytes(b"previous complete video")
+        with patch.object(packaging, "run", side_effect=RuntimeError("encoder failed")):
+            with self.assertRaisesRegex(RuntimeError, "encoder failed"):
+                packaging.render_one(row, output)
+        self.assertEqual(b"previous complete video", target.read_bytes())
+        self.assertFalse((output / "P1.partial.mp4").exists())
 
     def test_reburn_old_manifest_uses_new_default_style(self):
         previous = self.root / "old-manifest.json"

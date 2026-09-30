@@ -4,6 +4,7 @@ import importlib.util
 import json
 import tempfile
 import unittest
+from types import SimpleNamespace
 from pathlib import Path
 
 import numpy as np
@@ -17,10 +18,93 @@ SPEC.loader.exec_module(auto)
 
 
 class AutonomousContractTests(unittest.TestCase):
+    def test_explicit_continuation_preserves_round_numbers_and_failed_history(self):
+        job = self.root / "job"
+        order = self.root / "order.json"
+        auto.write(order, {"schema": auto.ORDER_SCHEMA})
+        job.mkdir()
+        auto.write(job / "autonomous_state.json", {"schema": auto.STATE_SCHEMA, "review_mode": "codex_asr_pcm",
+                   "work_order": auto.ref(order), "repair_round": 3, "phase": "failed"})
+        auto.repair(SimpleNamespace(job_dir=job, reason="fix overlay", continue_until_complete=True,
+                                   authorization="User explicitly requested repair until full delivery"))
+        value = auto.state(job)
+        self.assertEqual(4, value["repair_round"])
+        self.assertEqual("repair_required", value["phase"])
+        with self.assertRaises(RuntimeError):
+            auto.fail_round(job, value, "qc", ["still defective"])
+        self.assertEqual(5, auto.state(job)["repair_round"])
+        self.assertEqual("repair_required", auto.state(job)["phase"])
+        self.assertFalse((job / "video_montage_autonomous_completion.json").exists())
+
+    def test_packaged_mix_rejects_missing_voice_and_foreign_audio(self):
+        rate = 16000
+        t = np.arange(rate * 4) / rate
+        voice = .1 * np.sin(2 * np.pi * 440 * t)
+        music = .05 * np.sin(2 * np.pi * 120 * t)
+        mixed = voice + music * .1
+        self.assertEqual("pass", auto.packaged_mix_evidence(mixed, voice, music, -20)["decision"])
+        dropped = mixed.copy(); dropped[rate:rate + 4000] -= voice[rate:rate + 4000]
+        self.assertEqual("reject", auto.packaged_mix_evidence(dropped, voice, music, -20)["decision"])
+        inserted = mixed.copy(); inserted[rate:rate + 4000] += .08 * np.sin(2 * np.pi * 900 * t[:4000])
+        self.assertEqual("reject", auto.packaged_mix_evidence(inserted, voice, music, -20)["decision"])
+        self.assertEqual("reject", auto.packaged_mix_evidence(mixed[:-1], voice, music, -20)["decision"])
+
+    def test_reviewed_subtitle_spelling_keeps_other_speech_exact(self):
+        self.assertEqual(auto.subtitle_spelling("做的是真呆劲"), auto.subtitle_spelling("做的是真带劲"))
+        self.assertNotEqual(auto.subtitle_spelling("做的是真带劲"), auto.subtitle_spelling("做的是真没劲"))
+        self.assertNotEqual(auto.subtitle_spelling("做的是真带劲"), auto.subtitle_spelling("做的是真带劲谢谢观看"))
+        self.assertNotEqual(auto.normalized("真呆劲"), auto.normalized("真带劲"))
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
+
+    def test_new_job_creates_timestamped_delivery_under_requested_parent(self):
+        source = self.root / "source.mp4"
+        source.write_bytes(b"source")
+        assets = self.root / "assets"
+        assets.mkdir()
+        parent = self.root / "deliveries"
+        order = self.root / "order.json"
+        auto.write(order, {"schema": auto.ORDER_SCHEMA, "sources": [{"path": str(source)}],
+                           "requested_outputs": 1, "asset_root": str(assets), "output_root": str(parent)})
+        job = self.root / "job"
+        auto.init(SimpleNamespace(job_dir=job, work_order=order))
+        value = auto.state(job)
+        output = Path(value["output_root"])
+        self.assertEqual(parent, output.parent)
+        self.assertRegex(output.name, r"^自动化混剪_\d{8}_\d{6}_\d{6}$")
+        self.assertEqual("chinese/v1", value["delivery_layout"])
+        self.assertEqual(output, auto.attempt_dir(value))
+
+    def test_delivery_rounds_reuse_the_original_directory(self):
+        value = {"output_root": str(self.root / "自动化混剪_20260930_235959_123456"),
+                 "delivery_layout": "chinese/v1", "repair_round": 0}
+        first = auto.attempt_dir(value)
+        value["repair_round"] = 1
+        second = auto.attempt_dir(value)
+        self.assertEqual(first.parent, second.parent)
+        self.assertEqual("自动化混剪_20260930_235959_123456", second.name)
+        self.assertEqual(first, second)
+
+    def test_completed_job_repair_pins_actual_delivery_and_invalidates_completion(self):
+        job = self.root / "job"; job.mkdir()
+        order = self.root / "order.json"; auto.write(order, {"schema": auto.ORDER_SCHEMA})
+        directory = self.root / "自动化混剪_20260930_120003_123456"
+        manifest = directory / "日志" / "清单" / "packaging_manifest.json"
+        auto.write(manifest, {"results": [{"output_path": str(directory / "成片" / "P1.mp4")}]})
+        completion = job / "video_montage_autonomous_completion.json"; auto.write(completion, {"decision": "pass"})
+        auto.write(job / "autonomous_state.json", {"schema": auto.STATE_SCHEMA, "review_mode": "codex_asr_pcm",
+                   "work_order": auto.ref(order), "repair_round": 1, "phase": "complete", "completion": auto.ref(completion),
+                   "output_root": str(self.root / "自动化混剪_20260930_120000_123456"),
+                   "delivery_layout": "chinese/v1", "packaging_delivery": auto.ref(manifest)})
+        auto.repair(SimpleNamespace(job_dir=job, reason="fix subtitle", continue_until_complete=False, authorization=None))
+        value = auto.state(job)
+        self.assertEqual(directory, auto.attempt_dir(value))
+        self.assertEqual("repair_required", value["phase"])
+        self.assertNotIn("completion", value)
+        self.assertFalse(completion.exists())
 
     def test_old_job_cannot_be_reinterpreted(self):
         job = self.root / "old"

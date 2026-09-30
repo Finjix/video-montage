@@ -18,7 +18,16 @@ hash-bound `reviewer_role: codex` findings. Never claim an independent reviewer,
 human listening, or forced word alignment. Machine gates re-run ASR on source,
 candidate, clean and packaged media, inspect PCM, validate subtitles and
 recheck output hashes. Reject ambiguous speech, visuals or copy rather than
-guessing. After three rejected repair rounds, stop with the failure report.
+guessing. After three rejected repair rounds, stop with the failure report unless
+the user explicitly requests continued repair until complete delivery. Honor that
+request with the `repair --continue-until-complete --authorization <user instruction>`
+command, preserving all previous failures, evidence, and round numbers. Continue
+repairing or rebuilding until every requested packaged video passes; never replace
+quality checks with invented approvals or deliver partial results as completion.
+Reuse the original delivery directory for every repair and reburn; do not create
+new version folders. Render and check temporary video files before replacing
+existing MP4s, update subtitles and manifests in place, and invalidate stale
+completion receipts until the replacement batch passes all delivery checks.
 For every candidate, inspect the first and last 30 native frames in order,
 including the required first and last 13 frames and any original source
 transition near them. Report entry and exit visual findings separately.

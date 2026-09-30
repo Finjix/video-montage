@@ -5,14 +5,16 @@ Codex 根据原片/成片转写和素材文案先纠错字幕，程序再烧录�
 
 包装只接受 1440×2560、60 fps、带音频的纯净成片。完整混剪任务先通过语义和控制器质检，再包装；现有视频可以用独立命令测试包装，但其回执标记为 `standalone_test`，不代表通过混剪交付门禁。
 
+所有新输出目录必须命名为 `自动化混剪_YYYYMMDD_HHMMSS`（可追加六位微秒），命令行会检查命名；`--manifest` 必须位于该目录的 `日志/清单/`。字幕目录固定生成无扩展名文件 `修改字幕后让AI重新烧录`，纯净输入视频保留在 `混剪（无包装）/`。已有任务可继续通过原有状态与 Python 接口读取旧目录。
+
 ## 单条视频
 
-以下命令从项目根目录运行，使用随包 Python。先在输出目录的 `subtitles/` 生成 `subtitle-demo-01.txt`，检查并修改文字和时间；再在 `config/` 编写配置。TXT 内使用带时间码的字幕格式，仅供编辑和烧录。每个时间点最多显示一行；同一条时间码内手工写入多行时，会按文字显示宽度分配时长，依次显示。每行至少需要 20 毫秒，不足时会拒绝该时间码。
+以下命令从项目根目录运行，使用随包 Python。先在输出目录的 `字幕（可修改）/` 生成 `subtitle-demo-01.txt`，检查并修改文字和时间；再在 `日志/配置/` 编写配置。TXT 内使用带时间码的字幕格式，仅供编辑和烧录。每个时间点最多显示一行；同一条时间码内手工写入多行时，会按文字显示宽度分配时长，依次显示。每行至少需要 20 毫秒，不足时会拒绝该时间码。
 
 ```powershell
-dependencies\python\python.exe components\packaging\scripts\package_video.py draft --input D:\input.mp4 --plan-id demo-01 --output-dir D:\job\output
-dependencies\python\python.exe components\packaging\scripts\package_video.py render --config D:\job\output\config\packaging.json --output-dir D:\job\output --manifest D:\job\output\manifests\packaging_manifest.json
-dependencies\python\python.exe components\packaging\scripts\package_video.py validate --manifest D:\job\output\manifests\packaging_manifest.json --report D:\job\output\reports\packaging_validation.json
+dependencies\python\python.exe components\packaging\scripts\package_video.py draft --input D:\input.mp4 --plan-id demo-01 --output-dir D:\job\自动化混剪_20260930_153000
+dependencies\python\python.exe components\packaging\scripts\package_video.py render --config D:\job\自动化混剪_20260930_153000\日志\配置\packaging.json --output-dir D:\job\自动化混剪_20260930_153000 --manifest D:\job\自动化混剪_20260930_153000\日志\清单\packaging_manifest.json
+dependencies\python\python.exe components\packaging\scripts\package_video.py validate --manifest D:\job\自动化混剪_20260930_153000\日志\清单\packaging_manifest.json --report D:\job\自动化混剪_20260930_153000\日志\报告\packaging_validation.json
 ```
 
 没有独立审核文件时，技术检查返回 `technical_pass_pending_review`。审核者观看最终视频并听取原声与 BGM 后，提供下文的审核授权和审核文件，再用 `validate --review D:\job\review.json --review-authority D:\job\review_authority.json` 取得完整验证结果。不要把自动生成的审核结论当作独立审核。
@@ -28,7 +30,7 @@ dependencies\python\python.exe components\packaging\scripts\package_video.py val
     {
       "plan_id": "demo-01",
       "input_path": "D:/input.mp4",
-      "subtitle_txt": "../subtitles/subtitle-demo-01.txt",
+      "subtitle_txt": "../../字幕（可修改）/subtitle-demo-01.txt",
       "nameplate": {"path": "assets/nameplate.png"},
       "text_pins": [
         {"path": "assets/pin.png", "start_frame": 300, "end_frame_exclusive": 480}
@@ -46,16 +48,16 @@ dependencies\python\python.exe components\packaging\scripts\package_video.py val
 
 对照用户提供的 264×115 原图，可运行 `dependencies/python/python.exe tools/compare_subtitle_flower.py --reference <原图路径> --output-dir <对比输出目录>`。工具调用实际字幕渲染器，把字形等比缩放并平移到参考画布，计算前景并集（向外扩 2 像素）的 RGB SSIM；不以大面积黑色背景提高分数。阈值为 0.90，低于阈值返回失败。输出左右对照 PNG、原图、渲染图及包含字体和渲染器哈希的 JSON。这是明确的图像测量指标，仍需检查实际视频的混排与遮挡。
 
-字幕只烧录进画面；输出 MP4 只有一条视频流和一条音频流，没有可开关的字幕轨。渲染记录保存字体路径、哈希和字幕样式，验证时重新核对字体哈希。合成使用的 ASS 和临时字体副本会在完成后删除；项目中的原始字体保留。包装 MP4、可编辑的 `subtitle-xx.txt`、配置、清单和校验 JSON 分别放在输出根目录、`subtitles/`、`config/`、`manifests/` 和 `reports/`。不保留重复的配置或字幕快照；清单中的快照字段引用分类后的文件并保留 SHA-256 绑定。修改配置、输入视频、字幕、字体或素材会使旧验证结果失效；重新生成应使用新输出目录，程序拒绝覆盖已有成片。
-从其他目录提供配置时，存入 `config/` 的副本会将输入视频和素材路径改为绝对路径，并改为引用 `subtitles/` 中的字幕副本，因此两个配置文件的 SHA-256 可以不同；两者均由清单分别绑定。
+字幕只烧录进画面；输出 MP4 只有一条视频流和一条音频流，没有可开关的字幕轨。渲染记录保存字体路径、哈希和字幕样式，验证时重新核对字体哈希。合成使用的 ASS 和临时字体副本会在完成后删除；项目中的原始字体保留。包装 MP4、可编辑的 `subtitle-xx.txt`、配置、清单和校验 JSON 分别放在`成片/`、`字幕（可修改）/`、`日志/配置/`、`日志/清单/` 和 `日志/报告/`。不保留重复的配置或字幕快照；清单中的快照字段引用分类后的文件并保留 SHA-256 绑定。修改配置、输入视频、字幕、字体或素材会使旧验证结果失效；返修及重新烧录在原输出目录覆盖更新，临时视频检查通过后替换已有成片，并重新生成验证结果。
+从其他目录提供配置时，存入 `日志/配置/` 的副本会将输入视频和素材路径改为绝对路径，并改为引用 `字幕（可修改）/` 中的字幕副本，因此两个配置文件的 SHA-256 可以不同；两者均由清单分别绑定。
 
 ## 修改字幕后重新烧录
 
-编辑上一版输出目录 `subtitles/` 中的 `subtitle-demo-01.txt`，或将其复制出来再编辑。然后使用 `reburn`，它会读取上次的包装记录，从纯净成片和原素材重新合成，自动记录新版字幕哈希，并使用项目内同一份 W8 字体；旧记录中的外部字体路径无需继续存在。旧记录没有字幕样式时也使用新默认值。无需重新运行 Whisper，也无需手工修改原配置。新视频放进新目录根部，字幕 TXT 和配置分别放进 `subtitles/` 和 `config/`；旧 MP4 不会被覆盖。
+编辑上一版输出目录 `字幕（可修改）/` 中的 `subtitle-demo-01.txt`，或将其复制出来再编辑。然后使用 `reburn`，它会读取上次的包装记录，从纯净成片和原素材重新合成，自动记录新版字幕哈希，并使用项目内同一份 W8 字体；旧记录中的外部字体路径无需继续存在。旧记录没有字幕样式时也使用新默认值。无需重新运行 Whisper，也无需手工修改原配置。新视频覆盖原目录 `成片/` 中的对应 MP4，字幕 TXT、配置和清单同步原位更新，不新建交付文件夹。编码失败时保留原 MP4；旧质检与完成回执失效，新版须重新验证。
 
 ```powershell
-dependencies\python\python.exe components\packaging\scripts\package_video.py reburn --previous-manifest D:\job\output\manifests\packaging_manifest.json --plan-id demo-01 --subtitle-txt D:\job\output\subtitles\subtitle-demo-01.txt --output-dir D:\job\output-v2 --manifest D:\job\output-v2\manifests\packaging_manifest.json
-dependencies\python\python.exe components\packaging\scripts\package_video.py validate --manifest D:\job\output-v2\manifests\packaging_manifest.json --report D:\job\output-v2\reports\packaging_validation.json
+dependencies\python\python.exe components\packaging\scripts\package_video.py reburn --previous-manifest D:\job\自动化混剪_20260930_153000\日志\清单\packaging_manifest.json --plan-id demo-01 --subtitle-txt D:\job\自动化混剪_20260930_153000\字幕（可修改）\subtitle-demo-01.txt --output-dir D:\job\自动化混剪_20260930_153000 --manifest D:\job\自动化混剪_20260930_153000\日志\清单\packaging_manifest.json
+dependencies\python\python.exe components\packaging\scripts\package_video.py validate --manifest D:\job\自动化混剪_20260930_153000\日志\清单\packaging_manifest.json --report D:\job\自动化混剪_20260930_153000\日志\报告\packaging_validation.json
 ```
 
 完整任务用控制器命令 `packaging-reburn`，参数相同但以 `--job-dir D:\job` 代替 `--previous-manifest`。它会重新合成整批包装版，并使旧包装验证及完成回执失效；新版仍须运行 `packaging-validate` 和 `complete`。
@@ -65,13 +67,13 @@ dependencies\python\python.exe components\packaging\scripts\package_video.py val
 在 `controller-validate` 之后运行：
 
 ```powershell
-dependencies\python\python.exe components\executor\scripts\three_suite_ff.py packaging-draft --job-dir D:\job --output-dir D:\job\output
-dependencies\python\python.exe components\executor\scripts\three_suite_ff.py packaging-finalize --job-dir D:\job --config D:\job\output\config\packaging.json --output-dir D:\job\output --manifest D:\job\output\manifests\packaging_manifest.json
-dependencies\python\python.exe components\executor\scripts\three_suite_ff.py packaging-validate --job-dir D:\job --manifest D:\job\output\manifests\packaging_manifest.json --review D:\job\review.json --review-authority D:\job\review_authority.json --report D:\job\output\reports\packaging_validation.json
+dependencies\python\python.exe components\executor\scripts\three_suite_ff.py packaging-draft --job-dir D:\job --output-dir D:\job\自动化混剪_20260930_153000
+dependencies\python\python.exe components\executor\scripts\three_suite_ff.py packaging-finalize --job-dir D:\job --config D:\job\自动化混剪_20260930_153000\日志\配置\packaging.json --output-dir D:\job\自动化混剪_20260930_153000 --manifest D:\job\自动化混剪_20260930_153000\日志\清单\packaging_manifest.json
+dependencies\python\python.exe components\executor\scripts\three_suite_ff.py packaging-validate --job-dir D:\job --manifest D:\job\自动化混剪_20260930_153000\日志\清单\packaging_manifest.json --review D:\job\review.json --review-authority D:\job\review_authority.json --report D:\job\自动化混剪_20260930_153000\日志\报告\packaging_validation.json
 dependencies\python\python.exe components\executor\scripts\three_suite_ff.py complete --job-dir D:\job
 ```
 
-`packaging-draft` 在 `subtitles/` 生成全部 `subtitle-xx.txt`，并在 `reports/` 生成 `subtitle_draft.json`；修改后的字幕应由配置引用。`packaging-finalize` 核对全批次纯净视频 SHA-256，再生成包装版。若没有运行 `packaging-draft`，`complete` 沿用原来的纯净成片流程。
+`packaging-draft` 在 `字幕（可修改）/` 生成全部 `subtitle-xx.txt`，并在 `日志/报告/` 生成 `subtitle_draft.json`；修改后的字幕应由配置引用。`packaging-finalize` 核对全批次纯净视频 SHA-256，再生成包装版。若没有运行 `packaging-draft`，`complete` 沿用原来的纯净成片流程。
 直接使用包装模块的 `render --delivery-manifest` 时，还必须提供同一清单对应的 `--controller-validation` 通过回执；缺少回执的输出只能按独立测试模式生成。
 
 独立审核授权和审核文件示例：

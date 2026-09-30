@@ -16,7 +16,7 @@ from typing import Callable
 ROOT = Path(__file__).resolve().parent.parent
 DIRS = ("components", "dependencies", "docs", "skill", "tools")
 FILES = ("README.md", "install.cmd", "uninstall.cmd", "package.cmd")
-SKIP_DIRS = {".git", ".manifests", ".pytest_cache", "__pycache__", "artifacts", "records", "results", "outputs", "cache", "test"}
+SKIP_DIRS = {".git", ".manifests", ".pytest_cache", "__pycache__", "artifacts", "records", "results", "output", "outputs", "cache", "test"}
 SKIP_FILES = {"Thumbs.db", ".DS_Store"}
 
 

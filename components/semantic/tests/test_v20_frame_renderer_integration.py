@@ -60,6 +60,13 @@ class FrameRendererIntegrationTests(unittest.TestCase):
             try:
                 evidence = portable_frame_renderer.render(plan_path, rendered, render_evidence, 160, 284, 60, "libx264")
                 self.assertEqual(120, evidence["actual_output_frames"])
+                original_hash = portable_frame_renderer.sha256(rendered)
+                plan["segments"][0]["audio_gain_db"] = -3
+                plan_path.write_text(json.dumps(plan), encoding="utf-8")
+                replacement = portable_frame_renderer.render(plan_path, rendered, render_evidence, 160, 284, 60, "libx264", overwrite=True)
+                self.assertEqual(120, replacement["actual_output_frames"])
+                self.assertNotEqual(original_hash, portable_frame_renderer.sha256(rendered))
+                self.assertFalse(rendered.with_suffix(".partial.mp4").exists())
                 registry_path = root / "delete.json"
                 alignment_path = root / "alignment.json"
                 alignment_path.write_text(json.dumps({"schema": "spoken-alignment-evidence/v260928", "decision": "pass", "final_syllable_complete": True}), encoding="utf-8")

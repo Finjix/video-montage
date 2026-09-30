@@ -94,10 +94,11 @@ def coalesce_segments(segments: list[dict]) -> list[dict]:
             same_hash = str(previous.get("source_sha256") or "").lower() == str(current.get("source_sha256") or "").lower()
             same_fps = (previous["source_fps_num"], previous["source_fps_den"]) == (current["source_fps_num"], current["source_fps_den"])
             same_speed = abs(float(previous.get("speed", 1.0)) - float(current.get("speed", 1.0))) <= 1e-12
+            same_gain = float(previous.get("audio_gain_db", 0.0)) == float(current.get("audio_gain_db", 0.0))
             monotonic = int(current["source_in_frame"]) >= int(previous["source_in_frame"])
             touches_or_overlaps = int(current["source_in_frame"]) <= int(previous["source_out_frame_exclusive"])
             extends_forward = int(current["source_out_frame_exclusive"]) > int(previous["source_out_frame_exclusive"])
-            if same_source and same_hash and same_fps and same_speed and monotonic and touches_or_overlaps and extends_forward:
+            if same_source and same_hash and same_fps and same_speed and same_gain and monotonic and touches_or_overlaps and extends_forward:
                 previous["source_out_frame_exclusive"] = int(current["source_out_frame_exclusive"])
                 previous["speech_end_frame"] = max(int(previous["speech_end_frame"]), int(current["speech_end_frame"]))
                 previous["_candidate_ids"].extend(current["_candidate_ids"])
@@ -109,7 +110,7 @@ def coalesce_segments(segments: list[dict]) -> list[dict]:
     return result
 
 
-def render(plan_path: Path, output: Path, evidence: Path, width: int, height: int, fps: int, encoder: str) -> dict:
+def render(plan_path: Path, output: Path, evidence: Path, width: int, height: int, fps: int, encoder: str, *, overwrite: bool = False) -> dict:
     plan = load_json(plan_path)
     errors = validate_plan_value(plan)
     if errors:
@@ -160,6 +161,12 @@ def render(plan_path: Path, output: Path, evidence: Path, width: int, height: in
             f"[{index}:a]atrim=start={audio_start:.12f}:end={audio_end:.12f},"
             "asetpts=PTS-STARTPTS,aresample=48000"
         )
+        # Reserve headroom before lossy encoding when the frame plan requests it.
+        audio_gain_db = float(segment.get("audio_gain_db", 0.0))
+        if not -24.0 <= audio_gain_db <= 0.0:
+            raise ValueError("audio_gain_db must be between -24 and 0 dB")
+        if audio_gain_db:
+            audio += f",volume={audio_gain_db:.6f}dB"
         if abs(speed - 1.0) > 1e-12:
             audio += "," + atempo_chain(speed)
         audio += f",apad=pad_dur={output_duration:.12f},atrim=duration={output_duration:.12f}[a{index}]"
@@ -181,6 +188,7 @@ def render(plan_path: Path, output: Path, evidence: Path, width: int, height: in
                 "audio_start_seconds_derived_from_frame": audio_start,
                 "audio_end_seconds_derived_from_frame": audio_end,
                 "speed": speed,
+                "audio_gain_db": audio_gain_db,
                 "expected_output_frames": segment_output_frames,
                 "nominal_duration_seconds": nominal_duration,
                 "output_duration_seconds": output_duration,
@@ -188,7 +196,7 @@ def render(plan_path: Path, output: Path, evidence: Path, width: int, height: in
         )
     filters.append("".join(concat_inputs) + f"concat=n={len(segments)}:v=1:a=1[vout][aout]")
     partial = output.with_suffix(".partial.mp4")
-    if output.exists() or partial.exists():
+    if partial.exists() or (output.exists() and not overwrite):
         raise FileExistsError(f"refusing overwrite: {output}")
     output.parent.mkdir(parents=True, exist_ok=True)
     codec = (

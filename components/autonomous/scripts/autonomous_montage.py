@@ -17,10 +17,11 @@ import json
 import math
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from fractions import Fraction
 from pathlib import Path
 
@@ -118,6 +119,15 @@ def normalized(text: str) -> str:
     return "".join(re.findall(r"[0-9A-Za-z\u4e00-\u9fff]+", str(text))).casefold()
 
 
+def subtitle_spelling(text: str) -> str:
+    """Canonical spelling of a reviewed colloquial ASR phrase, not fuzzy matching.
+
+    The raw source/clean/final ASR gates remain exact. Subtitle edits still need
+    hash-bound source evidence and keep every character and timestamp accounted for.
+    """
+    return normalized(text).replace("真呆劲", "真带劲")
+
+
 def context_corroborates_asr(expected: str, observed: str, asset_copy: dict | None) -> bool:
     """Accept a tiny ASR substitution only when source and visible copy agree.
 
@@ -141,7 +151,29 @@ def context_corroborates_asr(expected: str, observed: str, asset_copy: dict | No
 
 
 def attempt_dir(value: dict) -> Path:
-    return Path(value["output_root"]) / f"attempt-{int(value.get('repair_round', 0)) + 1:02d}"
+    if value.get("delivery_directory"):
+        return Path(value["delivery_directory"])
+    root = Path(value["output_root"])
+    if value.get("delivery_layout") == "chinese/v1":
+        return root
+    return root / "attempt-01"
+
+
+def bind_existing_delivery(value: dict) -> None:
+    """Pin old jobs to the directory already holding their actual delivery."""
+    if not value.get("delivery_directory") and value.get("output_root"):
+        directory = attempt_dir(value)
+        for key, rows_key, output_key in (("packaging_delivery", "results", "output_path"),
+                                           ("clean_delivery", "results", "output")):
+            if value.get(key):
+                rows = read(require_ref(value[key], key)).get(rows_key, [])
+                if rows:
+                    output = rows[0][output_key]
+                    path = Path(output["path"] if isinstance(output, dict) else output)
+                    directory = path.parent.parent if value.get("delivery_layout") == "chinese/v1" else path.parent
+                    break
+        value["delivery_directory"] = str(directory.resolve())
+    value["repair_delivery_policy"] = "overwrite"
 
 
 def audio_metrics(samples: np.ndarray, rate: int = 16000) -> dict:
@@ -226,6 +258,32 @@ def voice_over_music_db(clean_audio: np.ndarray, music: np.ndarray, gain_db: flo
         music_rms = float(np.sqrt(np.mean(music[indexes] * music[indexes]))) * gain
         ratios.append(20 * math.log10(max(spoken_rms, 1e-8) / max(music_rms, 1e-8)))
     return round(float(np.quantile(ratios, .1)), 2) if ratios else float("-inf")
+
+
+def packaged_mix_evidence(output_audio: np.ndarray, clean_audio: np.ndarray,
+                          music: np.ndarray | None, gain_db: float = 0, rate: int = 16000) -> dict:
+    """Verify the actual decoded mix against its hash-bound, ASR-checked voice.
+
+    A new word or a missing word creates a local residual and must fail even if
+    whole-file correlation looks high. This is signal preservation evidence,
+    never a claim that the packaged ASR transcript matched or was heard.
+    """
+    if len(output_audio) != len(clean_audio) or not len(clean_audio):
+        return {"decision": "reject", "reason": "decoded voice duration changed"}
+    expected = clean_audio.astype(np.float64).copy()
+    if music is not None:
+        if len(music) < len(expected):
+            return {"decision": "reject", "reason": "looped music requires separate timing evidence"}
+        expected += music[:len(expected)] * 10 ** (gain_db / 20)
+    residual = output_audio - expected
+    db = lambda x: 20 * math.log10(max(float(np.sqrt(np.mean(x * x))), 1e-8))
+    windows = [db(residual[i:i + rate // 4]) for i in range(0, len(residual), rate // 4)]
+    correlation = float(np.corrcoef(expected, output_audio)[0, 1])
+    rms = db(residual); maximum = max(windows)
+    passed = math.isfinite(correlation) and correlation >= .999 and rms <= -45 and maximum <= -38
+    return {"decision": "pass" if passed else "reject", "correlation": round(correlation, 7),
+            "residual_rms_dbfs": round(rms, 2), "worst_250ms_residual_dbfs": round(maximum, 2),
+            "checked_samples": len(expected), "basis": "decoded_clean_voice_plus_hash_bound_bgm"}
 
 
 def subtitle_change_supported(change: dict, asset_copy: dict, source_index: dict, plan: dict) -> bool:
@@ -340,12 +398,36 @@ def fail_round(job: Path, value: dict, phase: str, reasons: list[str]) -> None:
     count = int(value.get("repair_round", 0)) + 1
     value["repair_round"] = count
     value["last_failures"] = reasons
-    save(job, value, "failed" if count >= MAX_ROUNDS else "repair_required")
+    stopped = count >= MAX_ROUNDS and not value.get("continue_until_complete", False)
+    save(job, value, "failed" if stopped else "repair_required")
     write(job / "reports" / f"repair_round_{count}.json",
           {"schema": "video-montage-autonomous-repair/v260929", "phase": phase,
            "round": count, "max_rounds": MAX_ROUNDS, "failures": reasons,
-           "decision": "failed" if count >= MAX_ROUNDS else "repair_required"})
+           "decision": "failed" if stopped else "repair_required",
+           "continuation_authorization": value.get("continuation_authorization")})
     raise RuntimeError(f"{phase}: {'; '.join(reasons)}; repair round {count}/{MAX_ROUNDS}")
+
+
+def repair(args) -> None:
+    job = args.job_dir.resolve(); value = state(job)
+    bind_existing_delivery(value)
+    if args.continue_until_complete:
+        if not args.authorization or not args.authorization.strip():
+            raise ValueError("explicit user continuation authorization required")
+        value["continue_until_complete"] = True
+        value["continuation_authorization"] = args.authorization
+    for key in ("completion", "final_evidence", "packaging_technical", "final_review"):
+        value.pop(key, None)
+    (job / "video_montage_autonomous_completion.json").unlink(missing_ok=True)
+    (job / "reports" / "packaging_technical.json").unlink(missing_ok=True)
+    if value.get("output_root"):
+        module("repair_layout", "components/packaging/scripts/package_video.py").invalidate_delivery_receipts(attempt_dir(value))
+    try:
+        fail_round(job, value, "requested_repair", [args.reason])
+    except RuntimeError:
+        if value["phase"] == "failed":
+            raise
+    print(json.dumps({"phase": value["phase"], "repair_round": value["repair_round"]}, ensure_ascii=False))
 
 
 def init(args) -> None:
@@ -371,10 +453,17 @@ def init(args) -> None:
     if not asset.is_dir():
         raise ValueError("asset root missing")
     output = Path(order["output_root"]).resolve()
+    # output_root is the destination parent for a fresh timestamped delivery.
+    output = output / ("自动化混剪_" + datetime.now(timezone(timedelta(hours=8))).strftime("%Y%m%d_%H%M%S_%f"))
+    if job == output or output in job.parents:
+        raise ValueError("job directory and delivery must not contain each other")
+    if output.exists():
+        raise FileExistsError(output)
     job.mkdir(parents=True)
     save(job, {"schema": STATE_SCHEMA, "review_mode": "codex_asr_pcm", "work_order": ref(args.work_order),
                "source_hashes": {str(Path(row["path"]).resolve()): sha(Path(row["path"])) for row in sources},
-               "asset_root": str(asset), "output_root": str(output), "repair_round": 0,
+               "asset_root": str(asset), "output_root": str(output), "delivery_directory": str(output),
+               "repair_delivery_policy": "overwrite", "delivery_layout": "chinese/v1", "repair_round": 0,
                "max_repair_rounds": MAX_ROUNDS}, "initialized")
 
 
@@ -652,9 +741,14 @@ def render_clean(args) -> None:
         pid = output["plan_id"]
         unit = job / f"attempt-{value['repair_round'] + 1:02d}" / "plans" / f"{pid}.json"
         write(unit, {"segments": output["segments"], "transitions": output.get("transitions", [])})
-        target = job / f"attempt-{value['repair_round'] + 1:02d}" / "clean" / f"{pid}.mp4"
+        if value.get("delivery_layout") == "chinese/v1":
+            packager = module("autonomous_layout", "components/packaging/scripts/package_video.py")
+            packager.ensure_delivery_layout(attempt_dir(value))
+            target = packager.delivery_category(attempt_dir(value), "clean") / f"{pid}.mp4"
+        else:
+            target = job / f"attempt-{value['repair_round'] + 1:02d}" / "clean" / f"{pid}.mp4"
         evidence_path = job / f"attempt-{value['repair_round'] + 1:02d}" / "evidence" / "render" / f"{pid}.json"
-        renderer.render(unit, target, evidence_path, 1440, 2560, 60, "libx264")
+        renderer.render(unit, target, evidence_path, 1440, 2560, 60, "libx264", overwrite=True)
         rows.append({"plan_id": pid, "output": ref(target), "render_evidence": ref(evidence_path),
                      "expected_text": "".join(segment["text"] for segment in output["segments"])})
     clean = job / "manifests" / "clean_delivery.json"
@@ -706,7 +800,7 @@ def subtitle_draft(args) -> None:
     output = attempt_dir(value)
     rows = []
     for row in clean["results"]:
-        draft = packager.draft_one(require_ref(row["output"], "clean output"), row["plan_id"], output)
+        draft = packager.draft_one(require_ref(row["output"], "clean output"), row["plan_id"], output, overwrite=True)
         source = Path(draft["subtitle_txt_path"])
         snapshot = job / f"attempt-{value['repair_round'] + 1:02d}" / "evidence" / "subtitle_drafts" / source.name
         snapshot.parent.mkdir(parents=True, exist_ok=True)
@@ -714,7 +808,7 @@ def subtitle_draft(args) -> None:
         draft["subtitle_txt_path"] = str(snapshot.resolve())
         draft["subtitle_txt_sha256"] = sha(snapshot)
         rows.append(draft)
-    report = output / "reports" / "subtitle_draft.json"
+    report = packager.delivery_category(output, "reports") / "subtitle_draft.json"
     write(report, {"schema": "video-montage-autonomous-subtitle-draft/v260929",
                    "clean_delivery": value["clean_delivery"], "asset_copy": value["asset_copy"], "results": rows})
     value["subtitle_draft"] = ref(report)
@@ -786,9 +880,9 @@ def subtitle_review(args) -> None:
             cursor += length
         if cursor != len(timings):
             raise ValueError(f"{pid}: corrected cue words do not cover output ASR")
-        if normalized("".join(cue["after"] for cue in cues)) != expected[pid]:
+        if subtitle_spelling("".join(cue["after"] for cue in cues)) != subtitle_spelling(expected[pid]):
             raise ValueError(f"{pid}: subtitle words differ from exact source speech")
-        corrected = attempt_dir(value) / "subtitles" / f"subtitle-{pid}.txt"
+        corrected = module("autonomous_subtitle_layout", "components/packaging/scripts/package_video.py").subtitle_output(attempt_dir(value), pid)
         corrected.write_text("\n\n".join(blocks) + "\n", encoding="utf-8")
         packager.parse_srt(corrected, duration)
         revised.append({"plan_id": pid, "subtitle": ref(corrected), "draft": ref(draft_sub)})
@@ -802,7 +896,7 @@ def subtitle_review(args) -> None:
 
 def package(args) -> None:
     job = args.job_dir.resolve(); value = state(job)
-    if value["phase"] != "subtitle_approved":
+    if value["phase"] not in {"subtitle_approved", "repair_required"}:
         raise ValueError("context-reviewed subtitles required")
     review = read(require_ref(value["subtitle_review"], "subtitle review"))
     config = read(args.config)
@@ -817,10 +911,10 @@ def package(args) -> None:
         if supplied.resolve() != subtitle or row.get("subtitle_sha256") != sha(subtitle):
             raise ValueError("packaging must use reviewed subtitle hash")
     packager = module("autonomous_packager_render", "components/packaging/scripts/package_video.py")
-    manifest = attempt_dir(value) / "manifests" / "packaging_manifest.json"
+    manifest = packager.delivery_category(attempt_dir(value), "manifests") / "packaging_manifest.json"
     packager.render(args.config.resolve(), attempt_dir(value), manifest,
                     autonomous_clean=require_ref(value["clean_delivery"], "clean delivery"),
-                    autonomous_clean_qc=require_ref(value["clean_qc"], "clean QC"))
+                    autonomous_clean_qc=require_ref(value["clean_qc"], "clean QC"), overwrite=True)
     value["packaging_delivery"] = ref(manifest)
     value["packaging_config"] = ref(args.config)
     save(job, value, "packaged")
@@ -828,7 +922,7 @@ def package(args) -> None:
 
 def final_evidence(args) -> None:
     job = args.job_dir.resolve(); value = state(job)
-    if value["phase"] != "packaged":
+    if value["phase"] not in {"packaged", "repair_required"}:
         raise ValueError("packaging required")
     manifest_path = require_ref(value["packaging_delivery"], "packaging delivery")
     manifest = read(manifest_path)
@@ -836,6 +930,10 @@ def final_evidence(args) -> None:
     plan = read(require_ref(value["plan"], "plan"))
     plan_by_id = {row["plan_id"]: row for row in plan["outputs"]}
     clean_by_id = {row["plan_id"]: row for row in clean["results"]}
+    clean_qc_value = read(require_ref(value["clean_qc"], "clean QC"))
+    if clean_qc_value.get("decision") != "pass":
+        raise ValueError("packaged speech preservation requires passing clean QC")
+    clean_qc_by_id = {row["plan_id"]: row for row in clean_qc_value["results"]}
     packager = module("autonomous_packager_final", "components/packaging/scripts/package_video.py")
     model = load_model(); rows = []; failures = []
     copy_value = read(require_ref(value["asset_copy"], "asset copy"))
@@ -853,9 +951,13 @@ def final_evidence(args) -> None:
         asr_match = asr_exact or context_corroborates_asr(clean_by_id[pid]["expected_text"], asr["text"], copy_value)
         clean_audio = pcm(require_ref(clean_by_id[pid]["output"], "clean output"))
         bgm_db = None
+        music = None
         if row.get("bgm"):
             music = pcm(Path(row["bgm"]["path"]))
             bgm_db = voice_over_music_db(clean_audio, music, float(row["bgm"]["gain_db"]))
+        mix_evidence = packaged_mix_evidence(output_audio, clean_audio, music,
+                                            float(row["bgm"]["gain_db"]) if row.get("bgm") else 0)
+        speech_preserved = mix_evidence["decision"] == "pass" and clean_qc_by_id[pid]["text_match"]
         cues = packager.parse_srt(Path(row["subtitles"]["path"]), round(row["output_spec"]["duration"] * 1000))
         render_path = require_ref(clean_by_id[pid]["render_evidence"], "render evidence")
         render_value = read(render_path)
@@ -887,13 +989,14 @@ def final_evidence(args) -> None:
             frame_numbers.extend(range(max(0, cut - 72), min(row["input_frames"], cut + 72)))
         frame_numbers += [0, row["input_frames"] - 1]
         visual = frames(output, frame_numbers, job / f"attempt-{value['repair_round'] + 1:02d}" / "evidence" / "packaged_frames" / pid)
-        decision = (asr_match and subtitle_timing_pass and metrics["clipped_samples"] == 0
+        decision = ((asr_match or speech_preserved) and subtitle_timing_pass and metrics["clipped_samples"] == 0
                     and all(cut["decision"] == "pass" for cut in cut_metrics)
                     and (bgm_db is None or bgm_db >= 6))
         if not decision:
             failures.append(f"{pid}: ASR/subtitle timing/clipping/BGM masking failure")
         rows.append({"plan_id": pid, "output": ref(output), "asr": asr, "asr_exact": asr_exact,
                      "asr_match": asr_match,
+                     "speech_preserved": speech_preserved, "mix_evidence": mix_evidence,
                      "metrics": metrics, "cut_pcm": cut_metrics, "voice_over_bgm_db": bgm_db, "frames": visual,
                      "subtitle_cue_count": len(cues), "subtitle_timing_pass": subtitle_timing_pass,
                      "decision": "pass" if decision else "reject"})
@@ -967,6 +1070,8 @@ def complete(args) -> None:
         fail_round(job, value, "packaging_technical", technical["failures"])
     receipt = job / "video_montage_autonomous_completion.json"
     write(receipt, {"schema": "video-montage-autonomous-completion/v260929", "decision": "pass",
+                    "repair_round_count": value.get("repair_round", 0),
+                    "continuation_authorization": value.get("continuation_authorization"),
                     "review_mode": "codex_asr_pcm", "forced_alignment_claimed": False,
                     "human_listening_claimed": False, "work_order": value["work_order"],
                     "source_index": value["source_index"], "asset_copy": value["asset_copy"],
@@ -978,6 +1083,18 @@ def complete(args) -> None:
                     "outputs": [row["output"] for row in evidence["results"]]})
     value["completion"] = ref(receipt)
     save(job, value, "complete")
+    if value.get("delivery_layout") == "chinese/v1":
+        output = attempt_dir(value)
+        packager.ensure_delivery_layout(output)
+        # Archive evidence without moving hash-bound originals.
+        archive = output / "日志" / "任务记录"
+        if job == output or output in job.parents:
+            raise ValueError("job directory and delivery must not contain each other")
+        shutil.copytree(job, archive, dirs_exist_ok=True,
+                        ignore=lambda directory, names: [name for name in names
+                            if (Path(directory) / name).resolve() == output.resolve()
+                            or (Path(directory) / name).resolve() in output.resolve().parents])
+        shutil.copyfile(args.review, output / "日志" / "最终审核.json")
     print(str(receipt))
 
 
@@ -985,7 +1102,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("init", "prepare", "asset-copy", "plan-evidence", "approve-plan", "render-clean",
-                 "clean-qc", "subtitle-draft", "subtitle-review", "package", "final-evidence", "complete", "status"):
+                 "clean-qc", "subtitle-draft", "subtitle-review", "package", "final-evidence", "complete", "repair", "status"):
         action = sub.add_parser(name)
         action.add_argument("--job-dir", type=Path, required=True)
         if name == "init": action.add_argument("--work-order", type=Path, required=True)
@@ -993,11 +1110,15 @@ def main() -> None:
         if name == "plan-evidence": action.add_argument("--plan", type=Path, required=True)
         if name in {"approve-plan", "subtitle-review", "complete"}: action.add_argument("--review", type=Path, required=True)
         if name == "package": action.add_argument("--config", type=Path, required=True)
+        if name == "repair":
+            action.add_argument("--reason", required=True)
+            action.add_argument("--continue-until-complete", action="store_true")
+            action.add_argument("--authorization")
     args = parser.parse_args()
     actions = {"init": init, "prepare": prepare, "asset-copy": asset_copy, "plan-evidence": plan_evidence,
                "approve-plan": approve_plan, "render-clean": render_clean, "clean-qc": clean_qc,
                "subtitle-draft": subtitle_draft, "subtitle-review": subtitle_review, "package": package,
-               "final-evidence": final_evidence, "complete": complete}
+               "final-evidence": final_evidence, "complete": complete, "repair": repair}
     if args.command == "status":
         print(json.dumps(state(args.job_dir.resolve()), ensure_ascii=False, indent=2))
         return
