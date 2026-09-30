@@ -155,7 +155,9 @@ def main():
         require_reference(value.get("controller_validation"),"controller validation")
         delivery=require_reference(value.get("delivery_manifest"),"clean delivery")
         run([sys.executable,str(packager),"draft-batch","--delivery-manifest",str(delivery),"--output-dir",str(a.output_dir.resolve())])
-        draft=a.output_dir.resolve()/"临时文件"/"报告"/"subtitle_draft.json"
+        output=a.output_dir.resolve()
+        project=output.parent.parent if output.parent.name=="work" else output.parent
+        draft=project/".runtime"/"jobs"/output.name/"报告"/"subtitle_draft.json"
         clear_after(value,"packaging_draft",job)
         value["packaging_draft"]={"path":str(draft),"sha256":sha(draft)}; save(job,value,"packaging_drafted","editable subtitles generated"); return
     if a.command=="packaging-finalize":

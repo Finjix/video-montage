@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from types import SimpleNamespace
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 from PIL import Image
@@ -69,7 +70,7 @@ class AutonomousContractTests(unittest.TestCase):
         order = self.root / "order.json"
         auto.write(order, {"schema": auto.ORDER_SCHEMA, "sources": [{"path": str(source)}],
                            "requested_outputs": 1, "asset_root": str(assets), "output_root": str(parent)})
-        job = parent / "自动化混剪_20260930_153000_123456" / "临时文件"
+        job = self.root / ".runtime" / "jobs" / "自动化混剪_20260930_153000_123456"
         auto.init(SimpleNamespace(job_dir=job, work_order=order))
         value = auto.state(job)
         output = Path(value["output_root"])
@@ -77,13 +78,16 @@ class AutonomousContractTests(unittest.TestCase):
         self.assertRegex(output.name, r"^自动化混剪_\d{8}_\d{6}_\d{6}$")
         self.assertEqual("chinese/v1", value["delivery_layout"])
         self.assertEqual(output, auto.attempt_dir(value))
-        self.assertEqual(job, output / "临时文件")
+        self.assertFalse(job.is_relative_to(output))
+        self.assertEqual("external/v1", value["records_policy"])
+        self.assertEqual({"配置"}, {p.name for p in (output / "临时文件").iterdir()})
         self.assertEqual(job / "work_order.json", Path(value["work_order"]["path"]))
         auto.init(SimpleNamespace(job_dir=None, work_order=order))
         generated = [p for p in parent.iterdir() if p != output]
         self.assertEqual(1, len(generated))
         self.assertRegex(generated[0].name, r"^自动化混剪_\d{8}_\d{6}_\d{6}$")
-        self.assertEqual(generated[0], auto.attempt_dir(auto.state(generated[0] / "临时文件")))
+        generated_job = self.root / ".runtime" / "jobs" / generated[0].name
+        self.assertEqual(generated[0], auto.attempt_dir(auto.state(generated_job)))
         bad_order = auto.read(order)
         bad_order["output_root"] = str(self.root / "output")
         auto.write(order, bad_order)
@@ -99,6 +103,36 @@ class AutonomousContractTests(unittest.TestCase):
         self.assertEqual(first.parent, second.parent)
         self.assertEqual("自动化混剪_20260930_235959_123456", second.name)
         self.assertEqual(first, second)
+
+    def test_completion_keeps_records_external_and_does_not_archive_them_into_delivery(self):
+        output = self.root / "work" / "自动化混剪_20260930_153000_123456"
+        packager = auto.module("external_layout_test", "components/packaging/scripts/package_video.py")
+        job = packager.runtime_directory(output)
+        job.mkdir(parents=True)
+        dummy = job / "fixture.json"; auto.write(dummy, {})
+        media = output / "成片" / "P1.mp4"
+        media.parent.mkdir(parents=True); media.write_bytes(b"video fixture")
+        evidence = job / "evidence.json"
+        auto.write(evidence, {"results": [{"plan_id": "P1", "output": auto.ref(media), "frames": []}]})
+        review = job / "review.json"
+        auto.write(review, {"schema": auto.REVIEW_SCHEMA, "stage": "final", "reviewer_role": "codex",
+                   "evidence_sha256": auto.sha(evidence), "outputs": [{"plan_id": "P1",
+                   "output_sha256": auto.sha(media), "visual_pass": True, "subtitle_pass": True,
+                   "overlay_pass": True, "reason": "layout test fixture"}]})
+        value = {key: auto.ref(dummy) for key in ("work_order", "source_index", "asset_copy", "plan",
+                 "plan_evidence", "plan_review", "clean_delivery", "clean_qc", "subtitle_review", "packaging_delivery")}
+        value.update({"schema": auto.STATE_SCHEMA, "review_mode": "codex_asr_pcm", "phase": "final_evidenced",
+                     "output_root": str(output), "delivery_layout": "chinese/v1", "final_evidence": auto.ref(evidence)})
+        auto.write(job / "autonomous_state.json", value)
+        def validate(manifest, report, **kwargs):
+            auto.write(report, {"decision": "pass"})
+            return {"decision": "pass"}
+        with patch.object(auto, "audit_provenance"), patch.object(auto, "module", return_value=packager), \
+             patch.object(packager, "validate", side_effect=validate):
+            auto.complete(SimpleNamespace(job_dir=job, review=review))
+        self.assertTrue((job / "video_montage_autonomous_completion.json").is_file())
+        self.assertEqual({"配置"}, {p.name for p in (output / "临时文件").iterdir()})
+        self.assertFalse(list(output.rglob("*.json")))
 
     def test_completed_job_repair_pins_actual_delivery_and_invalidates_completion(self):
         job = self.root / "job"; job.mkdir()

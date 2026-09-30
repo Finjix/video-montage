@@ -11,7 +11,22 @@ Use this skill for **new** jobs. Read [the complete workflow](../../components/a
 and run `components/autonomous/scripts/autonomous_montage.py` with
 `dependencies/python/python.exe`. The work order must name original sources,
 the asset pack and requested output count. Deliver under the project work/ directory;
-keep the job state, evidence, reviews and temporary media in the delivery 临时文件/ directory.
+keep job state, evidence, reviews, logs and validation reports outside the delivery,
+under `.runtime/jobs/<delivery-name>/`. Use the job_dir returned by init. Delivery
+临时文件/ contains only necessary render/edit files and reusable packaging config;
+never archive or copy job records there at completion.
+
+For a batch, read [batch diversity](../../components/autonomous/batch-diversity.md).
+Build coherent whole-edit alternatives across usable hooks, narrative routes,
+middle segments and endings, then run `diversify-plan` before `plan-evidence`.
+Minimize opening reuse first, then whole-sequence and source/combination reuse.
+When sources are limited, balance necessary reuse to fill the requested count,
+including batches of 40–50; there are no hard reuse quotas. Never invent capacity,
+shuffle dependent speech, or treat renamed IDs, cut jitter or new packaging as
+new footage. Inspect the hash-bound diversity report and explain remaining reuse
+in the plan review's `diversity_reason`. After rejecting a candidate, rebuild the
+whole batch from the remaining usable alternatives instead of copying one safe
+opening into every output. All normal quality gates still apply.
 
 Codex itself examines source ASR, native decoded frames, the asset copy pack,
 candidate evidence and final packaged frame evidence. Submit honest,

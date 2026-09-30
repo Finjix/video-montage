@@ -80,7 +80,7 @@ def copy_filter(directory: str, names: list[str], source: Path) -> set[str]:
     ignored = {name for name in names if name in {"__pycache__", ".pytest_cache"} or name.endswith(".pyc")}
     current = Path(directory).resolve()
     if current == source:
-        ignored.update({".git", ".manifests", "artifacts", "release", "test"} & set(names))
+        ignored.update({".git", ".manifests", ".runtime", "artifacts", "release", "test", "work", "output"} & set(names))
     if current == source / "components" / "semantic":
         ignored.update({"records"} & set(names))
     return ignored
@@ -108,7 +108,7 @@ def install(source: Path, target: Path, legacy_target: Path, agent_link: Path) -
         root_skill = (source / "skill" / SKILL / "SKILL.md").read_text(encoding="utf-8-sig")
         for name in ("semantic-workflow.md", "controller-workflow.md", "executor-workflow.md"):
             root_skill = root_skill.replace(f"]({name})", f"](skill/{SKILL}/{name})")
-        root_skill = root_skill.replace("](../../components/packaging/README.md)", "](components/packaging/README.md)")
+        root_skill = root_skill.replace("](../../components/", "](components/")
         (stage / "SKILL.md").write_text(root_skill, encoding="utf-8")
         staged_python = stage / "dependencies/python/python.exe"
         progress("正在运行发布校验，请稍候...")

@@ -50,12 +50,20 @@ SUBTITLE_EMPHASIS = {
 OUTPUT_NAME = re.compile(r"自动化混剪_\d{8}_\d{6}(?:_\d{6})?\Z")
 
 
+def runtime_directory(root: Path) -> Path:
+    """Keep audit/state files outside delivered media, keyed by delivery name."""
+    root = root.resolve()
+    project = root.parent.parent if root.parent.name == "work" else root.parent
+    return project / ".runtime" / "jobs" / root.name
+
+
 def delivery_category(root: Path, kind: str) -> Path:
     """Keep existing jobs readable while using the required layout for new jobs."""
     if OUTPUT_NAME.fullmatch(root.name):
+        if kind in {"manifests", "reports"}:
+            return runtime_directory(root) / {"manifests": "清单", "reports": "报告"}[kind]
         return root / {"video": "成片", "clean": "混剪（无包装）",
-                       "subtitles": "字幕（可修改）", "config": "临时文件/配置",
-                       "manifests": "临时文件/清单", "reports": "临时文件/报告"}[kind]
+                       "subtitles": "字幕（可修改）", "config": "临时文件/配置"}[kind]
     return root if kind == "video" else root / kind
 
 
@@ -68,8 +76,8 @@ def ensure_delivery_layout(root: Path) -> None:
     generated_prefix = "修改本目录 subtitle-*.txt 的文字或时间码后，把本输出目录交给 AI，要求重新烧录。"
     if not marker.exists() or marker.read_text(encoding="utf-8").startswith(generated_prefix):
         marker.write_text(generated_prefix + "\n"
-                          "保留混剪（无包装）和临时文件目录，AI 使用临时文件/清单中的包装清单及临时文件/配置中的配置重新烧录并校验。\n"
-                          "重新烧录在本目录覆盖成片、字幕、配置和清单，不新建交付文件夹；旧质检回执失效，重新校验后交付。\n", encoding="utf-8")
+                          "保留混剪（无包装）和临时文件/配置，AI 使用配置重新烧录并校验。\n"
+                          "重新烧录在本目录覆盖成片、字幕和配置，不新建交付文件夹；运行记录和校验结果存于项目内部，不随成片输出。\n", encoding="utf-8")
 
 
 def invalidate_delivery_receipts(root: Path) -> None:
@@ -79,6 +87,8 @@ def invalidate_delivery_receipts(root: Path) -> None:
              root / "临时文件" / "video_montage_autonomous_completion.json",
              root / "临时文件" / "reports" / "packaging_technical.json",
              delivery_category(root, "reports") / "packaging_technical.json",
+             runtime_directory(root) / "video_montage_autonomous_completion.json",
+             runtime_directory(root) / "reports" / "packaging_technical.json",
              root / "日志" / "最终审核.json",
              root / "日志" / "任务记录" / "video_montage_autonomous_completion.json",
              root / "日志" / "任务记录" / "reports" / "packaging_technical.json"]
@@ -615,6 +625,8 @@ def render_one(row: dict, output_dir: Path) -> dict:
 def render(config_path: Path, output_dir: Path, manifest_path: Path, delivery_manifest: Path | None = None,
            controller_validation: Path | None = None, autonomous_clean: Path | None = None,
            autonomous_clean_qc: Path | None = None, *, overwrite: bool = False) -> dict:
+    if OUTPUT_NAME.fullmatch(output_dir.name) and manifest_path.resolve().is_relative_to(output_dir.resolve()):
+        raise ValueError("packaging records must be outside the delivery directory")
     if manifest_path.exists() and not overwrite:
         raise FileExistsError(manifest_path)
     if bool(delivery_manifest) != bool(controller_validation):
@@ -795,6 +807,11 @@ def validate(manifest_path: Path, report_path: Path, review_path: Path | None = 
              authority_path: Path | None = None, autonomous_evidence: Path | None = None,
              autonomous_review: Path | None = None) -> dict:
     manifest = read(manifest_path)
+    for row in manifest.get("results", []):
+        output = Path(row.get("output_path", "")).resolve()
+        delivery = output.parent.parent if output.parent.name == "成片" else output.parent
+        if OUTPUT_NAME.fullmatch(delivery.name) and report_path.resolve().is_relative_to(delivery):
+            raise ValueError("validation reports must be outside the delivery directory")
     failures = []
     if bool(review_path) != bool(authority_path):
         raise ValueError("review and independent review authority must be provided together")
@@ -1023,7 +1040,7 @@ def main() -> int:
         if hasattr(args, "manifest"):
             expected_parent = delivery_category(args.output_dir.resolve(), "manifests")
             if args.manifest.resolve().parent != expected_parent:
-                parser.error("--manifest 必须位于输出目录的 临时文件/清单/ 下")
+                parser.error("--manifest 必须位于项目内部 .runtime/jobs/<交付目录名>/清单/ 下")
     if args.command == "draft":
         result = draft_one(args.input.resolve(), args.plan_id, args.output_dir.resolve())
     elif args.command == "draft-batch":

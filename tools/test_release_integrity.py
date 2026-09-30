@@ -94,6 +94,19 @@ class InstallationTests(unittest.TestCase):
         self.assertFalse(self.legacy.exists())
         self.assertFalse(self.agent_link.exists())
 
+    def test_installed_skill_keeps_batch_rule_link_readable(self):
+        guide = self.source / "components/autonomous/batch-diversity.md"
+        guide.parent.mkdir(parents=True)
+        guide.write_text("Batch diversity rules", encoding="utf-8")
+        (self.source / "skill/video-montage/SKILL.md").write_text(
+            "name: video-montage\n[batch rules](../../components/autonomous/batch-diversity.md)\n",
+            encoding="utf-8")
+        with patch.object(self.deployer, "run_checked"):
+            self.deployer.install(self.source, self.target, self.legacy, self.agent_link)
+        skill = (self.target / "SKILL.md").read_text(encoding="utf-8")
+        target = re.search(r"\]\(([^)]+)\)", skill).group(1)
+        self.assertTrue((self.target / target).is_file())
+
     def test_migrates_legacy_install_and_links(self):
         (self.legacy / "skill/video-montage").mkdir(parents=True)
         (self.legacy / "skill/video-montage/SKILL.md").write_text("name: video-montage\n", encoding="utf-8")

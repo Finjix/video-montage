@@ -452,23 +452,28 @@ def init(args) -> None:
     parent = Path(order.get("output_root", ROOT / "work")).resolve()
     if parent.name != "work":
         raise ValueError("output_root must be the work directory")
+    packager = module("init_output_layout", "components/packaging/scripts/package_video.py")
     if args.job_dir is not None:
         job = args.job_dir.resolve()
-        output = job.parent
-        if job.name != "临时文件" or output.parent != parent or not output.name.startswith("自动化混剪_"):
-            raise ValueError("job-dir must be work/自动化混剪_xx/临时文件")
+        output = parent / job.name
+        if not packager.OUTPUT_NAME.fullmatch(job.name) or job != packager.runtime_directory(output):
+            raise ValueError("job-dir must be .runtime/jobs/自动化混剪_xx outside the delivery")
     else:
         output = parent / ("自动化混剪_" + datetime.now(timezone(timedelta(hours=8))).strftime("%Y%m%d_%H%M%S_%f"))
-        job = output / "临时文件"
+        job = packager.runtime_directory(output)
     if output.exists() and any(output.iterdir()):
         raise FileExistsError(f"refusing non-empty delivery directory: {output}")
+    if job.exists() and any(job.iterdir()):
+        raise FileExistsError(f"refusing non-empty runtime directory: {job}")
     job.mkdir(parents=True)
+    packager.ensure_delivery_layout(output)
     order_snapshot = job / "work_order.json"
     shutil.copyfile(args.work_order, order_snapshot)
     save(job, {"schema": STATE_SCHEMA, "review_mode": "codex_asr_pcm", "work_order": ref(order_snapshot),
                "source_hashes": {str(Path(row["path"]).resolve()): sha(Path(row["path"])) for row in sources},
                "asset_root": str(asset), "output_root": str(output), "delivery_directory": str(output),
-               "repair_delivery_policy": "overwrite", "delivery_layout": "chinese/v1", "repair_round": 0,
+               "repair_delivery_policy": "overwrite", "delivery_layout": "chinese/v1", "records_policy": "external/v1",
+               "temporary_root": str(output / "临时文件"), "repair_round": 0,
                "max_repair_rounds": MAX_ROUNDS}, "initialized")
     print(json.dumps({"job_dir": str(job), "delivery_directory": str(output)}, ensure_ascii=False))
 
@@ -567,6 +572,66 @@ def check_plan(plan: dict, source_index: dict, count: int) -> list[str]:
     return errors
 
 
+def diversify_plan(args) -> None:
+    """Select a diverse batch from Codex's coherent, source-bound alternatives."""
+    job = args.job_dir.resolve(); value = state(job)
+    if value["phase"] not in {"prepared", "copy_indexed", "repair_required", "plan_evidenced"}:
+        raise ValueError("diverse planning requires source preparation")
+    if args.options.resolve() == args.plan.resolve():
+        raise ValueError("options and selected plan must use separate paths")
+    source_index = read(require_ref(value["source_index"], "source index"))
+    order = read(require_ref(value["work_order"], "work order"))
+    options = read(args.options)
+    errors = check_plan(options, source_index, len(options.get("outputs", [])))
+    if errors or not options.get("outputs"):
+        raise ValueError(f"invalid coherent option pool: {errors or ['empty pool']}")
+    diversity = module("autonomous_diversity", "components/autonomous/scripts/batch_diversity.py")
+    outputs, report = diversity.optimize(options["outputs"], int(order["requested_outputs"]))
+    write(args.plan, {"schema": PLAN_SCHEMA, "outputs": outputs})
+    report.update({"plan": ref(args.plan), "options": ref(args.options)})
+    report_path = job / "reports" / f"diversity_selection_round_{value['repair_round'] + 1}.json"
+    write(report_path, report)
+    value["diversity_selection"] = ref(report_path)
+    # A newly selected batch must obtain new evidence before any approval.
+    save(job, value, "copy_indexed" if value.get("asset_copy") else "prepared")
+    print(json.dumps({"plan": str(args.plan.resolve()), "report": str(report_path),
+                      "opening_repeat_pairs": report["opening_repeat_pairs"],
+                      "duplicate_sequence_pairs": report["duplicate_sequence_pairs"]}, ensure_ascii=False))
+
+
+def record_diversity(job: Path, value: dict, plan_path: Path, plan: dict) -> dict:
+    diversity = module("autonomous_diversity_report", "components/autonomous/scripts/batch_diversity.py")
+    report = diversity.evaluate(plan["outputs"])
+    selection = value.get("diversity_selection")
+    if selection:
+        selected = read(require_ref(selection, "diversity selection"))
+        if selected["plan"] == ref(plan_path):
+            require_ref(selected["options"], "coherent option pool")
+            report = selected
+        else:
+            value.pop("diversity_selection", None)
+    report["plan"] = ref(plan_path)
+    path = job / "reports" / f"batch_diversity_round_{value['repair_round'] + 1}.json"
+    write(path, report)
+    value["batch_diversity"] = ref(path)
+    return value["batch_diversity"]
+
+
+def require_diversity(value: dict, evidence: dict) -> dict | None:
+    reference = evidence.get("batch_diversity")
+    if not reference:  # Existing evidence/receipts retain their original contract.
+        return None
+    if reference != value.get("batch_diversity"):
+        raise ValueError("batch diversity evidence binding changed")
+    report = read(require_ref(reference, "batch diversity"))
+    if report.get("plan") != value["plan"]:
+        raise ValueError("batch diversity does not describe the approved plan")
+    require_ref(report["plan"], "diversity plan")
+    if report.get("options"):
+        require_ref(report["options"], "coherent option pool")
+    return report
+
+
 def frames(path: Path, frame_numbers: list[int], output: Path) -> list[dict]:
     output.mkdir(parents=True, exist_ok=True)
     numbers = sorted(set(frame_numbers))
@@ -643,6 +708,7 @@ def plan_evidence(args) -> None:
     errors = check_plan(plan, source_index, int(order["requested_outputs"]))
     if errors:
         fail_round(job, value, "plan", errors)
+    diversity_reference = record_diversity(job, value, args.plan, plan)
     model = load_model()
     asset_copy_value = read(require_ref(value["asset_copy"], "asset copy")) if value.get("asset_copy") else None
     source_asr = {row["source"]["sha256"]: normalized(read(require_ref(row["asr"], "source ASR"))["asr"]["text"])
@@ -688,7 +754,8 @@ def plan_evidence(args) -> None:
             result.append(row)
     evidence_path = job / "evidence" / f"plan_evidence_round_{value['repair_round'] + 1}.json"
     write(evidence_path, {"schema": "video-montage-plan-evidence/v260929", "plan": ref(args.plan),
-                          "source_index": value["source_index"], "results": result})
+                          "source_index": value["source_index"], "batch_diversity": diversity_reference,
+                          "results": result})
     value["plan"] = ref(args.plan); value["plan_evidence"] = ref(evidence_path)
     failures = [f"{row['plan_id']}:{row['segment_index']}:ASR/PCM/visual boundary inconclusive" for row in result if row["decision"] != "pass"]
     if failures:
@@ -702,10 +769,14 @@ def approve_plan(args) -> None:
         raise ValueError("plan evidence required")
     evidence_path = require_ref(value["plan_evidence"], "plan evidence")
     evidence = read(evidence_path); review = read(args.review)
+    diversity_report = require_diversity(value, evidence)
     if (review.get("schema") != REVIEW_SCHEMA or review.get("stage") != "plan"
             or review.get("reviewer_role") != "codex" or review.get("evidence_sha256") != sha(evidence_path)
             or review.get("plan_sha256") != value["plan"]["sha256"]):
         raise ValueError("Codex plan review binding invalid")
+    if diversity_report and (not isinstance(review.get("diversity_reason"), str)
+                             or not review["diversity_reason"].strip()):
+        raise ValueError("Codex must explain batch diversity and any necessary reuse")
     findings = review.get("segments", [])
     expected = {(row["plan_id"], row["segment_index"]) for row in evidence["results"]}
     actual = {(row.get("plan_id"), row.get("segment_index")) for row in findings}
@@ -1034,6 +1105,7 @@ def audit_provenance(value: dict) -> None:
         require_ref(row["pcm"], "candidate PCM")
         for frame in row["frames"]:
             require_ref(frame, "candidate frame")
+    require_diversity(value, read(Path(value["plan_evidence"]["path"])))
     for row in read(Path(value["clean_delivery"]["path"]))["results"]:
         require_ref(row["output"], "clean output")
         require_ref(row["render_evidence"], "clean render evidence")
@@ -1082,6 +1154,7 @@ def complete(args) -> None:
                     "human_listening_claimed": False, "work_order": value["work_order"],
                     "source_index": value["source_index"], "asset_copy": value["asset_copy"],
                     "plan": value["plan"], "plan_evidence": value["plan_evidence"],
+                    **({"batch_diversity": value["batch_diversity"]} if value.get("batch_diversity") else {}),
                     "plan_review": value["plan_review"], "clean_delivery": value["clean_delivery"],
                     "clean_qc": value["clean_qc"], "subtitle_review": value["subtitle_review"],
                     "packaging_delivery": value["packaging_delivery"], "packaging_technical": ref(technical_path),
@@ -1092,29 +1165,22 @@ def complete(args) -> None:
     if value.get("delivery_layout") == "chinese/v1":
         output = attempt_dir(value)
         packager.ensure_delivery_layout(output)
-        # Archive evidence without moving hash-bound originals.
-        archive = output / "临时文件"
-        if job != archive:
-            shutil.copytree(job, archive, dirs_exist_ok=True,
-                        ignore=lambda directory, names: [name for name in names
-                            if (Path(directory) / name).resolve() == output.resolve()
-                            or (Path(directory) / name).resolve() in output.resolve().parents])
-        review_copy = archive / "最终审核.json"
-        if args.review.resolve() != review_copy.resolve():
-            shutil.copyfile(args.review, review_copy)
     print(str(receipt))
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("init", "prepare", "asset-copy", "plan-evidence", "approve-plan", "render-clean",
+    for name in ("init", "prepare", "asset-copy", "diversify-plan", "plan-evidence", "approve-plan", "render-clean",
                  "clean-qc", "subtitle-draft", "subtitle-review", "package", "final-evidence", "complete", "repair", "status"):
         action = sub.add_parser(name)
         action.add_argument("--job-dir", type=Path, required=name != "init")
         if name == "init": action.add_argument("--work-order", type=Path, required=True)
         if name == "asset-copy": action.add_argument("--copy-text", type=Path, required=True)
         if name == "plan-evidence": action.add_argument("--plan", type=Path, required=True)
+        if name == "diversify-plan":
+            action.add_argument("--options", type=Path, required=True)
+            action.add_argument("--plan", type=Path, required=True)
         if name in {"approve-plan", "subtitle-review", "complete"}: action.add_argument("--review", type=Path, required=True)
         if name == "package": action.add_argument("--config", type=Path, required=True)
         if name == "repair":
@@ -1122,7 +1188,8 @@ def main() -> None:
             action.add_argument("--continue-until-complete", action="store_true")
             action.add_argument("--authorization")
     args = parser.parse_args()
-    actions = {"init": init, "prepare": prepare, "asset-copy": asset_copy, "plan-evidence": plan_evidence,
+    actions = {"init": init, "prepare": prepare, "asset-copy": asset_copy, "diversify-plan": diversify_plan,
+               "plan-evidence": plan_evidence,
                "approve-plan": approve_plan, "render-clean": render_clean, "clean-qc": clean_qc,
                "subtitle-draft": subtitle_draft, "subtitle-review": subtitle_review, "package": package,
                "final-evidence": final_evidence, "complete": complete, "repair": repair}

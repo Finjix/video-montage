@@ -58,7 +58,7 @@ class PackagingContractTests(unittest.TestCase):
 
     def test_in_place_reburn_keeps_clean_inputs_and_updates_the_existing_manifest(self):
         first = self.root / "自动化混剪_20260930_153000_123456"
-        manifest = first / "临时文件" / "清单" / "packaging_manifest.json"
+        manifest = packaging.delivery_category(first, "manifests") / "packaging_manifest.json"
 
         def encode(row, root):
             target = packaging.delivery_category(root, "video") / f"{row['plan_id']}.mp4"
@@ -71,6 +71,8 @@ class PackagingContractTests(unittest.TestCase):
             result = packaging.render(self.config, first, manifest)
             self.assertEqual({"成片", "混剪（无包装）", "字幕（可修改）", "临时文件"},
                              {p.name for p in first.iterdir()})
+            self.assertEqual({"配置"}, {p.name for p in (first / "临时文件").iterdir()})
+            self.assertFalse(manifest.is_relative_to(first))
             self.assertEqual(self.video.read_bytes(), (first / "混剪（无包装）" / "P1.mp4").read_bytes())
             self.assertEqual(str(first / "混剪（无包装）" / "P1.mp4"), result["results"][0]["input"]["path"])
             marker = first / "字幕（可修改）" / "修改字幕后让AI重新烧录"
@@ -103,6 +105,18 @@ class PackagingContractTests(unittest.TestCase):
         self.pin.write_bytes(b"changed image")
         with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
             self.prepare()
+
+    def test_delivery_rejects_manifest_and_validation_report_inside_output(self):
+        output = self.root / "work" / "自动化混剪_20260930_153000_123456"
+        inside = output / "临时文件" / "报告" / "validation.json"
+        with self.assertRaisesRegex(ValueError, "records must be outside"):
+            packaging.render(self.config, output, inside)
+        self.assertFalse(output.exists())
+        manifest = packaging.delivery_category(output, "manifests") / "packaging_manifest.json"
+        packaging.atomic(manifest, {"results": [{"output_path": str(output / "成片" / "P1.mp4")}]})
+        with self.assertRaisesRegex(ValueError, "reports must be outside"):
+            packaging.validate(manifest, inside)
+        self.assertFalse(inside.exists())
 
     def test_out_of_range_and_missing_text_pin_interval_rejected(self):
         self.row["text_pins"][0]["end_frame_exclusive"] = 61
