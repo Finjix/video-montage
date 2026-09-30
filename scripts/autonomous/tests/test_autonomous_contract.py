@@ -70,7 +70,7 @@ class AutonomousContractTests(unittest.TestCase):
         order = self.root / "order.json"
         auto.write(order, {"schema": auto.ORDER_SCHEMA, "sources": [{"path": str(source)}],
                            "requested_outputs": 1, "asset_root": str(assets), "output_root": str(parent)})
-        job = self.root / ".runtime" / "jobs" / "自动化混剪_20260930_153000_123456"
+        job = parent / "自动化混剪_20260930_153000_123456" / "临时文件"
         auto.init(SimpleNamespace(job_dir=job, work_order=order))
         value = auto.state(job)
         output = Path(value["output_root"])
@@ -78,16 +78,21 @@ class AutonomousContractTests(unittest.TestCase):
         self.assertRegex(output.name, r"^自动化混剪_\d{8}_\d{6}_\d{6}$")
         self.assertEqual("chinese/v1", value["delivery_layout"])
         self.assertEqual(output, auto.attempt_dir(value))
-        self.assertFalse(job.is_relative_to(output))
-        self.assertEqual("external/v1", value["records_policy"])
-        self.assertEqual({"配置"}, {p.name for p in (output / "临时文件").iterdir()})
+        self.assertEqual(output / "临时文件", job)
+        self.assertEqual("delivery-temporary/v1", value["records_policy"])
+        self.assertTrue((output / "临时文件" / "配置").is_dir())
         self.assertEqual(job / "work_order.json", Path(value["work_order"]["path"]))
         auto.init(SimpleNamespace(job_dir=None, work_order=order))
         generated = [p for p in parent.iterdir() if p != output]
         self.assertEqual(1, len(generated))
         self.assertRegex(generated[0].name, r"^自动化混剪_\d{8}_\d{6}_\d{6}$")
-        generated_job = self.root / ".runtime" / "jobs" / generated[0].name
+        generated_job = generated[0] / "临时文件"
         self.assertEqual(generated[0], auto.attempt_dir(auto.state(generated_job)))
+        self.assertFalse((self.root / ".runtime").exists())
+        with self.assertRaisesRegex(ValueError, "job-dir must be work"):
+            auto.init(SimpleNamespace(job_dir=self.root / ".runtime" / "jobs" / output.name, work_order=order))
+        with self.assertRaisesRegex(FileExistsError, "non-empty delivery"):
+            auto.init(SimpleNamespace(job_dir=job, work_order=order))
         bad_order = auto.read(order)
         bad_order["output_root"] = str(self.root / "output")
         auto.write(order, bad_order)
@@ -104,7 +109,7 @@ class AutonomousContractTests(unittest.TestCase):
         self.assertEqual("自动化混剪_20260930_235959_123456", second.name)
         self.assertEqual(first, second)
 
-    def test_completion_keeps_records_external_and_does_not_archive_them_into_delivery(self):
+    def test_completion_keeps_records_in_delivery_temporary_directory(self):
         output = self.root / "work" / "自动化混剪_20260930_153000_123456"
         packager = auto.module("external_layout_test", "scripts/packaging/scripts/package_video.py")
         job = packager.runtime_directory(output)
@@ -131,8 +136,9 @@ class AutonomousContractTests(unittest.TestCase):
              patch.object(packager, "validate", side_effect=validate):
             auto.complete(SimpleNamespace(job_dir=job, review=review))
         self.assertTrue((job / "video_montage_autonomous_completion.json").is_file())
-        self.assertEqual({"配置"}, {p.name for p in (output / "临时文件").iterdir()})
-        self.assertFalse(list(output.rglob("*.json")))
+        self.assertTrue((output / "临时文件" / "配置").is_dir())
+        self.assertEqual(job, output / "临时文件")
+        self.assertFalse(list((output / "成片").glob("*.json")))
 
     def test_completed_job_repair_pins_actual_delivery_and_invalidates_completion(self):
         job = self.root / "job"; job.mkdir()

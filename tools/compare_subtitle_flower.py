@@ -42,7 +42,7 @@ def compare(reference_path: Path, output_dir: Path) -> dict:
     recorded_style = json.loads(json.dumps(style))
     # Uniform size and translation align the screenshot. No image warping or reference pixels are used.
     style["ass"].update(play_res_x=264, play_res_y=115, position_x=geometry["x"], position_y=geometry["y"],
-                        font_size=187 / 203 * geometry["size"])
+                        font_size=style["ass"]["font_size"] / style["emphasis"]["ass_font_size"] * geometry["size"])
     style["emphasis"]["ass_font_size"] = geometry["size"]
     with TemporaryDirectory(prefix="flower-comparison-") as temp:
         work = Path(temp)

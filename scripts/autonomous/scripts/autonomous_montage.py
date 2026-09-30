@@ -455,9 +455,10 @@ def init(args) -> None:
     packager = module("init_output_layout", "scripts/packaging/scripts/package_video.py")
     if args.job_dir is not None:
         job = args.job_dir.resolve()
-        output = parent / job.name
-        if not packager.OUTPUT_NAME.fullmatch(job.name) or job != packager.runtime_directory(output):
-            raise ValueError("job-dir must be .runtime/jobs/自动化混剪_xx outside the delivery")
+        output = job.parent
+        if (output.parent != parent or not packager.OUTPUT_NAME.fullmatch(output.name)
+                or job != packager.runtime_directory(output)):
+            raise ValueError("job-dir must be work/自动化混剪_xx/临时文件")
     else:
         output = parent / ("自动化混剪_" + datetime.now(timezone(timedelta(hours=8))).strftime("%Y%m%d_%H%M%S_%f"))
         job = packager.runtime_directory(output)
@@ -472,7 +473,7 @@ def init(args) -> None:
     save(job, {"schema": STATE_SCHEMA, "review_mode": "codex_asr_pcm", "work_order": ref(order_snapshot),
                "source_hashes": {str(Path(row["path"]).resolve()): sha(Path(row["path"])) for row in sources},
                "asset_root": str(asset), "output_root": str(output), "delivery_directory": str(output),
-               "repair_delivery_policy": "overwrite", "delivery_layout": "chinese/v1", "records_policy": "external/v1",
+               "repair_delivery_policy": "overwrite", "delivery_layout": "chinese/v1", "records_policy": "delivery-temporary/v1",
                "temporary_root": str(output / "临时文件"), "repair_round": 0,
                "max_repair_rounds": MAX_ROUNDS}, "initialized")
     print(json.dumps({"job_dir": str(job), "delivery_directory": str(output)}, ensure_ascii=False))

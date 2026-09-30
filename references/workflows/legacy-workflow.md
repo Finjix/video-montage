@@ -18,11 +18,11 @@ by default, using the fixed OTF in `assets/packaging/fonts`.
 Burn subtitles into the video picture only. All new deliveries must use a
 `work/自动化混剪_YYYYMMDD_HHMMSS_ffffff` directory (Beijing time). Put packaged MP4s in
 `成片/`, clean MP4s in `混剪（无包装）/`, editable `subtitle-xx.txt` in
-`字幕（可修改）/`, and reusable configuration in `临时文件/配置/`.
-Keep logs, job state, manifests, reviews, evidence and validation reports outside
-the delivery in `.runtime/jobs/<delivery-name>/`; never archive them into output.
-临时文件/ contains only necessary rendering/editing files. Always keep the
-extensionless file `字幕（可修改）/修改字幕后让AI重新烧录`.
+`字幕/`, and reusable configuration in `临时文件/配置/`.
+Keep logs, job state, manifests, reviews, evidence and validation reports in
+`work/<delivery-name>/临时文件/`, alongside necessary rendering/editing files.
+Preserve existing hash-bound job paths; do not create root-level `.runtime` for new records. Always keep the
+extensionless file `字幕/修改字幕后让AI重新烧录`.
 When the user edits that TXT, run `packaging-reburn` (or the standalone packager's
 `reburn`) into the same directory, then validate the replacement MP4. Render and
 check temporary video files before replacing existing MP4s. Invalidate stale

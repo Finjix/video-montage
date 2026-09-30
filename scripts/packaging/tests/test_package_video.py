@@ -69,26 +69,26 @@ class PackagingContractTests(unittest.TestCase):
         with patch.object(packaging, "video_spec", return_value=self.spec), \
              patch.object(packaging, "render_one", side_effect=encode):
             result = packaging.render(self.config, first, manifest)
-            self.assertEqual({"成片", "混剪（无包装）", "字幕（可修改）", "临时文件"},
+            self.assertEqual({"成片", "混剪（无包装）", "字幕", "临时文件"},
                              {p.name for p in first.iterdir()})
-            self.assertEqual({"配置"}, {p.name for p in (first / "临时文件").iterdir()})
-            self.assertFalse(manifest.is_relative_to(first))
+            self.assertEqual({"配置", "清单", "报告"}, {p.name for p in (first / "临时文件").iterdir()})
+            self.assertEqual(first / "临时文件" / "清单", manifest.parent)
             self.assertEqual(self.video.read_bytes(), (first / "混剪（无包装）" / "P1.mp4").read_bytes())
             self.assertEqual(str(first / "混剪（无包装）" / "P1.mp4"), result["results"][0]["input"]["path"])
-            marker = first / "字幕（可修改）" / "修改字幕后让AI重新烧录"
+            marker = first / "字幕" / "修改字幕后让AI重新烧录"
             self.assertTrue(marker.is_file())
             marker.write_text("用户保留的说明", encoding="utf-8")
             packaging.ensure_delivery_layout(first)
             self.assertEqual("用户保留的说明", marker.read_text(encoding="utf-8"))
-            edited = first / "字幕（可修改）" / "subtitle-P1.txt"
+            edited = first / "字幕" / "subtitle-P1.txt"
             edited.write_text("1\n00:00:00,000 --> 00:00:00,900\n新字幕\n", encoding="utf-8")
             self.video.unlink()  # Reburn must use the delivered clean copy.
             previous_hash = packaging.sha(manifest)
             second = first
             new_manifest = manifest
             updated = packaging.reburn(manifest, "P1", edited, second, new_manifest)
-            self.assertEqual(edited.read_bytes(), (second / "字幕（可修改）" / edited.name).read_bytes())
-            self.assertTrue((second / "字幕（可修改）" / marker.name).is_file())
+            self.assertEqual(edited.read_bytes(), (second / "字幕" / edited.name).read_bytes())
+            self.assertTrue((second / "字幕" / marker.name).is_file())
             reopened = packaging.prepared_rows(second / "临时文件" / "配置" / "reburn_config.json")
             self.assertEqual(str(second / "混剪（无包装）" / "P1.mp4"), reopened[0]["input"]["path"])
             self.assertEqual(packaging.sha(edited), updated["results"][0]["subtitle_snapshot"]["sha256"])
@@ -106,17 +106,25 @@ class PackagingContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
             self.prepare()
 
-    def test_delivery_rejects_manifest_and_validation_report_inside_output(self):
+    def test_delivery_rejects_records_outside_temporary_subdirectory(self):
         output = self.root / "work" / "自动化混剪_20260930_153000_123456"
-        inside = output / "临时文件" / "报告" / "validation.json"
-        with self.assertRaisesRegex(ValueError, "records must be outside"):
+        inside = output / "成片" / "validation.json"
+        with self.assertRaisesRegex(ValueError, "records inside the delivery must be in"):
             packaging.render(self.config, output, inside)
         self.assertFalse(output.exists())
         manifest = packaging.delivery_category(output, "manifests") / "packaging_manifest.json"
-        packaging.atomic(manifest, {"results": [{"output_path": str(output / "成片" / "P1.mp4")}]})
-        with self.assertRaisesRegex(ValueError, "reports must be outside"):
+        packaging.atomic(manifest, {"output_count": 1, "results": [{"plan_id": "P1",
+            "output_path": str(output / "成片" / "P1.mp4"),
+            "subtitles": {"path": str(self.srt), "sha256": packaging.sha(self.srt), "cue_count": 1}}]})
+        with self.assertRaisesRegex(ValueError, "reports inside the delivery must be in"):
             packaging.validate(manifest, inside)
         self.assertFalse(inside.exists())
+
+        report = packaging.delivery_category(output, "reports") / "validation.json"
+        # A missing-media failure should still write the report in the job's temp directory.
+        result = packaging.validate(manifest, report)
+        self.assertTrue(report.is_file())
+        self.assertEqual("reject", result["decision"])
 
     def test_out_of_range_and_missing_text_pin_interval_rejected(self):
         self.row["text_pins"][0]["end_frame_exclusive"] = 61
@@ -170,23 +178,25 @@ class PackagingContractTests(unittest.TestCase):
     def test_default_subtitle_style_and_single_line_ass(self):
         style = self.prepare()[0]["subtitle_style"]
         self.assertEqual({"path": str(self.font), "sha256": packaging.sha(self.font)}, style["font"])
-        self.assertEqual(-1300, style["capcut_reference"]["y"])
-        self.assertEqual(2357, style["ass"]["position_y"])
+        self.assertEqual(8, style["capcut_reference"]["font_size"])
+        self.assertEqual(164, style["capcut_reference"]["scale_percent"])
+        self.assertEqual(-2524, style["capcut_reference"]["y"])
+        self.assertEqual(2969, style["ass"]["position_y"])
         self.assertEqual("无尽冬日", style["emphasis"]["text"])
-        self.assertEqual(13, style["emphasis"]["capcut_font_size"])
-        self.assertEqual(203, style["emphasis"]["ass_font_size"])
+        self.assertEqual(9, style["emphasis"]["capcut_font_size"])
+        self.assertEqual(230, style["emphasis"]["ass_font_size"])
         self.assertEqual("pastel_cyan_extrusion_v3", style["emphasis"]["effect"])
         ass = self.root / "sample.ass"
         packaging.write_ass(ass, [{"start_ms": 0, "end_ms": 900, "text": "是兄弟就来"}], style)
         content = ass.read_text(encoding="utf-8-sig")
         self.assertIn("PlayResX: 1920\nPlayResY: 3414", content)
-        self.assertIn("WenYue XinQingNianTi J W8,187,&H0000DEFF", content)
-        self.assertIn(",1,10,0,5,0,0,0,1", content)
-        self.assertIn(r"{\pos(960,2357)}是兄弟就来", content)
+        self.assertIn("WenYue XinQingNianTi J W8,204,&H0000DEFF", content)
+        self.assertIn(",1,16.4,0,5,0,0,0,1", content)
+        self.assertIn(r"{\pos(960,2969)}是兄弟就来", content)
         with self.assertRaisesRegex(ValueError, "one line"):
             packaging.write_ass(ass, [{"start_ms": 0, "end_ms": 900, "text": "第一行\n第二行"}], style)
 
-    def test_every_game_title_occurrence_uses_size_13(self):
+    def test_every_game_title_occurrence_uses_size_9(self):
         style = self.prepare()[0]["subtitle_style"]
         ass = self.root / "emphasis.ass"
         packaging.write_ass(ass, [
@@ -197,9 +207,9 @@ class PackagingContractTests(unittest.TestCase):
         content = ass.read_text(encoding="utf-8-sig")
         base_lines = [line for line in content.splitlines() if line.startswith("Dialogue: 0,")]
         self.assertEqual(3, len(base_lines))
-        enlarged = r"{\fs203\alpha&HFF&}无尽冬日{\fs187\alpha&H00&}"
+        enlarged = r"{\fs230\alpha&HFF&}无尽冬日{\fs204\alpha&H00&}"
         self.assertEqual(3, "\n".join(base_lines).count(enlarged))
-        gap = r"{\fs100\fscx280}\h{\fs187\fscx100}"
+        gap = r"{\fs164\fscx280}\h{\fs204\fscx100}"
         self.assertIn(f"玩{gap}{enlarged}{gap}，再玩{gap}{enlarged}", base_lines[0])
         self.assertIn("普通字幕", base_lines[1])
         self.assertIn(enlarged, base_lines[2])
@@ -332,15 +342,15 @@ class PackagingContractTests(unittest.TestCase):
                         "-frames:v", "1", str(frame)], check=True, capture_output=True)
         with Image.open(frame) as image:
             pixels = image.convert("RGB").load()
-            yellow = [(x, y) for y in range(1650, 1900) for x in range(400, 1040)
+            yellow = [(x, y) for y in range(2100, 2350) for x in range(400, 1040)
                       if pixels[x, y][0] > 150 and pixels[x, y][1] > 100 and pixels[x, y][2] < 80]
         self.assertTrue(yellow)
         left, top = min(x for x, _ in yellow), min(y for _, y in yellow)
         right, bottom = max(x for x, _ in yellow), max(y for _, y in yellow)
         self.assertLessEqual(abs((left + right) / 2 - 720), 5)
-        self.assertLessEqual(abs((top + bottom) / 2 - 1768), 5)
-        self.assertTrue(405 <= right - left + 1 <= 435)
-        self.assertTrue(84 <= bottom - top + 1 <= 100)
+        self.assertLessEqual(abs((top + bottom) / 2 - 2226), 5)
+        self.assertTrue(442 <= right - left + 1 <= 475)
+        self.assertTrue(92 <= bottom - top + 1 <= 109)
 
     def test_render_keeps_subtitle_as_named_txt(self):
         output = self.root / "rendered"

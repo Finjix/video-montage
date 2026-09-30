@@ -49,14 +49,16 @@ New deliveries use `work/自动化混剪_YYYYMMDD_HHMMSS_ffffff` in Beijing time
 
 - `成片/`: packaged MP4s.
 - `混剪（无包装）/`: clean MP4s.
-- `字幕（可修改）/`: editable `subtitle-xx.txt` and the extensionless file
+- `字幕/`: editable `subtitle-xx.txt` and the extensionless file
   `修改字幕后让AI重新烧录`.
-- `临时文件/配置/`: reusable packaging configuration. Other temporary files
-  must be necessary for rendering or editing.
+- `临时文件/`: job state, logs, evidence, reviews, manifests, reports and
+  completion receipts, plus necessary rendering/editing files.
+- `临时文件/配置/`: reusable packaging configuration.
 
 Keep state, logs, reviews, evidence, manifests, validation reports and completion
-receipts in `.runtime/jobs/<delivery-name>/`, outside the delivery. Do not archive
-them into output or duplicate configuration/subtitle snapshots. For autonomous
+receipts in `work/<delivery-name>/临时文件/`, alongside reusable configuration and
+necessary render/edit files. Do not create a root-level `.runtime` for new jobs
+or duplicate configuration/subtitle snapshots. For autonomous
 init, work-order `output_root` is the project `work/` directory; use the returned
 `job_dir` and read the actual generated delivery path from status.
 Keep older jobs bound to their actual paths and hash-bound evidence.

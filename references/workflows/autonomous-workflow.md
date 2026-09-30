@@ -4,10 +4,10 @@ Use this skill for **new** jobs. Read [the complete workflow](../autonomous/work
 and run `scripts/autonomous/scripts/autonomous_montage.py` with
 `assets/dependencies/python/python.exe`. The work order must name original sources,
 the asset pack and requested output count. Deliver under the project work/ directory;
-keep job state, evidence, reviews, logs and validation reports outside the delivery,
-under `.runtime/jobs/<delivery-name>/`. Use the job_dir returned by init. Delivery
-临时文件/ contains only necessary render/edit files and reusable packaging config;
-never archive or copy job records there at completion.
+keep job state, evidence, reviews, logs, manifests, validation reports and completion
+receipts under `work/<delivery-name>/临时文件/`. Use the job_dir returned by init.
+Keep records there throughout the job, alongside necessary render/edit files and
+reusable packaging config; do not create a root-level `.runtime` for new jobs.
 
 For a batch, read [batch diversity](../autonomous/batch-diversity.md).
 Build coherent whole-edit alternatives across usable hooks, narrative routes,

@@ -26,14 +26,20 @@ DEFAULT_SUBTITLE_FONT_PATH = ROOT / "assets/packaging/fonts/WenYue-XinQingNianTi
 SUBTITLE_FONT_SHA256 = "20b03dfe8dc982a19946726fe4acf156f9bb8b45adae8aac22a4a3590bb9a6bf"
 SUBTITLE_FONT_FAMILY = "WenYue XinQingNianTi J W8"
 SUBTITLE_FONT_POSTSCRIPT = "WenYue_XinQingNianTi_J-W8"
-SUBTITLE_REFERENCE = {"canvas_width": 1920, "canvas_height": 3414, "font_size": 12,
-                      "color": "#FFDE00", "outline_color": "#000000", "outline_width": 40, "y": -1300}
-SUBTITLE_ASS = {"play_res_x": 1920, "play_res_y": 3414, "font_size": 187, "outline": 10,
-                "alignment": 5, "position_x": 960, "position_y": 2357}
+SUBTITLE_REFERENCE = {"canvas_width": 1920, "canvas_height": 3414, "font_size": 8, "scale_percent": 164,
+                      "color": "#FFDE00", "outline_color": "#000000", "outline_width": 40, "y": -2524}
+# Preserve the calibrated CapCut font/stroke conversion, applying its text scale.
+# CapCut Y is upward-positive and uses twice the reference canvas pixel offset.
+SUBTITLE_ASS = {"play_res_x": 1920, "play_res_y": 3414,
+                "font_size": round(187 / 12 * SUBTITLE_REFERENCE["font_size"] * SUBTITLE_REFERENCE["scale_percent"] / 100),
+                "outline": 10 * SUBTITLE_REFERENCE["scale_percent"] / 100,
+                "alignment": 5, "position_x": 960,
+                "position_y": (SUBTITLE_REFERENCE["canvas_height"] - SUBTITLE_REFERENCE["y"]) // 2}
 SUBTITLE_EMPHASIS = {
-    "text": "无尽冬日", "capcut_font_size": 13,
-    "ass_font_size": round(SUBTITLE_ASS["font_size"] * 13 / SUBTITLE_REFERENCE["font_size"]),
-    "effect": "pastel_cyan_extrusion_v3", "gap_font_size": 100, "gap_scale_x": 280,
+    "text": "无尽冬日", "capcut_font_size": 9,
+    "ass_font_size": round(187 / 12 * 9 * SUBTITLE_REFERENCE["scale_percent"] / 100),
+    "effect": "pastel_cyan_extrusion_v3",
+    "gap_font_size": round(100 * SUBTITLE_REFERENCE["scale_percent"] / 100), "gap_scale_x": 280,
     "reference_geometry": {"size": 85.5, "x": 131, "y": 52.3125,
         "outer_x": 10.8125, "outer_y": 8.5, "pink_x": 7.6875, "pink_y": 5.1875,
         "white": 3.8625, "depth": 5.5875, "blue_depth_ratio": .55625,
@@ -51,10 +57,9 @@ OUTPUT_NAME = re.compile(r"自动化混剪_\d{8}_\d{6}(?:_\d{6})?\Z")
 
 
 def runtime_directory(root: Path) -> Path:
-    """Keep audit/state files outside delivered media, keyed by delivery name."""
+    """Keep each delivery's audit/state files in its temporary directory."""
     root = root.resolve()
-    project = root.parent.parent if root.parent.name == "work" else root.parent
-    return project / ".runtime" / "jobs" / root.name
+    return root / "临时文件"
 
 
 def delivery_category(root: Path, kind: str) -> Path:
@@ -63,7 +68,7 @@ def delivery_category(root: Path, kind: str) -> Path:
         if kind in {"manifests", "reports"}:
             return runtime_directory(root) / {"manifests": "清单", "reports": "报告"}[kind]
         return root / {"video": "成片", "clean": "混剪（无包装）",
-                       "subtitles": "字幕（可修改）", "config": "临时文件/配置"}[kind]
+                       "subtitles": "字幕", "config": "临时文件/配置"}[kind]
     return root if kind == "video" else root / kind
 
 
@@ -77,7 +82,7 @@ def ensure_delivery_layout(root: Path) -> None:
     if not marker.exists() or marker.read_text(encoding="utf-8").startswith(generated_prefix):
         marker.write_text(generated_prefix + "\n"
                           "保留混剪（无包装）和临时文件/配置，AI 使用配置重新烧录并校验。\n"
-                          "重新烧录在本目录覆盖成片、字幕和配置，不新建交付文件夹；运行记录和校验结果存于项目内部，不随成片输出。\n", encoding="utf-8")
+                          "重新烧录在本目录覆盖成片、字幕和配置，不新建交付文件夹；运行记录和校验结果保留在本目录的临时文件内。\n", encoding="utf-8")
 
 
 def invalidate_delivery_receipts(root: Path) -> None:
@@ -625,8 +630,9 @@ def render_one(row: dict, output_dir: Path) -> dict:
 def render(config_path: Path, output_dir: Path, manifest_path: Path, delivery_manifest: Path | None = None,
            controller_validation: Path | None = None, autonomous_clean: Path | None = None,
            autonomous_clean_qc: Path | None = None, *, overwrite: bool = False) -> dict:
-    if OUTPUT_NAME.fullmatch(output_dir.name) and manifest_path.resolve().is_relative_to(output_dir.resolve()):
-        raise ValueError("packaging records must be outside the delivery directory")
+    if (OUTPUT_NAME.fullmatch(output_dir.name) and manifest_path.resolve().is_relative_to(output_dir.resolve())
+            and not manifest_path.resolve().is_relative_to(runtime_directory(output_dir))):
+        raise ValueError("packaging records inside the delivery must be in 临时文件")
     if manifest_path.exists() and not overwrite:
         raise FileExistsError(manifest_path)
     if bool(delivery_manifest) != bool(controller_validation):
@@ -810,8 +816,9 @@ def validate(manifest_path: Path, report_path: Path, review_path: Path | None = 
     for row in manifest.get("results", []):
         output = Path(row.get("output_path", "")).resolve()
         delivery = output.parent.parent if output.parent.name == "成片" else output.parent
-        if OUTPUT_NAME.fullmatch(delivery.name) and report_path.resolve().is_relative_to(delivery):
-            raise ValueError("validation reports must be outside the delivery directory")
+        if (OUTPUT_NAME.fullmatch(delivery.name) and report_path.resolve().is_relative_to(delivery)
+                and not report_path.resolve().is_relative_to(runtime_directory(delivery))):
+            raise ValueError("validation reports inside the delivery must be in 临时文件")
     failures = []
     if bool(review_path) != bool(authority_path):
         raise ValueError("review and independent review authority must be provided together")
@@ -1040,7 +1047,7 @@ def main() -> int:
         if hasattr(args, "manifest"):
             expected_parent = delivery_category(args.output_dir.resolve(), "manifests")
             if args.manifest.resolve().parent != expected_parent:
-                parser.error("--manifest 必须位于项目内部 .runtime/jobs/<交付目录名>/清单/ 下")
+                parser.error("--manifest 必须位于 work/<交付目录名>/临时文件/清单/ 下")
     if args.command == "draft":
         result = draft_one(args.input.resolve(), args.plan_id, args.output_dir.resolve())
     elif args.command == "draft-batch":
