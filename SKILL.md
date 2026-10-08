@@ -31,6 +31,12 @@ from one route do not substitute for the other route's contract.
 
 ## Shared editing and delivery rules
 
+New autonomous jobs must keep adjusting, repairing or rebuilding until every
+requested finished video passes all delivery checks. There is no retry ceiling
+or additional continuation approval. Preserve failed-round history while working;
+never bypass quality gates or report a partial batch as complete. Pause only
+when the user asks to stop or an external dependency truly prevents progress.
+
 Every source segment must bind original-source SHA-256, integer native-frame
 bounds and source FPS. Reject seconds-only cuts, rejected source ranges, stale
 evidence and incomplete speech. Keep the requested batch scope; technical decode
@@ -45,23 +51,23 @@ reburn commands. Subtitles burn into the picture only; the default style uses
 the calibrated WenYue W8 yellow, black-outlined OTF from
 `assets/packaging/fonts`.
 
-New deliveries use `work/自动化混剪_YYYYMMDD_HHMMSS_ffffff` in Beijing time:
+New deliveries use `work/自动化混剪_YYYYMMDD_HHMMSS` in Beijing time. Refuse collisions rather than overwriting another job.
 
 - `成片/`: packaged MP4s.
-- `混剪（无包装）/`: clean MP4s.
-- `字幕/`: editable `subtitle-xx.txt` and the extensionless file
-  `修改字幕后让AI重新烧录`.
-- `临时文件/`: job state, logs, evidence, reviews, manifests, reports and
-  completion receipts, plus necessary rendering/editing files.
-- `临时文件/配置/`: reusable packaging configuration.
+- `混剪（无包装）/`: clean MP4s for reburns.
+- `字幕/`: editable `subtitle-xx.txt` and the extensionless instruction file.
+- `临时文件/config/`: reusable packaging configuration.
+- `临时文件/manifests/`: packaging manifest and clean-input authorization needed for reburn.
+- `临时文件/`: minimal job state and work order needed to restart repairs.
 
-Keep state, logs, reviews, evidence, manifests, validation reports and completion
-receipts in `work/<delivery-name>/临时文件/`, alongside reusable configuration and
-necessary render/edit files. Do not create a root-level `.runtime` for new jobs
-or duplicate configuration/subtitle snapshots. For autonomous
-init, work-order `output_root` is the project `work/` directory; use the returned
-`job_dir` and read the actual generated delivery path from status.
-Keep older jobs bound to their actual paths and hash-bound evidence.
+All subdirectories inside `临时文件/` use English names. Generate logs, evidence,
+reviews and reports during processing and QC, then remove them after successful
+completion. Preserve only files necessary for subsequent editing, reburn and repair.
+A compact completed autonomous job regenerates evidence from sources on repair;
+never reuse deleted evidence or claim old approvals remain valid. Legacy jobs retain
+their existing hash-bound paths until their workflow supports compact delivery.
+For autonomous init, work-order `output_root` is the project `work/` directory;
+use the returned `job_dir` and actual delivery path from status.
 
 Repairs and subtitle reburns reuse the existing delivery directory. Render and
 check temporary videos before replacing MP4s, invalidate stale completion

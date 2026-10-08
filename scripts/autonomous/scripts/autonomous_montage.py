@@ -36,7 +36,7 @@ STATE_SCHEMA = "video-montage-autonomous-state/v260929"
 ORDER_SCHEMA = "video-montage-autonomous-work-order/v260929"
 PLAN_SCHEMA = "video-montage-autonomous-plan/v260929"
 REVIEW_SCHEMA = "video-montage-codex-review/v260929"
-MAX_ROUNDS = 3
+MAX_ROUNDS = None  # Repair until the complete delivery passes; no retry ceiling.
 
 
 def module(name: str, relative: str):
@@ -398,19 +398,25 @@ def fail_round(job: Path, value: dict, phase: str, reasons: list[str]) -> None:
     count = int(value.get("repair_round", 0)) + 1
     value["repair_round"] = count
     value["last_failures"] = reasons
-    stopped = count >= MAX_ROUNDS and not value.get("continue_until_complete", False)
-    save(job, value, "failed" if stopped else "repair_required")
+    value["continue_until_complete"] = True
+    value["max_repair_rounds"] = MAX_ROUNDS
+    save(job, value, "repair_required")
     write(job / "reports" / f"repair_round_{count}.json",
           {"schema": "video-montage-autonomous-repair/v260929", "phase": phase,
            "round": count, "max_rounds": MAX_ROUNDS, "failures": reasons,
-           "decision": "failed" if stopped else "repair_required",
+           "decision": "repair_required",
            "continuation_authorization": value.get("continuation_authorization")})
-    raise RuntimeError(f"{phase}: {'; '.join(reasons)}; repair round {count}/{MAX_ROUNDS}")
+    raise RuntimeError(f"{phase}: {'; '.join(reasons)}; repair round {count}; repair required until complete")
 
 
 def repair(args) -> None:
     job = args.job_dir.resolve(); value = state(job)
     bind_existing_delivery(value)
+    if value.pop("compact_delivery", False):
+        for key in ("source_index", "asset_copy", "plan", "plan_evidence", "plan_review",
+                    "batch_diversity", "clean_delivery", "clean_qc", "subtitle_draft",
+                    "subtitle_review", "packaging_delivery", "packaging_config"):
+            value.pop(key, None)
     if args.continue_until_complete:
         if not args.authorization or not args.authorization.strip():
             raise ValueError("explicit user continuation authorization required")
@@ -460,7 +466,7 @@ def init(args) -> None:
                 or job != packager.runtime_directory(output)):
             raise ValueError("job-dir must be work/自动化混剪_xx/临时文件")
     else:
-        output = parent / ("自动化混剪_" + datetime.now(timezone(timedelta(hours=8))).strftime("%Y%m%d_%H%M%S_%f"))
+        output = parent / ("自动化混剪_" + datetime.now(timezone(timedelta(hours=8))).strftime("%Y%m%d_%H%M%S"))
         job = packager.runtime_directory(output)
     if output.exists() and any(output.iterdir()):
         raise FileExistsError(f"refusing non-empty delivery directory: {output}")
@@ -475,7 +481,7 @@ def init(args) -> None:
                "asset_root": str(asset), "output_root": str(output), "delivery_directory": str(output),
                "repair_delivery_policy": "overwrite", "delivery_layout": "chinese/v1", "records_policy": "delivery-temporary/v1",
                "temporary_root": str(output / "临时文件"), "repair_round": 0,
-               "max_repair_rounds": MAX_ROUNDS}, "initialized")
+               "max_repair_rounds": MAX_ROUNDS, "continue_until_complete": True}, "initialized")
     print(json.dumps({"job_dir": str(job), "delivery_directory": str(output)}, ensure_ascii=False))
 
 
@@ -836,6 +842,44 @@ def render_clean(args) -> None:
     save(job, value, "clean_rendered")
 
 
+def rendered_shot_asr(model, output: Path, rendered: dict, planned: dict,
+                      copy_value: dict, directory: Path) -> dict:
+    """Recheck clean speech per rendered shot and anchor word times to that shot.
+
+    Whole-video ASR may assign a new shot's first word to the previous shot's
+    silence. Keep that original ASR as evidence; independently verify every
+    rendered audio range before using its word timestamps for subtitles.
+    """
+    if len(rendered["segments"]) != len(planned["segments"]):
+        raise ValueError("shot ASR plan/render scope mismatch")
+    directory.mkdir(parents=True, exist_ok=True)
+    cursor = 0
+    segments = []
+    texts = []
+    for index, (shot, original) in enumerate(zip(rendered["segments"], planned["segments"])):
+        end = cursor + shot["expected_output_frames"]
+        target = directory / f"shot_{index + 1:03d}.wav"
+        run([str(FFMPEG), "-v", "error", "-nostdin", "-i", str(output),
+             "-af", f"atrim=start={cursor / 60:.9f}:end={end / 60:.9f},asetpts=PTS-STARTPTS",
+             "-vn", "-ac", "1", "-ar", "16000", "-y", str(target)])
+        observed = transcribe(model, target)
+        if (normalized(observed["text"]) != normalized(original["text"])
+                and not context_corroborates_asr(original["text"], observed["text"], copy_value)):
+            raise ValueError(f"shot {index + 1}: rendered speech differs from source plan")
+        texts.append(observed["text"])
+        for segment in observed["segments"]:
+            shifted = dict(segment)
+            shifted["start"] = float(segment["start"]) + cursor / 60
+            shifted["end"] = float(segment["end"]) + cursor / 60
+            shifted["words"] = [{**word, "start": float(word["start"]) + cursor / 60,
+                                  "end": float(word["end"]) + cursor / 60}
+                                 for word in segment.get("words", [])]
+            segments.append(shifted)
+        cursor = end
+    return {"text": " ".join(texts), "segments": segments,
+            "timing_basis": "verified_rendered_shot_asr", "output": ref(output)}
+
+
 def clean_qc(args) -> None:
     job = args.job_dir.resolve(); value = state(job)
     if value["phase"] not in {"clean_rendered", "repair_required"}:
@@ -843,6 +887,7 @@ def clean_qc(args) -> None:
     clean_path = require_ref(value["clean_delivery"], "clean delivery"); clean = read(clean_path)
     model = load_model(); rows = []; failures = []
     copy_value = read(require_ref(value["asset_copy"], "asset copy"))
+    plan_by_id = {row["plan_id"]: row for row in read(require_ref(value["plan"], "plan"))["outputs"]}
     for row in clean["results"]:
         output = require_ref(row["output"], "clean output")
         asr = transcribe(model, output)
@@ -854,7 +899,11 @@ def clean_qc(args) -> None:
         match = exact or context_corroborates_asr(row["expected_text"], asr["text"], copy_value)
         if not match or metrics["clipped_samples"] or any(cut["decision"] != "pass" for cut in cut_metrics):
             failures.append(f"{row['plan_id']}: clean ASR/clipping/cut PCM mismatch")
+        timing_asr = rendered_shot_asr(model, output,
+            read(require_ref(row["render_evidence"], "render evidence")), plan_by_id[row["plan_id"]],
+            copy_value, job / "evidence" / "clean_shot_asr" / row["plan_id"])
         rows.append({"plan_id": row["plan_id"], "output": row["output"], "asr": asr,
+                     "timing_asr": timing_asr,
                      "metrics": metrics, "cut_pcm": cut_metrics, "expected_text": row["expected_text"],
                      "asr_exact": exact, "text_match": match})
     report_path = job / "reports" / "clean_qc.json"
@@ -911,7 +960,7 @@ def subtitle_review(args) -> None:
     plan_by_id = {row["plan_id"]: row for row in plan["outputs"]}
     clean_by_id = {row["plan_id"]: row for row in clean["results"]}
     clean_qc_value = read(require_ref(value["clean_qc"], "clean QC"))
-    asr_by_id = {row["plan_id"]: row["asr"] for row in clean_qc_value["results"]}
+    asr_by_id = {row["plan_id"]: row.get("timing_asr", row["asr"]) for row in clean_qc_value["results"]}
     expected = {row["plan_id"]: normalized(row["expected_text"]) for row in clean["results"]}
     by_id = {row.get("plan_id"): row for row in review.get("results", [])}
     if set(by_id) != set(expected) or len(by_id) != len(review.get("results", [])):
@@ -1166,7 +1215,47 @@ def complete(args) -> None:
     if value.get("delivery_layout") == "chinese/v1":
         output = attempt_dir(value)
         packager.ensure_delivery_layout(output)
-    print(str(receipt))
+    if value.get("records_policy") == "delivery-temporary/v1":
+        compact_delivery(job, value)
+    print(str(job / "autonomous_state.json"))
+
+
+def compact_delivery(job: Path, value: dict) -> None:
+    """Retain only inputs needed for reburn or restarting a full repair."""
+    root = job.resolve()
+    keep = {root / "autonomous_state.json", require_ref(value["work_order"], "work order")}
+    for folder in (root / "config", root / "manifests"):
+        if folder.exists():
+            keep.update(path.resolve() for path in folder.rglob("*") if path.is_file())
+    # Reburn's render gate still needs the bound clean manifest and its QC receipt.
+    packaging_path = require_ref(value["packaging_delivery"], "packaging delivery")
+    packaging = read(packaging_path)
+    if packaging.get("controller_validation_path"):
+        previous_qc = Path(packaging["controller_validation_path"]).resolve()
+        reusable_qc = root / "manifests" / "clean_validation.json"
+        reusable_qc.parent.mkdir(parents=True, exist_ok=True)
+        if previous_qc != reusable_qc:
+            shutil.copyfile(previous_qc, reusable_qc)
+        packaging["controller_validation_path"] = str(reusable_qc)
+        write(packaging_path, packaging)
+        keep.add(reusable_qc)
+
+    for key in ("clean_delivery_path", "controller_validation_path"):
+        if packaging.get(key):
+            keep.add(Path(packaging[key]).resolve())
+    retained = {key: value[key] for key in (
+        "schema", "review_mode", "work_order", "source_hashes", "asset_root", "output_root",
+        "delivery_directory", "repair_delivery_policy", "delivery_layout", "records_policy",
+        "temporary_root", "repair_round", "max_repair_rounds", "continue_until_complete",
+        "continuation_authorization") if key in value}
+    retained.update(phase="complete", compact_delivery=True)
+    write(root / "autonomous_state.json", retained)
+    for path in root.rglob("*"):
+        if path.is_file() and path.resolve() not in keep:
+            path.unlink()
+    for path in sorted(root.rglob("*"), key=lambda p: len(p.parts), reverse=True):
+        if path.is_dir() and not any(path.iterdir()):
+            path.rmdir()
 
 
 def main() -> None:

@@ -27,10 +27,11 @@ hash-bound `reviewer_role: codex` findings. Never claim an independent reviewer,
 human listening, or forced word alignment. Machine gates re-run ASR on source,
 candidate, clean and packaged media, inspect PCM, validate subtitles and
 recheck output hashes. Reject ambiguous speech, visuals or copy rather than
-guessing. After three rejected repair rounds, stop with the failure report unless
-the user explicitly requests continued repair until complete delivery. Honor that
-request with the `repair --continue-until-complete --authorization <user instruction>`
-command, preserving all previous failures, evidence, and round numbers. Continue
+guessing. After every rejected round, adjust the edit, replace unsuitable footage,
+or rebuild and run the required checks again until complete delivery passes.
+There is no three-round stopping rule and no repeated continuation approval.
+Use `repair --reason <defect>` to resume an existing failed job, preserving
+all previous failures, evidence, and round numbers. Continue
 repairing or rebuilding until every requested packaged video passes; never replace
 quality checks with invented approvals or deliver partial results as completion.
 Reuse the original delivery directory for every repair and reburn; do not create
@@ -51,3 +52,6 @@ spoken phrase remains intact.
 Do not migrate a job containing `three_suite_ff_state.json` or v260928 review
 receipts. The [legacy workflow](legacy-workflow.md) and its
 hash-bound work orders remain untouched for those jobs.
+
+
+当前成品组织规则：新交付目录按北京时间命名为 `work/自动化混剪_YYYYMMDD_HHMMSS/`，不追加微秒，同秒重名拒绝覆盖。`临时文件/` 内目录使用英文。生产期间可以生成审核、证据和报告；自动流程通过全部交付检查后清理这些过程文件，仅保留 `config/`、重烧必要的 `manifests/`、最小工作单和任务状态。纯净视频和字幕继续分别保存在 `混剪（无包装）/`、`字幕/`。完整剪辑返工重新生成证据、审核和校验；字幕重烧复用纯净视频和绑定的纯净输入校验文件。旧任务仍使用其原有路径，避免破坏哈希绑定。此规则替代上文关于完成后保留全部运行记录的要求。

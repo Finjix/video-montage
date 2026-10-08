@@ -16,9 +16,9 @@ keep the clean delivery behavior.
 Packaging burns the calibrated WenYue W8 yellow, black-outlined subtitle style
 by default, using the fixed OTF in `assets/packaging/fonts`.
 Burn subtitles into the video picture only. All new deliveries must use a
-`work/自动化混剪_YYYYMMDD_HHMMSS_ffffff` directory (Beijing time). Put packaged MP4s in
+`work/自动化混剪_YYYYMMDD_HHMMSS` directory (Beijing time). Put packaged MP4s in
 `成片/`, clean MP4s in `混剪（无包装）/`, editable `subtitle-xx.txt` in
-`字幕/`, and reusable configuration in `临时文件/配置/`.
+`字幕/`, and reusable configuration in `临时文件/config/`.
 Keep logs, job state, manifests, reviews, evidence and validation reports in
 `work/<delivery-name>/临时文件/`, alongside necessary rendering/editing files.
 Preserve existing hash-bound job paths; do not create root-level `.runtime` for new records. Always keep the
@@ -50,3 +50,6 @@ overlays, and audio before the optional packaging gate can complete.
 
 Task evidence belongs in the job directory. The installed suite does not create
 package manifests or deployment reports.
+
+
+当前成品组织规则：新交付目录按北京时间命名为 `work/自动化混剪_YYYYMMDD_HHMMSS/`，不追加微秒，同秒重名拒绝覆盖。`临时文件/` 内目录使用英文。生产期间可以生成审核、证据和报告；自动流程通过全部交付检查后清理这些过程文件，仅保留 `config/`、重烧必要的 `manifests/`、最小工作单和任务状态。纯净视频和字幕继续分别保存在 `混剪（无包装）/`、`字幕/`。完整剪辑返工重新生成证据、审核和校验；字幕重烧复用纯净视频和绑定的纯净输入校验文件。旧任务仍使用其原有路径，避免破坏哈希绑定。此规则替代上文关于完成后保留全部运行记录的要求。

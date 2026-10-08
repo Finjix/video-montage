@@ -66,23 +66,23 @@ def delivery_category(root: Path, kind: str) -> Path:
     """Keep existing jobs readable while using the required layout for new jobs."""
     if OUTPUT_NAME.fullmatch(root.name):
         if kind in {"manifests", "reports"}:
-            return runtime_directory(root) / {"manifests": "清单", "reports": "报告"}[kind]
+            return runtime_directory(root) / {"manifests": "manifests", "reports": "reports"}[kind]
         return root / {"video": "成片", "clean": "混剪（无包装）",
-                       "subtitles": "字幕", "config": "临时文件/配置"}[kind]
+                       "subtitles": "字幕", "config": "临时文件/config"}[kind]
     return root if kind == "video" else root / kind
 
 
 def ensure_delivery_layout(root: Path) -> None:
     if not OUTPUT_NAME.fullmatch(root.name):
         return
-    for kind in ("video", "clean", "subtitles", "config", "manifests", "reports"):
+    for kind in ("video", "clean", "subtitles", "config", "manifests"):
         delivery_category(root, kind).mkdir(parents=True, exist_ok=True)
     marker = delivery_category(root, "subtitles") / "修改字幕后让AI重新烧录"
     generated_prefix = "修改本目录 subtitle-*.txt 的文字或时间码后，把本输出目录交给 AI，要求重新烧录。"
     if not marker.exists() or marker.read_text(encoding="utf-8").startswith(generated_prefix):
         marker.write_text(generated_prefix + "\n"
-                          "保留混剪（无包装）和临时文件/配置，AI 使用配置重新烧录并校验。\n"
-                          "重新烧录在本目录覆盖成片、字幕和配置，不新建交付文件夹；运行记录和校验结果保留在本目录的临时文件内。\n", encoding="utf-8")
+                          "保留混剪（无包装）和临时文件/config，AI 使用配置重新烧录并校验。\n"
+                          "重新烧录在本目录覆盖成片、字幕和配置，不新建交付文件夹；通过校验后清理运行记录和证据，只保留二次修改必要文件。\n", encoding="utf-8")
 
 
 def invalidate_delivery_receipts(root: Path) -> None:
@@ -1041,13 +1041,13 @@ def main() -> int:
     args = parser.parse_args()
     if hasattr(args, "output_dir"):
         if not OUTPUT_NAME.fullmatch(args.output_dir.name):
-            parser.error("--output-dir 必须命名为 自动化混剪_YYYYMMDD_HHMMSS（可追加六位微秒）")
+            parser.error("--output-dir 必须命名为 自动化混剪_YYYYMMDD_HHMMSS")
         if args.output_dir.resolve().parent.name != "work":
             parser.error("--output-dir 必须位于 work 目录下")
         if hasattr(args, "manifest"):
             expected_parent = delivery_category(args.output_dir.resolve(), "manifests")
             if args.manifest.resolve().parent != expected_parent:
-                parser.error("--manifest 必须位于 work/<交付目录名>/临时文件/清单/ 下")
+                parser.error("--manifest 必须位于 work/<交付目录名>/临时文件/manifests/ 下")
     if args.command == "draft":
         result = draft_one(args.input.resolve(), args.plan_id, args.output_dir.resolve())
     elif args.command == "draft-batch":

@@ -71,8 +71,8 @@ class PackagingContractTests(unittest.TestCase):
             result = packaging.render(self.config, first, manifest)
             self.assertEqual({"成片", "混剪（无包装）", "字幕", "临时文件"},
                              {p.name for p in first.iterdir()})
-            self.assertEqual({"配置", "清单", "报告"}, {p.name for p in (first / "临时文件").iterdir()})
-            self.assertEqual(first / "临时文件" / "清单", manifest.parent)
+            self.assertEqual({"config", "manifests"}, {p.name for p in (first / "临时文件").iterdir()})
+            self.assertEqual(first / "临时文件" / "manifests", manifest.parent)
             self.assertEqual(self.video.read_bytes(), (first / "混剪（无包装）" / "P1.mp4").read_bytes())
             self.assertEqual(str(first / "混剪（无包装）" / "P1.mp4"), result["results"][0]["input"]["path"])
             marker = first / "字幕" / "修改字幕后让AI重新烧录"
@@ -89,7 +89,7 @@ class PackagingContractTests(unittest.TestCase):
             updated = packaging.reburn(manifest, "P1", edited, second, new_manifest)
             self.assertEqual(edited.read_bytes(), (second / "字幕" / edited.name).read_bytes())
             self.assertTrue((second / "字幕" / marker.name).is_file())
-            reopened = packaging.prepared_rows(second / "临时文件" / "配置" / "reburn_config.json")
+            reopened = packaging.prepared_rows(second / "临时文件" / "config" / "reburn_config.json")
             self.assertEqual(str(second / "混剪（无包装）" / "P1.mp4"), reopened[0]["input"]["path"])
             self.assertEqual(packaging.sha(edited), updated["results"][0]["subtitle_snapshot"]["sha256"])
             self.assertEqual(b"packaged video", (first / "成片" / "P1.mp4").read_bytes())

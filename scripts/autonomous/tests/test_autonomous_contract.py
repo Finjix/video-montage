@@ -19,6 +19,27 @@ SPEC.loader.exec_module(auto)
 
 
 class AutonomousContractTests(unittest.TestCase):
+    def test_rendered_shot_asr_anchors_words_and_rejects_missing_speech(self):
+        output = self.root / "clean.mp4"
+        output.write_bytes(b"hash-bound clean video")
+        rendered = {"segments": [{"expected_output_frames": 60}, {"expected_output_frames": 120}]}
+        planned = {"segments": [{"text": "开局"}, {"text": "点燃熔炉"}]}
+        observations = [
+            {"text": "开局", "segments": [{"start": .1, "end": .6,
+              "words": [{"word": "开局", "start": .1, "end": .6}]}]},
+            {"text": "点燃熔炉", "segments": [{"start": 0., "end": 1.4,
+              "words": [{"word": "点燃熔炉", "start": 0., "end": 1.4}]}]}]
+        with patch.object(auto, "run"), patch.object(auto, "transcribe", side_effect=observations):
+            result = auto.rendered_shot_asr(None, output, rendered, planned, {}, self.root / "shots")
+        self.assertEqual(auto.ref(output), result["output"])
+        self.assertEqual(1., result["segments"][1]["words"][0]["start"])
+        self.assertEqual(2.4, result["segments"][1]["words"][0]["end"])
+        self.assertEqual("开局 点燃熔炉", result["text"])
+        truncated = {"text": "燃熔炉", "segments": []}
+        with patch.object(auto, "run"), patch.object(auto, "transcribe", side_effect=[observations[0], truncated]):
+            with self.assertRaisesRegex(ValueError, "rendered speech differs"):
+                auto.rendered_shot_asr(None, output, rendered, planned, {}, self.root / "shots")
+
     def test_explicit_continuation_preserves_round_numbers_and_failed_history(self):
         job = self.root / "job"
         order = self.root / "order.json"
@@ -80,12 +101,12 @@ class AutonomousContractTests(unittest.TestCase):
         self.assertEqual(output, auto.attempt_dir(value))
         self.assertEqual(output / "临时文件", job)
         self.assertEqual("delivery-temporary/v1", value["records_policy"])
-        self.assertTrue((output / "临时文件" / "配置").is_dir())
+        self.assertTrue((output / "临时文件" / "config").is_dir())
         self.assertEqual(job / "work_order.json", Path(value["work_order"]["path"]))
         auto.init(SimpleNamespace(job_dir=None, work_order=order))
         generated = [p for p in parent.iterdir() if p != output]
         self.assertEqual(1, len(generated))
-        self.assertRegex(generated[0].name, r"^自动化混剪_\d{8}_\d{6}_\d{6}$")
+        self.assertRegex(generated[0].name, r"^自动化混剪_\d{8}_\d{6}$")
         generated_job = generated[0] / "临时文件"
         self.assertEqual(generated[0], auto.attempt_dir(auto.state(generated_job)))
         self.assertFalse((self.root / ".runtime").exists())
@@ -136,15 +157,46 @@ class AutonomousContractTests(unittest.TestCase):
              patch.object(packager, "validate", side_effect=validate):
             auto.complete(SimpleNamespace(job_dir=job, review=review))
         self.assertTrue((job / "video_montage_autonomous_completion.json").is_file())
-        self.assertTrue((output / "临时文件" / "配置").is_dir())
+        self.assertTrue((output / "临时文件" / "config").is_dir())
         self.assertEqual(job, output / "临时文件")
         self.assertFalse(list((output / "成片").glob("*.json")))
+
+    def test_compact_delivery_removes_audit_and_preserves_reburn_gate(self):
+        output = self.root / "work" / "自动化混剪_20261008_120000"
+        job = output / "临时文件"
+        order = job / "work_order.json"
+        auto.write(order, {"schema": auto.ORDER_SCHEMA})
+        clean = job / "manifests" / "clean_delivery.json"
+        auto.write(clean, {"decision": "pass"})
+        qc = job / "reports" / "clean_qc.json"
+        auto.write(qc, {"decision": "pass", "clean_delivery": auto.ref(clean)})
+        manifest = job / "manifests" / "packaging_manifest.json"
+        auto.write(manifest, {"clean_delivery_path": str(clean.resolve()),
+                   "controller_validation_path": str(qc.resolve()),
+                   "controller_validation_sha256": auto.sha(qc)})
+        auto.write(job / "config" / "packaging.json", {})
+        auto.write(job / "evidence" / "frames.json", {})
+        auto.write(job / "video_montage_autonomous_completion.json", {})
+        value = {"schema": auto.STATE_SCHEMA, "review_mode": "codex_asr_pcm",
+                 "work_order": auto.ref(order), "packaging_delivery": auto.ref(manifest),
+                 "output_root": str(output), "delivery_directory": str(output), "repair_round": 0}
+        auto.compact_delivery(job, value)
+        self.assertEqual({"config", "manifests"}, {p.name for p in job.iterdir() if p.is_dir()})
+        self.assertFalse((job / "video_montage_autonomous_completion.json").exists())
+        updated = auto.read(manifest)
+        copied = Path(updated["controller_validation_path"])
+        self.assertEqual(job / "manifests" / "clean_validation.json", copied)
+        self.assertEqual(updated["controller_validation_sha256"], auto.sha(copied))
+        self.assertTrue(auto.state(job)["compact_delivery"])
+        auto.repair(SimpleNamespace(job_dir=job, reason="redo cut", continue_until_complete=False))
+        self.assertEqual("repair_required", auto.state(job)["phase"])
+        self.assertNotIn("compact_delivery", auto.state(job))
 
     def test_completed_job_repair_pins_actual_delivery_and_invalidates_completion(self):
         job = self.root / "job"; job.mkdir()
         order = self.root / "order.json"; auto.write(order, {"schema": auto.ORDER_SCHEMA})
         directory = self.root / "自动化混剪_20260930_120003_123456"
-        manifest = directory / "日志" / "清单" / "packaging_manifest.json"
+        manifest = directory / "日志" / "manifests" / "packaging_manifest.json"
         auto.write(manifest, {"results": [{"output_path": str(directory / "成片" / "P1.mp4")}]})
         completion = job / "video_montage_autonomous_completion.json"; auto.write(completion, {"decision": "pass"})
         auto.write(job / "autonomous_state.json", {"schema": auto.STATE_SCHEMA, "review_mode": "codex_asr_pcm",
@@ -285,18 +337,23 @@ class AutonomousContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "does not follow"):
             auto.validate_subtitle_timing(3200, 4120, (2560, 3020), (3920, 4120), (2817, 9667))
 
-    def test_three_repair_rounds_stop_without_pass_receipt(self):
+    def test_repairs_continue_beyond_three_rounds_without_pass_receipt(self):
         job = self.root / "job"
         order = self.root / "order.json"
         auto.write(order, {"schema": auto.ORDER_SCHEMA})
         job.mkdir()
         value = {"schema": auto.STATE_SCHEMA, "review_mode": "codex_asr_pcm",
                  "work_order": auto.ref(order), "repair_round": 0}
-        for round_number in range(1, 4):
-            with self.assertRaisesRegex(RuntimeError, f"repair round {round_number}/3"):
+        for round_number in range(1, 9):
+            with self.assertRaisesRegex(RuntimeError, f"repair round {round_number};"):
                 auto.fail_round(job, value, "test", ["unconfirmed audio"])
             self.assertEqual(round_number, auto.state(job)["repair_round"])
-        self.assertEqual("failed", auto.state(job)["phase"])
+            self.assertEqual("repair_required", auto.state(job)["phase"])
+            report = auto.read(job / "reports" / f"repair_round_{round_number}.json")
+            self.assertEqual(["unconfirmed audio"], report["failures"])
+            self.assertIsNone(report["max_rounds"])
+        self.assertTrue(auto.state(job)["continue_until_complete"])
+        self.assertIsNone(auto.state(job)["max_repair_rounds"])
         self.assertFalse((job / "video_montage_autonomous_completion.json").exists())
 
 
