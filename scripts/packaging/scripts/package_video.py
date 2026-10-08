@@ -30,7 +30,7 @@ SUBTITLE_FONT_SHA256 = "20b03dfe8dc982a19946726fe4acf156f9bb8b45adae8aac22a4a359
 SUBTITLE_FONT_FAMILY = "WenYue XinQingNianTi J W8"
 SUBTITLE_FONT_POSTSCRIPT = "WenYue_XinQingNianTi_J-W8"
 SUBTITLE_REFERENCE = {"canvas_width": 1920, "canvas_height": 3414, "font_size": 8, "scale_percent": 164,
-                      "color": "#FFDE00", "outline_color": "#000000", "outline_width": 40, "y": -2524}
+                      "color": "#FFDE00", "outline_color": "#000000", "outline_width": 40, "y": -1300}
 # Preserve the calibrated CapCut font/stroke conversion, applying its text scale.
 # CapCut Y is upward-positive and uses twice the reference canvas pixel offset.
 SUBTITLE_ASS = {"play_res_x": 1920, "play_res_y": 3414,

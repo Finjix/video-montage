@@ -210,8 +210,8 @@ class PackagingContractTests(unittest.TestCase):
         self.assertEqual({"path": str(self.font), "sha256": packaging.sha(self.font)}, style["font"])
         self.assertEqual(8, style["capcut_reference"]["font_size"])
         self.assertEqual(164, style["capcut_reference"]["scale_percent"])
-        self.assertEqual(-2524, style["capcut_reference"]["y"])
-        self.assertEqual(2969, style["ass"]["position_y"])
+        self.assertEqual(-1300, style["capcut_reference"]["y"])
+        self.assertEqual(2357, style["ass"]["position_y"])
         self.assertEqual("无尽冬日", style["emphasis"]["text"])
         self.assertEqual(9, style["emphasis"]["capcut_font_size"])
         self.assertEqual(230, style["emphasis"]["ass_font_size"])
@@ -222,7 +222,7 @@ class PackagingContractTests(unittest.TestCase):
         self.assertIn("PlayResX: 1920\nPlayResY: 3414", content)
         self.assertIn("WenYue XinQingNianTi J W8,204,&H0000DEFF", content)
         self.assertIn(",1,16.4,0,5,0,0,0,1", content)
-        self.assertIn(r"{\pos(960,2969)}是兄弟就来", content)
+        self.assertIn(r"{\pos(960,2357)}是兄弟就来", content)
         with self.assertRaisesRegex(ValueError, "one line"):
             packaging.write_ass(ass, [{"start_ms": 0, "end_ms": 900, "text": "第一行\n第二行"}], style)
 
@@ -372,13 +372,13 @@ class PackagingContractTests(unittest.TestCase):
                         "-frames:v", "1", str(frame)], check=True, capture_output=True)
         with Image.open(frame) as image:
             pixels = image.convert("RGB").load()
-            yellow = [(x, y) for y in range(2100, 2350) for x in range(400, 1040)
+            yellow = [(x, y) for y in range(1640, 1890) for x in range(400, 1040)
                       if pixels[x, y][0] > 150 and pixels[x, y][1] > 100 and pixels[x, y][2] < 80]
         self.assertTrue(yellow)
         left, top = min(x for x, _ in yellow), min(y for _, y in yellow)
         right, bottom = max(x for x, _ in yellow), max(y for _, y in yellow)
         self.assertLessEqual(abs((left + right) / 2 - 720), 5)
-        self.assertLessEqual(abs((top + bottom) / 2 - 2226), 5)
+        self.assertLessEqual(abs((top + bottom) / 2 - 1768), 5)
         self.assertTrue(442 <= right - left + 1 <= 475)
         self.assertTrue(92 <= bottom - top + 1 <= 109)
 
