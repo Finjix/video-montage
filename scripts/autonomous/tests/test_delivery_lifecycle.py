@@ -106,8 +106,9 @@ class DeliveryLifecycleTests(unittest.TestCase):
         auto.subtitle_review(SimpleNamespace(job_dir=job, review=path))
 
     def test_clean_only_completion_publishes_after_visual_approval(self):
-        job, delivery, pending, _, _ = self.fixture()
-        auto.final_evidence(SimpleNamespace(job_dir=job, clean=True))
+        job, delivery, pending, asr, packager = self.fixture()
+        with patch.object(auto, "load_model"), patch.object(auto, "transcribe", return_value=asr):
+            auto.final_evidence(SimpleNamespace(job_dir=job, clean=True))
         self.assertEqual(b"previous video", (delivery / "混剪（无包装）" / "P1.mp4").read_bytes())
         auto.complete(SimpleNamespace(job_dir=job, review=self.final_review(job)))
         value = auto.state(job)
@@ -115,11 +116,14 @@ class DeliveryLifecycleTests(unittest.TestCase):
         self.assertEqual("clean", value["delivery_mode"])
         self.assertFalse(pending.exists())
         auto.require_ref(value["outputs"][0], "published clean")
+        self.assertEqual(50, packager.video_spec(Path(value["outputs"][0]["path"]))["frames"])
+        self.assertEqual(60, packager.video_spec(job / "manifests" / "clean_inputs" / "P1.mp4")["frames"])
         self.assertFalse(list((delivery / "字幕").glob("subtitle-*.txt")))
 
     def test_rejected_final_review_leaves_both_delivered_videos_untouched(self):
-        job, delivery, _, _, _ = self.fixture()
-        auto.final_evidence(SimpleNamespace(job_dir=job, clean=True))
+        job, delivery, _, asr, _ = self.fixture()
+        with patch.object(auto, "load_model"), patch.object(auto, "transcribe", return_value=asr):
+            auto.final_evidence(SimpleNamespace(job_dir=job, clean=True))
         with self.assertRaisesRegex(RuntimeError, "incomplete visual finding"):
             auto.complete(SimpleNamespace(job_dir=job, review=self.final_review(job, visual_pass=False)))
         for folder in ("成片", "混剪（无包装）"):
@@ -155,6 +159,9 @@ class DeliveryLifecycleTests(unittest.TestCase):
             auto.require_ref(reference, key)
         manifest_path = Path(value["reburn_inputs"]["packaging_delivery"]["path"])
         manifest = auto.read(manifest_path)
+        self.assertEqual(1.2, manifest["results"][0]["final_speed"])
+        self.assertEqual(60, manifest["results"][0]["input_frames"])
+        self.assertEqual(50, packager.video_spec(delivery / "成片" / "P1.mp4")["frames"])
         self.assertEqual(manifest["config_snapshot_path"], manifest["config_path"])
         self.assertEqual("technical_pass_pending_review", packager.validate(manifest_path, job / "reports" / "check.json")["decision"])
         original = (delivery / "成片" / "P1.mp4").read_bytes()
@@ -170,6 +177,7 @@ class DeliveryLifecycleTests(unittest.TestCase):
         auto.complete(SimpleNamespace(job_dir=job, review=self.final_review(job)))
         self.assertEqual("complete", auto.state(job)["phase"])
         self.assertEqual(1, auto.state(job)["repair_round"])
+        self.assertEqual(50, packager.video_spec(delivery / "成片" / "P1.mp4")["frames"])
 
     def test_publication_failure_rolls_back_previously_replaced_files(self):
         helper = auto.module("lifecycle_delivery_files", "scripts/packaging/scripts/delivery_files.py")

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import re
 import subprocess
 from pathlib import Path
@@ -141,13 +142,17 @@ def main() -> int:
         total_frames = int(render.get("actual_output_frames", 0) or 0)
         if not segments or total_frames <= 0 or total_frames != sum(int(segment["expected_output_frames"]) for segment in segments):
             raise RuntimeError(f"integer render-frame evidence required: {pid}")
+        speed = item.get("final_speed", 1.0)
+        if speed not in (1.0, 1.2):
+            raise RuntimeError(f"invalid final speed: {pid}")
+        total_frames = (total_frames * 5 + 5) // 6 if speed == 1.2 else total_frames
         start_row = extract_boundary(video, pid, 0, "output_start", 0, total_frames, args.output_dir)
         start_row["right_source_candidate_ids"] = segments[0].get("source_candidate_ids", [])
         rows.append(start_row)
         cumulative = 0
         for cut_index, segment in enumerate(segments[:-1], 1):
             cumulative += int(segment["expected_output_frames"])
-            row = extract_boundary(video, pid, cut_index, "concat_cut", cumulative, total_frames, args.output_dir)
+            row = extract_boundary(video, pid, cut_index, "concat_cut", math.ceil(cumulative / speed), total_frames, args.output_dir)
             row["left_source_candidate_ids"] = segment.get("source_candidate_ids", [])
             row["right_source_candidate_ids"] = segments[cut_index].get("source_candidate_ids", [])
             rows.append(row)

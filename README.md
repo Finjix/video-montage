@@ -31,6 +31,10 @@ video-montage/
 
 ## 使用
 
+流程新增最后的整片倍速步骤：剪辑及所需包装完成后，画面和音频统一加速至 **1.2 倍**，保持音调与字幕同步，再检查并输出成品。无包装交付同样适用；字幕重烧从未加速的纯净输入重新合成，最后只加速一次。最终证据和审核须绑定倍速后的实际成品。
+
+自主流程的 `package` 和 `final-evidence --clean` 已自动执行该步骤。旧任务无包装交付时，在 `controller-finalize` 添加 `--final-speed`；要做包装时不添加该参数，由包装器在合成后加速。无包装交付的未加速输入保存在 `临时文件/manifests/clean_inputs/`，避免和交付的倍速 MP4 混用。字幕 TXT 与图层配置继续按未加速输入编辑。
+
 在 Codex 中统一调用 `video-montage`，项目根目录 `SKILL.md` 是唯一技能入口。新任务及其返修按[自主流程](references/workflows/autonomous-workflow.md)使用 `scripts/autonomous/scripts/autonomous_montage.py`，由 Codex 审核语义、画面和字幕，程序核验 ASR、PCM 与哈希。已有 `three_suite_ff_state.json` 或 v260928 审核回执的任务按[旧任务流程](references/workflows/legacy-workflow.md)继续运行，不转换状态或回执。旧任务由执行器 `scripts/executor/scripts/three_suite_ff.py` 按 `preflight → init → semantic-run → semantic-complete → controller-preflight → controller-finalize → controller-validate → complete` 顺序运行。语义模块制定和审核帧计划，帧渲染器剪出预成片，FFmpeg 控制器编码并复检最终视频。
 
 生产裁切使用 `source_in_frame`、`speech_end_frame`、`source_out_frame_exclusive` 和源帧率；只有秒数的计划会被拒绝。解码后的帧时间戳须为从零开始的恒定帧率，变帧率及非零视频起点会在编码前被拒绝。素材须绑定原片 SHA-256 和原始帧区间，用户判坏的区间不能通过改名或新候选 ID 绕过。计划 ID 在忽略大小写后仍须唯一。两种流程按各自契约执行语义、切点和成片复检；自主流程不声明人工听审、独立审核或强制对齐，旧流程保留原审核门禁。

@@ -1,5 +1,10 @@
 # Autonomous video montage
 
+Apply the shared final 1.2x whole-video speed-up in the root `SKILL.md` after
+editing and requested packaging, before final evidence and completion. Review
+the accelerated delivery with synchronized picture, audio, subtitles and overlays;
+retain unaccelerated inputs for reburns and apply the speed-up only once.
+
 Use this skill for **new** jobs. Read [the complete workflow](../autonomous/workflow.md)
 and run `scripts/autonomous/scripts/autonomous_montage.py` with
 `assets/dependencies/python/python.exe`. The work order must name original sources,

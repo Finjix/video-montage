@@ -23,6 +23,59 @@ FFMPEG = ROOT / "assets/dependencies/ffmpeg/bin/ffmpeg.exe"
 FFPROBE = ROOT / "assets/dependencies/ffmpeg/bin/ffprobe.exe"
 MODEL_ROOT = ROOT / "assets/dependencies/models"
 SCHEMA = "video-montage-packaging/v1"
+FINAL_SPEED = 1.2
+
+
+def final_frames(input_frames: int) -> int:
+    # Round up to a complete output frame so the last source frame is retained.
+    return (input_frames * 5 + 5) // 6
+
+
+def delivery_speed(row: dict) -> float:
+    speed = row.get("final_speed", 1.0)  # Existing manifests remain readable.
+    if speed not in (1.0, FINAL_SPEED):
+        raise ValueError("invalid final delivery speed")
+    return speed
+
+
+def delivery_cues(row: dict) -> list[dict]:
+    cues = parse_srt(Path(row["subtitles"]["path"]), round(row["input_frames"] / 60 * 1000))
+    speed = delivery_speed(row)
+    return [{**cue, "start_ms": round(cue["start_ms"] / speed),
+             "end_ms": round(cue["end_ms"] / speed)} for cue in cues]
+
+
+def speed_clean(input_path: Path, output: Path) -> dict:
+    """Create a separate accelerated delivery; never overwrite the clean input."""
+    if input_path.resolve() == output.resolve():
+        raise ValueError("speed output must be separate from clean input")
+    source_hash = sha(input_path)
+    source_spec = video_spec(input_path)
+    frames = final_frames(source_spec["frames"])
+    output.parent.mkdir(parents=True, exist_ok=True)
+    partial = output.with_suffix(".partial.mp4")
+    try:
+        run([str(FFMPEG), "-v", "error", "-nostdin", "-y", "-i", str(input_path),
+             "-map", "0:v:0", "-map", "0:a:0", "-vf", "setpts=(PTS-STARTPTS)/1.2,fps=60:round=up",
+             "-af", "asetpts=PTS-STARTPTS,atempo=1.2,apad",
+             "-frames:v", str(frames), "-r", "60", "-fps_mode", "cfr",
+             "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+             "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+             "-t", f"{frames / 60:.9f}", "-movflags", "+faststart", str(partial)])
+        spec = video_spec(partial)
+        if (spec["frames"] != frames or not packaged_streams_ok(spec)
+                or (spec["width"], spec["height"]) != (1440, 2560)
+                or spec["video_codec"] != "h264" or spec["audio_codec"] != "aac"):
+            raise RuntimeError("accelerated clean specification mismatch")
+        if sha(input_path) != source_hash:
+            raise ValueError("clean input changed during speed encoding")
+        os.replace(partial, output)
+    finally:
+        partial.unlink(missing_ok=True)
+    return {"input": {"path": str(input_path.resolve()), "sha256": source_hash},
+            "input_frames": source_spec["frames"], "final_speed": FINAL_SPEED,
+            "output_frames": frames, "output_spec": spec,
+            "output_path": str(output.resolve()), "output_sha256": sha(output)}
 PLAN_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}\Z")
 SRT_TIME = re.compile(r"(\d{2}):(\d{2}):(\d{2}),(\d{3})")
 DEFAULT_SUBTITLE_FONT_PATH = ROOT / "assets/packaging/fonts/WenYue-XinQingNianTi-W8.otf"
@@ -601,14 +654,14 @@ def render_one(row: dict, output_dir: Path) -> dict:
                 filters.append(f"{current}[layer{index}]overlay=0:0:format=auto{enable}[{label}]")
                 current = f"[{label}]"
                 index += 1
-            filters.append(f"{current}ass=filename={ass.name}:fontsdir={Path(font_directory).name},format=yuv420p[vout]")
+            filters.append(f"{current}ass=filename={ass.name}:fontsdir={Path(font_directory).name},format=yuv420p,setpts=(PTS-STARTPTS)/1.2,fps=60:round=up[vout]")
             if row["bgm"]:
                 command += ["-stream_loop", "-1", "-i", row["bgm"]["path"]]
                 filters.append(f"[{index}:a]volume={row['bgm']['gain_db']}dB[bgm]")
-                filters.append("[0:a][bgm]amix=inputs=2:duration=first:normalize=0[aout]")
+                filters.append("[0:a][bgm]amix=inputs=2:duration=first:normalize=0,asetpts=PTS-STARTPTS,atempo=1.2,apad[aout]")
             else:
-                filters.append("[0:a]anull[aout]")
-            frames = row["spec"]["frames"]
+                filters.append("[0:a]asetpts=PTS-STARTPTS,atempo=1.2,apad[aout]")
+            frames = final_frames(row["spec"]["frames"])
             command += ["-filter_complex", ";".join(filters), "-map", "[vout]", "-map", "[aout]", "-frames:v", str(frames),
                         "-r", "60", "-fps_mode", "cfr", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
                         "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
@@ -625,7 +678,8 @@ def render_one(row: dict, output_dir: Path) -> dict:
         raise
     finally:
         ass.unlink(missing_ok=True)
-    return {"plan_id": plan_id, "input": row["input"], "input_frames": frames, "output_path": str(output.resolve()),
+    return {"plan_id": plan_id, "input": row["input"], "input_frames": row["spec"]["frames"],
+            "final_speed": FINAL_SPEED, "output_frames": frames, "output_path": str(output.resolve()),
             "output_sha256": sha(output), "output_spec": spec, "subtitles": row["subtitles"],
             "nameplate": row["nameplate"], "text_pins": row["text_pins"], "disclaimer": row["disclaimer"], "bgm": row["bgm"]}
 
@@ -647,6 +701,8 @@ def render(config_path: Path, output_dir: Path, manifest_path: Path, delivery_ma
         delivery = read(delivery_manifest)
         if delivery.get("schema") != "ffmpeg-controller-delivery/v260928":
             raise ValueError("controller delivery manifest required")
+        if any(item.get("final_speed", 1.0) != 1.0 for item in delivery.get("results", [])):
+            raise ValueError("packaging requires unaccelerated clean inputs; final speed would be applied twice")
         validation = read(controller_validation)
         if (validation.get("schema") != "ffmpeg-controller-validation/v260928"
                 or validation.get("decision") != "pass"
@@ -821,9 +877,7 @@ def verify_autonomous_speech(measured: dict, item: dict, manifest: dict) -> bool
     if qc.get("decision") != "pass" or clean_row.get("text_match") is not True or clean_row.get("output", {}).get("sha256") != item["input"]["sha256"]:
         return False
     output = verifier.pcm(Path(item["output_path"]))
-    clean = verifier.pcm(Path(item["input"]["path"]))
-    music = verifier.pcm(Path(item["bgm"]["path"])) if item.get("bgm") else None
-    proof = verifier.packaged_mix_evidence(output, clean, music, float(item["bgm"]["gain_db"]) if item.get("bgm") else 0)
+    proof = verifier.delivery_mix_evidence(output, item)
     return proof.get("decision") == "pass" and proof == measured.get("mix_evidence")
 
 
@@ -984,7 +1038,8 @@ def validate(manifest_path: Path, report_path: Path, review_path: Path | None = 
         else:
             try:
                 spec = video_spec(output)
-                if (spec["frames"] != row["input_frames"] or (spec["width"], spec["height"]) != (1440, 2560)
+                expected_frames = final_frames(row["input_frames"]) if delivery_speed(row) == FINAL_SPEED else row["input_frames"]
+                if (spec["frames"] != expected_frames or (spec["width"], spec["height"]) != (1440, 2560)
                         or spec["video_codec"] != "h264" or spec["audio_codec"] != "aac"
                         or not packaged_streams_ok(spec)):
                     changes.append("output_spec")

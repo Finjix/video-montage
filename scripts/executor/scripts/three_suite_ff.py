@@ -83,6 +83,7 @@ def main():
     d=sub.add_parser("semantic-complete"); d.add_argument("--job-dir",type=Path,required=True); d.add_argument("--manifest",type=Path,required=True)
     cp=sub.add_parser("controller-preflight"); cp.add_argument("--job-dir",type=Path,required=True); cp.add_argument("--report",type=Path,required=True)
     cf=sub.add_parser("controller-finalize"); cf.add_argument("--job-dir",type=Path,required=True); cf.add_argument("--premaster-manifest",type=Path,required=True); cf.add_argument("--semantic-release",type=Path,required=True); cf.add_argument("--output-dir",type=Path,required=True); cf.add_argument("--manifest",type=Path,required=True)
+    cf.add_argument("--final-speed", action="store_true", help="Final 1.2x for delivery without packaging")
     cv=sub.add_parser("controller-validate"); cv.add_argument("--job-dir",type=Path,required=True); cv.add_argument("--manifest",type=Path,required=True); cv.add_argument("--semantic-release",type=Path,required=True); cv.add_argument("--post-qc",type=Path,required=True); cv.add_argument("--opening-family-report",type=Path,required=True); cv.add_argument("--report",type=Path,required=True)
     pd=sub.add_parser("packaging-draft"); pd.add_argument("--job-dir",type=Path,required=True); pd.add_argument("--output-dir",type=Path,required=True)
     pf=sub.add_parser("packaging-finalize"); pf.add_argument("--job-dir",type=Path,required=True); pf.add_argument("--config",type=Path,required=True); pf.add_argument("--output-dir",type=Path,required=True); pf.add_argument("--manifest",type=Path,required=True)
@@ -139,7 +140,10 @@ def main():
     if a.command=="controller-finalize":
         require_reference(value.get("controller_preflight"),"controller preflight")
         require_argument(a.semantic_release,value.get("semantic_completion"),"semantic release")
-        command=[sys.executable,str(script),"finalize","--premaster-manifest",str(a.premaster_manifest.resolve()),"--semantic-release",str(a.semantic_release.resolve()),"--output-dir",str(a.output_dir.resolve()),"--manifest",str(a.manifest.resolve())]; run(command); clear_after(value,"finalize",job); value["controller_invocations"].append({"at":now(),"command":command}); value["delivery_manifest"]={"path":str(a.manifest.resolve()),"sha256":sha(a.manifest)}; save(job,value,"controller_outputs","FF exact-60 outputs completed"); return
+        command=[sys.executable,str(script),"finalize","--premaster-manifest",str(a.premaster_manifest.resolve()),"--semantic-release",str(a.semantic_release.resolve()),"--output-dir",str(a.output_dir.resolve()),"--manifest",str(a.manifest.resolve())]
+        if a.final_speed:
+            command.append("--final-speed")
+        run(command); clear_after(value,"finalize",job); value["controller_invocations"].append({"at":now(),"command":command}); value["delivery_manifest"]={"path":str(a.manifest.resolve()),"sha256":sha(a.manifest)}; save(job,value,"controller_outputs","FF exact-60 outputs completed"); return
     if a.command=="controller-validate":
         delivery_path=require_argument(a.manifest,value.get("delivery_manifest"),"delivery manifest")
         semantic_path=require_argument(a.semantic_release,value.get("semantic_completion"),"semantic release")

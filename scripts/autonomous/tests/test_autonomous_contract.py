@@ -147,6 +147,9 @@ class AutonomousContractTests(unittest.TestCase):
                    "overlay_pass": True, "reason": "layout test fixture"}]})
         value = {key: auto.ref(dummy) for key in ("work_order", "source_index", "asset_copy", "plan",
                  "plan_evidence", "plan_review", "clean_delivery", "clean_qc", "subtitle_review", "packaging_delivery")}
+        package = job / "packaging.json"
+        auto.write(package, {"results": [{"plan_id": "P1", "final_speed": 1.2}]})
+        value["packaging_delivery"] = auto.ref(package)
         value.update({"schema": auto.STATE_SCHEMA, "review_mode": "codex_asr_pcm", "phase": "final_evidenced",
                      "output_root": str(output), "delivery_layout": "chinese/v1", "final_evidence": auto.ref(evidence)})
         auto.write(job / "autonomous_state.json", value)

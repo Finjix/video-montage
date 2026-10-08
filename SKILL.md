@@ -31,6 +31,18 @@ from one route do not substitute for the other route's contract.
 
 ## Shared editing and delivery rules
 
+Before delivering any finished video, apply a single whole-video 1.2x speed-up
+after editing and any requested packaging, and before final evidence, review and
+completion. Speed up picture and all mixed audio together, preserve audio pitch,
+and keep burned subtitles and overlays synchronized with the picture. The final
+duration is the pre-speed duration divided by 1.2; retain the required output FPS.
+Keep unaccelerated clean inputs and their editable subtitle/overlay timing for
+reburns. Rebuild from those inputs and apply 1.2x once on each new final render;
+never accelerate an already accelerated delivery again. Without packaging, the
+delivered clean version must also receive this final speed-up. Final ASR, audio,
+visual checks, timeline evidence, manifests and hashes must describe the actual
+accelerated output; old pre-speed approvals cannot authorize it.
+
 New autonomous jobs must keep adjusting, repairing or rebuilding until every
 requested finished video passes all delivery checks. There is no retry ceiling
 or additional continuation approval. Preserve failed-round history while working;

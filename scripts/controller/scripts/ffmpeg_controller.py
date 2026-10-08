@@ -109,11 +109,13 @@ def preflight(output: Path) -> int:
     atomic(output,report); print(json.dumps(report,ensure_ascii=False)); return 0 if report["decision"]=="pass" else 2
 
 
-def finalize_one(item: dict, output_dir: Path, width: int, height: int, fps: int, encoder: str) -> dict:
+def finalize_one(item: dict, output_dir: Path, width: int, height: int, fps: int, encoder: str, final_speed: bool = False) -> dict:
     source=Path(item["export_path"]).resolve(); plan_id=item["plan_id"]
     target=output_dir/f"{plan_id}.mp4"; partial=target.with_suffix(".partial.mp4")
     receipt_path=output_dir/".finalize_receipts"/f"{plan_id}.json"
     parameters={"width":width,"height":height,"fps":fps,"encoder":encoder}
+    if final_speed:
+        parameters["final_speed"] = 1.2
     source_hash=sha(source)
     if partial.exists(): raise RuntimeError(f"refusing stale partial output: {partial}")
     if target.exists():
@@ -129,22 +131,36 @@ def finalize_one(item: dict, output_dir: Path, width: int, height: int, fps: int
                     and result.get("output_sha256")==sha(target)
                     and Path(str(result.get("render_evidence_path") or "")).resolve()==Path(item["render_evidence_path"]).resolve()
                     and result.get("render_evidence_sha256")==item["render_evidence_sha256"]
-                    and all(result.get("checks",{}).get(key) is True for key in ("h264","dimensions","fps","aac","audio_rate"))):
+                    and all(result.get("checks",{}).get(key) is True for key in ("h264","dimensions","fps","aac","audio_rate"))
+                    and (not final_speed or (result.get("final_speed") == 1.2 and result.get("checks", {}).get("final_frames") is True))):
                 return result
         raise RuntimeError(f"refusing overwrite without matching receipt: {target}")
     codec=["-c:v","h264_nvenc","-preset","p4","-tune","hq","-rc","vbr","-cq","19","-b:v","0"] if encoder=="h264_nvenc" else ["-c:v","libx264","-preset","veryfast","-crf","18"]
     command=[FFMPEG,"-hide_banner","-nostdin","-y","-i",str(source),"-map","0:v:0","-map","0:a:0","-vf",f"fps={fps},scale={width}:{height}:flags=lanczos,setsar=1,format=yuv420p","-r",str(fps),"-fps_mode","cfr",*codec,"-c:a","copy","-movflags","+faststart",str(partial)]
+    if final_speed:
+        if fps != 60:
+            raise ValueError("final speed requires 60 fps delivery")
+        render = read(Path(item["render_evidence_path"]))
+        expected_frames = (int(render["actual_output_frames"]) * 5 + 5) // 6
+        command[command.index("-vf") + 1] = f"setpts=(PTS-STARTPTS)/1.2,fps={fps}:round=up,scale={width}:{height}:flags=lanczos,setsar=1,format=yuv420p"
+        command[command.index("-c:a") + 1] = "aac"
+        command[-1:-1] = ["-af", "asetpts=PTS-STARTPTS,atempo=1.2,apad", "-b:a", "192k", "-ar", "48000",
+                          "-frames:v", str(expected_frames), "-t", f"{expected_frames / 60:.9f}"]
     try:
         run=subprocess.run(command,capture_output=True,text=True,encoding="utf-8",errors="replace")
         if run.returncode: raise RuntimeError(run.stderr[-3000:])
         info=probe(partial); video=next(x for x in info["streams"] if x["codec_type"]=="video"); audio=next(x for x in info["streams"] if x["codec_type"]=="audio")
         checks={"h264":video["codec_name"]=="h264","dimensions":int(video["width"])==width and int(video["height"])==height,"fps":video["avg_frame_rate"]==f"{fps}/1","aac":audio["codec_name"]=="aac","audio_rate":int(audio["sample_rate"])==48000}
+        if final_speed:
+            checks["final_frames"] = int(video.get("nb_frames", 0)) == expected_frames
         if not all(checks.values()): raise RuntimeError(f"technical validation failed: {checks}")
     except Exception:
         partial.unlink(missing_ok=True)
         raise
     partial.replace(target)
     result={"plan_id":plan_id,"premaster_path":str(source),"premaster_sha256":source_hash,"output_path":str(target),"output_sha256":sha(target),"duration":float(info["format"]["duration"]),"render_evidence_path":str(Path(item["render_evidence_path"]).resolve()),"render_evidence_sha256":item["render_evidence_sha256"],"command":command,"checks":checks}
+    if final_speed:
+        result.update(final_speed=1.2, output_frames=expected_frames)
     try:
         atomic(receipt_path,{"schema":"ffmpeg-controller-item-receipt/v260928","parameters":parameters,"source_sha256":source_hash,"result":result})
     except Exception:
@@ -166,7 +182,7 @@ def finalize(args) -> int:
     args.output_dir.mkdir(parents=True,exist_ok=True)
     results=[]
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        futures=[pool.submit(finalize_one,item,args.output_dir,args.width,args.height,args.fps,encoder) for item in items]
+        futures=[pool.submit(finalize_one,item,args.output_dir,args.width,args.height,args.fps,encoder,getattr(args,"final_speed",False)) for item in items]
         for future in as_completed(futures): results.append(future.result())
     results.sort(key=lambda item:item["plan_id"])
     manifest={"schema":"ffmpeg-controller-delivery/v260928","render_mode":"source_frame_ranges/v1","seconds_only_fallback":False,"created_at":datetime.now().astimezone().isoformat(timespec="seconds"),"semantic_release_path":str(args.semantic_release.resolve()),"semantic_release_sha256":sha(args.semantic_release),"output_root":str(args.output_dir.resolve()),"output_count":len(results),"video_spec":{"width":args.width,"height":args.height,"fps":f"{args.fps}/1","codec":"h264"},"audio_spec":{"codec":"aac","sample_rate":48000,"bgm_added":False},"results":results}
@@ -292,6 +308,17 @@ def validate(args) -> int:
         if not path.is_file() or sha(path)!=item["output_sha256"]: failures.append(f"output:{item.get('plan_id')}")
         else:
             if not output_spec_matches(path,manifest): failures.append(f"output_spec:{item.get('plan_id')}")
+            if item.get("final_speed", 1.0) != 1.0:
+                try:
+                    render_path = Path(item["render_evidence_path"])
+                    if sha(render_path) != item["render_evidence_sha256"]:
+                        raise ValueError("render evidence changed")
+                    expected = (int(read(render_path)["actual_output_frames"]) * 5 + 5) // 6
+                    video = next(stream for stream in probe(path)["streams"] if stream.get("codec_type") == "video")
+                    if item["final_speed"] != 1.2 or item.get("output_frames") != expected or int(video.get("nb_frames", 0)) != expected:
+                        raise ValueError("final frame count mismatch")
+                except (OSError, ValueError, KeyError, TypeError, StopIteration):
+                    failures.append(f"final_speed:{item.get('plan_id')}")
             run=subprocess.run([FFMPEG,"-v","error","-i",str(path),"-f","null","NUL"],capture_output=True,text=True)
             if run.returncode: failures.append(f"decode:{item.get('plan_id')}")
     report={"schema":"ffmpeg-controller-validation/v260928","decision":"pass" if not failures else "reject","failures":failures,"manifest_path":str(args.manifest.resolve()),"manifest_sha256":sha(args.manifest),"opening_visual_family_report_path":str(args.opening_family_report.resolve()),"opening_visual_family_report_sha256":sha(args.opening_family_report),"validated_outputs":len(manifest.get("results",[]))}
@@ -303,6 +330,7 @@ def main() -> int:
     p=sub.add_parser("preflight"); p.add_argument("--output",type=Path,required=True)
     f=sub.add_parser("finalize"); f.add_argument("--premaster-manifest",type=Path,required=True); f.add_argument("--semantic-release",type=Path,required=True); f.add_argument("--output-dir",type=Path,required=True); f.add_argument("--manifest",type=Path,required=True); f.add_argument("--width",type=int,default=1440); f.add_argument("--height",type=int,default=2560); f.add_argument("--fps",type=int,default=60); f.add_argument("--encoder",choices=("auto","h264_nvenc","libx264"),default="auto"); f.add_argument("--workers",type=int,default=2)
     v=sub.add_parser("validate"); v.add_argument("--manifest",type=Path,required=True); v.add_argument("--semantic-release",type=Path,required=True); v.add_argument("--post-qc",type=Path,required=True); v.add_argument("--opening-family-report",type=Path,required=True); v.add_argument("--report",type=Path,required=True)
+    f.add_argument("--final-speed", action="store_true", help="Apply final whole-video 1.2x for delivery without packaging")
     args=parser.parse_args(); return preflight(args.output) if args.command=="preflight" else finalize(args) if args.command=="finalize" else validate(args)
 
 

@@ -1,5 +1,17 @@
 # Legacy video montage workflow
 
+Apply the shared final 1.2x whole-video speed-up in the root `SKILL.md` after
+editing and requested packaging, before final output QC and completion. Refresh
+all hash-bound final evidence and approvals for the accelerated output. Retain
+unaccelerated inputs for reburns and apply the speed-up only once.
+
+For delivery without packaging, add `--final-speed` to `controller-finalize`.
+It applies 1.2x before generating the new post-encode evidence and independent
+review. For packaged delivery, omit that flag: the packager applies 1.2x after
+burning subtitles and mixing audio. Accelerated controller outputs are rejected
+as packaging input to prevent applying the speed-up twice. Changed media require
+fresh QC; existing receipts remain bound to their original media.
+
 Apply only to existing jobs with `three_suite_ff_state.json` or v260928 review
 receipts. New jobs use [autonomous workflow](autonomous-workflow.md).
 

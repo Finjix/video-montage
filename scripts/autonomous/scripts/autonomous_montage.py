@@ -301,6 +301,36 @@ def packaged_mix_evidence(output_audio: np.ndarray, clean_audio: np.ndarray,
             "checked_samples": len(expected), "basis": "decoded_clean_voice_plus_hash_bound_bgm"}
 
 
+def delivery_mix_evidence(output_audio: np.ndarray, row: dict) -> dict:
+    """Rebuild the same full mix and tempo transform from authorized inputs."""
+    packager = module("delivery_audio_packager", "scripts/packaging/scripts/package_video.py")
+    if packager.delivery_speed(row) == 1.0:
+        return packaged_mix_evidence(output_audio, pcm(Path(row["input"]["path"])),
+            pcm(Path(row["bgm"]["path"])) if row.get("bgm") else None,
+            float(row["bgm"]["gain_db"]) if row.get("bgm") else 0)
+    require_ref(row["input"], "delivery audio input")
+    command = [str(FFMPEG), "-v", "error", "-nostdin", "-y", "-i", row["input"]["path"]]
+    if row.get("bgm"):
+        require_ref(row["bgm"], "delivery BGM")
+        command += ["-stream_loop", "-1", "-i", row["bgm"]["path"]]
+        filters = (f"[1:a]volume={row['bgm']['gain_db']}dB[m];"
+                   "[0:a][m]amix=inputs=2:duration=first:normalize=0,")
+    else:
+        filters = "[0:a]"
+    filters += "asetpts=PTS-STARTPTS,atempo=1.2,apad[a]"
+    # Match encoder sample rate and channel negotiation before decoding to mono.
+    with tempfile.TemporaryDirectory(prefix="montage-tempo-proof-") as directory:
+        expected_path = Path(directory) / "expected.m4a"
+        command += ["-filter_complex", filters, "-map", "[a]", "-vn", "-c:a", "aac",
+                    "-b:a", "192k", "-ar", "48000", "-t",
+                    f"{packager.final_frames(row['input_frames']) / 60:.6f}", str(expected_path)]
+        run(command)
+        expected = pcm(expected_path)
+    proof = packaged_mix_evidence(output_audio, expected, None)
+    proof["basis"] = "hash_bound_clean_mix_then_atempo_1.2"
+    return proof
+
+
 def subtitle_change_supported(change: dict, asset_copy: dict, source_index: dict, plan: dict) -> bool:
     evidence = change.get("evidence")
     if not isinstance(evidence, list) or not evidence:
@@ -1142,39 +1172,42 @@ def final_evidence(args) -> None:
         if row.get("bgm"):
             music = pcm(Path(row["bgm"]["path"]))
             bgm_db = voice_over_music_db(clean_audio, music, float(row["bgm"]["gain_db"]))
-        mix_evidence = packaged_mix_evidence(output_audio, clean_audio, music,
-                                            float(row["bgm"]["gain_db"]) if row.get("bgm") else 0)
+        mix_evidence = delivery_mix_evidence(output_audio, row)
         speech_preserved = mix_evidence["decision"] == "pass" and clean_qc_by_id[pid]["text_match"]
-        cues = packager.parse_srt(Path(row["subtitles"]["path"]), round(row["output_spec"]["duration"] * 1000))
+        source_cues = packager.parse_srt(Path(row["subtitles"]["path"]), round(row["input_frames"] / 60 * 1000))
+        cues = packager.delivery_cues(row)
+        speed = packager.delivery_speed(row)
+        output_frames = row["output_spec"]["frames"]
         render_path = require_ref(clean_by_id[pid]["render_evidence"], "render evidence")
         render_value = read(render_path)
-        cut_metrics = cut_pcm_metrics(output_audio, render_cut_frames(render_value), clean=False)
+        cut_metrics = cut_pcm_metrics(output_audio, [math.ceil(cut / speed) for cut in render_cut_frames(render_value)], clean=False)
         try:
-            shot_bounds = subtitle_segment_bounds(cues, plan_by_id[pid], render_value)
+            source_bounds = subtitle_segment_bounds(source_cues, plan_by_id[pid], render_value)
+            shot_bounds = [(round(start / speed), round(end / speed)) for start, end in source_bounds]
             subtitle_timing_pass = all(cue["start_ms"] >= shot_start and cue["end_ms"] <= shot_end
                                        for cue, (shot_start, shot_end) in zip(cues, shot_bounds))
         except ValueError:
             subtitle_timing_pass = False
-        frame_numbers = [min(row["input_frames"] - 1, max(0, round((cue["start_ms"] + cue["end_ms"]) * 60 / 2000))) for cue in cues]
+        frame_numbers = [min(output_frames - 1, max(0, round((cue["start_ms"] + cue["end_ms"]) * 60 / 2000))) for cue in cues]
         for cue in cues:
-            start_frame = round(cue["start_ms"] * 60 / 1000)
-            end_frame = round(cue["end_ms"] * 60 / 1000)
+            start_frame = min(output_frames - 1, round(cue["start_ms"] * 60 / 1000))
+            end_frame = min(output_frames, round(cue["end_ms"] * 60 / 1000))
             frame_numbers.extend([max(0, start_frame - 1), start_frame,
-                                  min(row["input_frames"] - 1, end_frame - 1),
-                                  min(row["input_frames"] - 1, end_frame)])
+                                  min(output_frames - 1, end_frame - 1),
+                                  min(output_frames - 1, end_frame)])
         for layer in [row.get("nameplate"), *row.get("text_pins", [])]:
             if layer:
-                frame_numbers += [max(0, layer["start_frame"] - 1), layer["start_frame"],
-                                  min(row["input_frames"] - 1, layer["end_frame_exclusive"] - 1),
-                                  min(row["input_frames"] - 1, layer["end_frame_exclusive"])]
+                start = min(output_frames - 1, math.ceil(layer["start_frame"] / speed))
+                end = min(output_frames - 1, math.ceil(layer["end_frame_exclusive"] / speed))
+                frame_numbers += [max(0, start - 1), start, max(0, end - 1), end]
         cut_positions = [0]
         cumulative = 0
         for segment in render_value["segments"]:
             cumulative += segment["expected_output_frames"]
-            cut_positions.append(cumulative)
+            cut_positions.append(math.ceil(cumulative / speed))
         for cut in cut_positions:
-            frame_numbers.extend(range(max(0, cut - 72), min(row["input_frames"], cut + 72)))
-        frame_numbers += [0, row["input_frames"] - 1]
+            frame_numbers.extend(range(max(0, cut - 72), min(output_frames, cut + 72)))
+        frame_numbers += [0, output_frames - 1]
         visual = frames(output, frame_numbers, job / f"attempt-{value['repair_round'] + 1:02d}" / "evidence" / "packaged_frames" / pid)
         decision = ((asr_match or speech_preserved) and subtitle_timing_pass and metrics["clipped_samples"] == 0
                     and all(cut["decision"] == "pass" for cut in cut_metrics)
@@ -1224,24 +1257,47 @@ def clean_final_evidence(job: Path, value: dict) -> None:
     if value["phase"] != "clean_validated":
         raise ValueError("clean final evidence requires passing clean QC")
     clean, qc = require_clean_qc(value)
-    measured = {row["plan_id"]: row for row in qc["results"]}
-    rows = []
+    rows = []; deliveries = []; failures = []
+    packager = module("clean_final_speed", "scripts/packaging/scripts/package_video.py")
+    model = load_model()
     for row in clean["results"]:
-        output = require_ref(row["output"], "clean output")
+        source = require_ref(row["output"], "clean output")
+        delivery = packager.speed_clean(source, processing_dir(value) / "临时文件" / "final_clean" / f"{row['plan_id']}.mp4")
+        delivery["plan_id"] = row["plan_id"]
+        deliveries.append(delivery)
+        output = Path(delivery["output_path"])
         render = read(require_ref(row["render_evidence"], "render evidence"))
-        count = render["actual_output_frames"]
+        count = delivery["output_frames"]
+        cuts = [math.ceil(cut / packager.FINAL_SPEED) for cut in render_cut_frames(render)]
         numbers = {0, count - 1}
-        for cut in [0, *render_cut_frames(render), count]:
+        for cut in [0, *cuts, count]:
             numbers.update(range(max(0, cut - 72), min(count, cut + 72)))
         visual = frames(output, sorted(numbers), job / "evidence" / "clean_final_frames" / row["plan_id"])
-        rows.append({"plan_id": row["plan_id"], "output": row["output"], "frames": visual,
-                     "metrics": measured[row["plan_id"]]["metrics"], "decision": "pass"})
+        audio = pcm(output); metrics = audio_metrics(audio)
+        cut_metrics = cut_pcm_metrics(audio, cuts, clean=True)
+        asr = transcribe(model, output)
+        asr_match = normalized(asr["text"]) == normalized(row["expected_text"])
+        proof = delivery_mix_evidence(audio, delivery)
+        passed = ((asr_match or proof["decision"] == "pass") and metrics["clipped_samples"] == 0
+                  and all(cut["decision"] == "pass" for cut in cut_metrics))
+        if not passed:
+            failures.append(f"{row['plan_id']}: accelerated clean audio QC")
+        rows.append({"plan_id": row["plan_id"], "output": ref(output), "frames": visual,
+                     "asr": asr, "asr_match": asr_match, "mix_evidence": proof,
+                     "metrics": metrics, "cut_pcm": cut_metrics, "decision": "pass" if passed else "reject"})
+    final_path = job / "manifests" / "final_clean_delivery.json"
+    write(final_path, {"schema": "video-montage-final-clean/v1", "clean_delivery": value["clean_delivery"],
+                       "final_speed": packager.FINAL_SPEED, "results": deliveries})
+    value["final_clean_delivery"] = ref(final_path)
     path = job / "reports" / "final_evidence.json"
     write(path, {"schema": "video-montage-autonomous-final-evidence/v260929", "delivery_mode": "clean",
                  "clean_delivery": value["clean_delivery"], "clean_qc": value["clean_qc"],
-                 "results": rows, "decision": "pass", "failures": []})
+                 "final_clean_delivery": value["final_clean_delivery"],
+                 "results": rows, "decision": "reject" if failures else "pass", "failures": failures})
     value["final_evidence"] = ref(path)
     value["delivery_mode"] = "clean"
+    if failures:
+        fail_round(job, value, "final_evidence", failures)
     save(job, value, "final_evidenced")
 
 
@@ -1300,7 +1356,7 @@ def publish_delivery(job: Path, value: dict) -> list[dict]:
     """Publish only bytes authorized by the final review; keep reusable bindings local."""
     pending = processing_dir(value).resolve()
     delivery = attempt_dir(value).resolve()
-    if pending == delivery:
+    if pending == delivery and value.get("delivery_mode") != "clean":
         return [row["output"] for row in read(require_ref(value["final_evidence"], "final evidence"))["results"]]
     packager = module("autonomous_publisher", "scripts/packaging/scripts/package_video.py")
     clean, qc = require_clean_qc(value)
@@ -1323,7 +1379,8 @@ def publish_delivery(job: Path, value: dict) -> list[dict]:
     published_clean = {"schema": clean["schema"], "decision": "pass", "results": []}
     for row in clean["results"]:
         source = require_ref(row["output"], "authorized clean output")
-        target = Path(relocate(str(source)))
+        target = (target_manifests / "clean_inputs" / f"{row['plan_id']}.mp4"
+                  if value.get("delivery_mode") == "clean" else Path(relocate(str(source))))
         if source != target:
             copies.append((source, target))
         timeline = read(require_ref(row["render_evidence"], "render evidence"))
@@ -1354,7 +1411,22 @@ def publish_delivery(job: Path, value: dict) -> list[dict]:
     copies.append((qc_path, qc_target))
     outputs = [row["output"] for row in published_clean["results"]]
     published = clean_ref
-    if value.get("delivery_mode") != "clean":
+    if value.get("delivery_mode") == "clean":
+        final = read(require_ref(value["final_clean_delivery"], "accelerated clean delivery"))
+        final["clean_delivery"] = clean_ref
+        outputs = []
+        for row in final["results"]:
+            target = packager.delivery_category(delivery, "clean") / f"{row['plan_id']}.mp4"
+            copies.append((Path(row["output_path"]), target))
+            row["output_path"] = str(target)
+            row["input"] = next(item["output"] for item in published_clean["results"] if item["plan_id"] == row["plan_id"])
+            outputs.append({"path": str(target), "sha256": row["output_sha256"]})
+        final_path = staging / "final_clean_delivery.json"
+        final_target = target_manifests / final_path.name
+        write(final_path, final)
+        copies.append((final_path, final_target))
+        published = {"path": str(final_target), "sha256": sha(final_path)}
+    else:
         packaged = read(require_ref(value["packaging_delivery"], "packaging delivery"))
         final = relocate(packaged)
         for old, row in zip(packaged["results"], final["results"]):
@@ -1456,20 +1528,44 @@ def complete(args) -> None:
         clean, _ = require_clean_qc(value)
         if evidence.get("clean_delivery") != value["clean_delivery"] or evidence.get("clean_qc") != value["clean_qc"]:
             raise ValueError("clean final evidence binding changed")
+        final_path = require_ref(value["final_clean_delivery"], "accelerated clean delivery")
+        final = read(final_path)
+        if (evidence.get("final_clean_delivery") != ref(final_path)
+                or final.get("clean_delivery") != value["clean_delivery"]
+                or final.get("final_speed") != packager.FINAL_SPEED
+                or len(final.get("results", [])) != len(clean["results"])
+                or {row["plan_id"] for row in final["results"]} != {row["plan_id"] for row in clean["results"]}):
+            raise ValueError("accelerated clean binding changed")
+        by_clean = {row["plan_id"]: row for row in clean["results"]}
+        by_evidence = {row["plan_id"]: row for row in evidence["results"]}
         failures = []
-        for row in clean["results"]:
-            output = require_ref(row["output"], "clean output")
+        for row in final["results"]:
+            output = require_ref({"path": row["output_path"], "sha256": row["output_sha256"]}, "accelerated clean output")
             spec = packager.video_spec(output)
-            render = read(require_ref(row["render_evidence"], "render evidence"))
+            original = by_clean[row["plan_id"]]
+            render = read(require_ref(original["render_evidence"], "render evidence"))
+            measured = by_evidence[row["plan_id"]]
+            if (row["input"] != original["output"] or row.get("final_speed") != packager.FINAL_SPEED
+                    or row.get("input_frames") != render["actual_output_frames"]
+                    or measured.get("output") != ref(output) or measured.get("decision") != "pass"
+                    or measured.get("metrics", {}).get("clipped_samples") != 0
+                    or not isinstance(measured.get("cut_pcm"), list)
+                    or any(cut.get("decision") != "pass" for cut in measured["cut_pcm"])
+                    or (measured.get("asr_match") is not True and delivery_mix_evidence(pcm(output), row)["decision"] != "pass")):
+                failures.append(f"{row['plan_id']}: accelerated clean evidence")
             if ((spec["width"], spec["height"]) != (1440, 2560)
                     or spec["video_codec"] != "h264" or spec["audio_codec"] != "aac"
-                    or not packager.packaged_streams_ok(spec) or spec["frames"] != render["actual_output_frames"]):
+                    or not packager.packaged_streams_ok(spec) or spec["frames"] != packager.final_frames(render["actual_output_frames"])):
                 failures.append(f"{row['plan_id']}: clean specification")
             run([str(FFMPEG), "-v", "error", "-i", str(output), "-f", "null", "NUL"])
         technical = {"decision": "reject" if failures else "pass", "failures": failures, "delivery_mode": "clean"}
         write(technical_path, technical)
     else:
-        technical = packager.validate(require_ref(value["packaging_delivery"], "packaging delivery"), technical_path,
+        package_path = require_ref(value["packaging_delivery"], "packaging delivery")
+        packaged_rows = read(package_path).get("results", [])
+        if not packaged_rows or any(row.get("final_speed") != packager.FINAL_SPEED for row in packaged_rows):
+            raise ValueError("final 1.2x packaging required; rerender and obtain new final evidence")
+        technical = packager.validate(package_path, technical_path,
                                       autonomous_evidence=evidence_path, autonomous_review=args.review)
     if technical["decision"] != "pass":
         fail_round(job, value, "packaging_technical", technical["failures"])
@@ -1572,8 +1668,6 @@ def compact_delivery(job: Path, value: dict) -> None:
     if value.get("delivery_mode") != "clean" and all(key in inputs for key in ("plan", "source_index", "asset_copy", "clean_delivery", "clean_qc")):
         retained["reburn_inputs"] = inputs
     retained["outputs"] = [{"path": row["output_path"], "sha256": row["output_sha256"]} for row in packaging.get("results", []) if row.get("output_path")]
-    if value.get("delivery_mode") == "clean":
-        retained["outputs"] = [row["output"] for row in packaging["results"]]
     write(root / "autonomous_state.json", retained)
     for path in root.rglob("*"):
         if path.is_file() and path.resolve() not in keep:
