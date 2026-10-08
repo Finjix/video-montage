@@ -33,15 +33,19 @@ video-montage/
 
 在 Codex 中统一调用 `video-montage`，项目根目录 `SKILL.md` 是唯一技能入口。新任务及其返修按[自主流程](references/workflows/autonomous-workflow.md)使用 `scripts/autonomous/scripts/autonomous_montage.py`，由 Codex 审核语义、画面和字幕，程序核验 ASR、PCM 与哈希。已有 `three_suite_ff_state.json` 或 v260928 审核回执的任务按[旧任务流程](references/workflows/legacy-workflow.md)继续运行，不转换状态或回执。旧任务由执行器 `scripts/executor/scripts/three_suite_ff.py` 按 `preflight → init → semantic-run → semantic-complete → controller-preflight → controller-finalize → controller-validate → complete` 顺序运行。语义模块制定和审核帧计划，帧渲染器剪出预成片，FFmpeg 控制器编码并复检最终视频。
 
-生产裁切使用 `source_in_frame`、`speech_end_frame`、`source_out_frame_exclusive` 和源帧率；只有秒数的计划会被拒绝。素材须绑定原片 SHA-256 和原始帧区间，用户判坏的区间不能通过改名或新候选 ID 绕过。两种流程按各自契约执行语义、切点和成片复检；自主流程不声明人工听审、独立审核或强制对齐，旧流程保留原审核门禁。工作单、来源追溯、语义审核、帧计划和质检回执保存在任务目录中。
+生产裁切使用 `source_in_frame`、`speech_end_frame`、`source_out_frame_exclusive` 和源帧率；只有秒数的计划会被拒绝。解码后的帧时间戳须为从零开始的恒定帧率，变帧率及非零视频起点会在编码前被拒绝。素材须绑定原片 SHA-256 和原始帧区间，用户判坏的区间不能通过改名或新候选 ID 绕过。计划 ID 在忽略大小写后仍须唯一。两种流程按各自契约执行语义、切点和成片复检；自主流程不声明人工听审、独立审核或强制对齐，旧流程保留原审核门禁。
 
 默认成片为 H.264/AAC、1440×2560、60 fps，不额外添加背景音乐、字幕或叠加元素。新任务合同见[自动混剪流程](references/autonomous/workflow.md)；旧任务合同见 [语义流程](references/workflows/semantic-workflow.md)、[渲染流程](references/workflows/executor-workflow.md) 和 [控制器流程](references/workflows/controller-workflow.md)。
+
+未请求包装的新任务，在 `clean-qc` 后运行 `final-evidence --clean`，由 Codex 查看成片画面并提交最终审核，再执行 `complete --review <JSON>`。整批通过后交付 `混剪（无包装）/` 中的 MP4。
 
 ### 可选成片包装
 
 新任务按自主流程执行 `subtitle-draft → subtitle-review → package → final-evidence → complete`，由 Codex 审核包装版画面和字幕；下述控制器及 `packaging-*` 命令用于旧任务。
 
-通过控制器质检后，可用包装模块生成可编辑中文字幕草稿，并按每条视频的 JSON 配置加入文字钉、BGM、免责图和明星名牌。字幕只烧录进视频，保留 `字幕/subtitle-xx.txt` 供修改后重新烧录，不生成外挂字幕轨或 `.srt` 文件；输出目录命名为 `自动化混剪_时间戳`；包装视频放 `成片/`，纯净视频放 `混剪（无包装）/`，配置放 `临时文件/配置/`，清单、日志、状态、审核和校验结果存入项目 `work/<交付目录名>/临时文件/`，与该项目一起保留，字幕目录固定包含无扩展名文件 `修改字幕后让AI重新烧录`，不生成重复快照文件。包装版另存，不覆盖纯净成片；包装配置、素材、字幕和输出均以 SHA-256 绑定。完整任务在 `controller-validate` 后依次运行 `packaging-draft`、`packaging-finalize`、`packaging-validate`，再运行 `complete`；没有包装配置时继续原流程。已有 1440×2560、60 fps 视频也可用独立命令包装，结果标为单条测试。命令、配置和审核格式见 [包装说明](references/packaging/workflow.md)。
+包装模块生成可编辑中文字幕草稿，并按每条视频的 JSON 配置加入文字钉、BGM、免责图和明星名牌。字幕只烧录进视频，保留 `字幕/subtitle-xx.txt` 供修改后重新烧录，不生成外挂字幕轨或 `.srt` 文件；包装视频放 `成片/`，纯净视频放 `混剪（无包装）/`，配置放 `临时文件/config/`，清单和重烧上下文放 `临时文件/manifests/`。字幕目录固定包含无扩展名文件 `修改字幕后让AI重新烧录`。包装版另存，包装配置、素材、字幕和输出均以 SHA-256 绑定。旧任务在 `controller-validate` 后依次运行 `packaging-draft`、`packaging-finalize`、`packaging-validate`，再运行 `complete`；没有包装配置时继续原流程。已有 1440×2560、60 fps 视频也可用独立命令包装，结果标为单条测试。命令、配置和审核格式见 [包装说明](references/packaging/workflow.md)。
+
+完成后的自主任务修改字幕时，运行 `reburn --job-dir <任务目录> --plan-id <ID> --subtitle-txt <修改后的TXT>`。按命令返回的草稿和配置完成新的 `subtitle-review → package → final-evidence → complete`。保留的纯净输入及 QC 可复用，新的字幕和包装画面必须重新审核；原始素材仍需可访问且哈希一致。
 
 ## 随包依赖与检查
 
@@ -51,28 +55,24 @@ video-montage/
 
 ## 打包分发
 
-运行 `package.cmd`，在项目的 `release/` 目录生成 `video-montage-v260928.zip`，解压后顶层文件夹为 `video-montage-v260928`。可传入压缩包文件名版本，例如 `package.cmd v260929` 会生成 `release/video-montage-v260929.zip`，但包内顶层文件夹仍按当前项目版本命名。完成或失败后会显示结果并等待按键；脚本调用可加 `-NoPause`。
+运行 `package.cmd`，在项目的 `release/` 目录生成 `video-montage-v261008.zip`，解压后顶层文件夹为 `video-montage-v261008`。可传入压缩包文件名版本，例如 `package.cmd v261009` 会生成 `release/video-montage-v261009.zip`，但包内顶层文件夹仍按当前项目版本命名。完成或失败后会显示结果并等待按键；脚本调用可加 `-NoPause`。
 
 
-所有新任务的交付目录放在项目 `work/`，时间戳使用北京时间（`YYYYMMDD_HHMMSS_ffffff`）：
+所有新任务的交付目录放在项目 `work/`，时间戳使用北京时间（`YYYYMMDD_HHMMSS`），同秒重名拒绝覆盖：
 
 ```text
 work/
-└── 自动化混剪_20260930_153000_123456/
+└── 自动化混剪_20261008_153000/
     ├── 成片/                       # 包装、烧录后的 MP4
     ├── 混剪（无包装）/             # 供重新烧录的纯净 MP4
     ├── 字幕/
     │   ├── subtitle-xx.txt
     │   └── 修改字幕后让AI重新烧录
-    └── 临时文件/                   # 运行记录及必要的渲染、编辑文件
-        ├── 配置/                   # 重烧需要的包装配置
+    └── 临时文件/                   # 完成后保留的必要文件
+        ├── config/                 # 重烧需要的包装配置
+        ├── manifests/              # 清单、纯净输入校验和重烧上下文
         ├── autonomous_state.json
-        ├── evidence/
-        ├── reviews/
-        ├── reports/
-        ├── 清单/
-        ├── 报告/
-        └── video_montage_autonomous_completion.json
+        └── work_order.json
 ```
 
-运行 `init --work-order <JSON>` 自动创建交付目录与项目临时运行目录，返回的 `job_dir` 为 `work/<交付目录名>/临时文件/`；后续命令使用这个路径。工作单 `output_root` 可省略，填写时必须指向 `work`。状态、日志、运行记录、审核、证据、清单、校验报告和完成回执统一保存在该项目的 `临时文件/`，不写入成片、纯净视频或字幕目录；包装编码完成后清理临时 MP4、ASS 和字体副本。返修和字幕重烧仍覆盖同一交付目录，重新校验后替换成片。新任务不再创建根目录 `.runtime/`。Git、安装和分发排除 `work/`，并继续排除兼容旧任务的 `.runtime/`。已有任务保留原路径和绑定，不改写已有审核回执。
+运行 `init --work-order <JSON>` 自动创建交付目录与项目临时运行目录，返回的 `job_dir` 为 `work/<交付目录名>/临时文件/`；后续命令使用这个路径。工作单 `output_root` 可省略，填写时必须指向 `work`。过程状态、日志、审核、证据和报告统一保存在 `临时文件/` 的英文子目录。自主任务完成后清理过程记录、临时 MP4、ASS 和字体副本，仅保留配置、清单、纯净输入授权、计划/转写/素材文案等重烧上下文及最小工作单和状态。返修和字幕重烧复用同一交付目录；整批临时视频通过最终检查后才替换交付文件，替换失败会回滚已替换文件。新任务不再创建根目录 `.runtime/`。Git、安装和分发排除 `work/`，并继续排除兼容旧任务的 `.runtime/`。已有旧流程任务保留原路径和绑定。

@@ -47,6 +47,9 @@ def module(name: str, relative: str):
     return value
 
 
+SOURCE_TIMING = module("autonomous_source_timing", "scripts/semantic/scripts/source_timing.py")
+
+
 def read(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8-sig"))
 
@@ -95,6 +98,7 @@ def probe(path: Path) -> dict:
 def video(path: Path) -> dict:
     info = probe(path)
     stream = next(row for row in info["streams"] if row["codec_type"] == "video")
+    SOURCE_TIMING.require_constant_frame_rate(FFPROBE, path, stream)
     fps = Fraction(stream["avg_frame_rate"])
     frames = int(stream.get("nb_frames") or round(float(info["format"]["duration"]) * fps))
     return {"fps_num": fps.numerator, "fps_den": fps.denominator, "frames": frames,
@@ -157,6 +161,17 @@ def attempt_dir(value: dict) -> Path:
     if value.get("delivery_layout") == "chinese/v1":
         return root
     return root / "attempt-01"
+
+
+def processing_dir(value: dict) -> Path:
+    return Path(value["pending_delivery_directory"]) if value.get("pending_delivery_directory") else attempt_dir(value)
+
+
+def start_pending_delivery(job: Path, value: dict) -> Path:
+    pending = job / f"attempt-{value['repair_round'] + 1:02d}" / "pending" / attempt_dir(value).name
+    pending.mkdir(parents=True, exist_ok=True)
+    value["pending_delivery_directory"] = str(pending.resolve())
+    return pending
 
 
 def bind_existing_delivery(value: dict) -> None:
@@ -338,12 +353,32 @@ def validate_subtitle_timing(start: int, end: int, first: tuple[int, int],
         raise ValueError("corrected cue does not follow ASR word timestamps")
 
 
+def rendered_plan_segments(plan_output: dict, render_value: dict) -> list[dict]:
+    """Resolve each rendered shot's contiguous original segment indexes."""
+    originals = plan_output["segments"]
+    rendered = render_value["segments"]
+    mapped = []
+    covered = []
+    for index, shot in enumerate(rendered, 1):
+        indexes = shot.get("source_segment_indexes")
+        if indexes is None:
+            if len(originals) != len(rendered):
+                raise ValueError("shot ASR plan/render scope mismatch")
+            indexes = [index]
+        if (not isinstance(indexes, list) or not indexes
+                or any(type(i) is not int or i < 1 or i > len(originals) for i in indexes)):
+            raise ValueError("invalid rendered source segment mapping")
+        covered.extend(indexes)
+        mapped.append({"text": "".join(originals[i - 1]["text"] for i in indexes)})
+    if covered != list(range(1, len(originals) + 1)):
+        raise ValueError("incomplete or replayed rendered source segment mapping")
+    return mapped
+
+
 def subtitle_segment_bounds(cues: list[dict], plan_output: dict, render_value: dict) -> list[tuple[int, int]]:
     """Bind each spoken cue to the actual rendered shot that contains its words."""
-    segments = plan_output["segments"]
+    segments = rendered_plan_segments(plan_output, render_value)
     rendered = render_value["segments"]
-    if len(segments) != len(rendered):
-        raise ValueError("subtitle/render segment scope mismatch")
     spans = []
     frame_cursor = text_cursor = 0
     for segment, result in zip(segments, rendered):
@@ -412,6 +447,8 @@ def fail_round(job: Path, value: dict, phase: str, reasons: list[str]) -> None:
 def repair(args) -> None:
     job = args.job_dir.resolve(); value = state(job)
     bind_existing_delivery(value)
+    value.pop("pending_delivery_directory", None)
+    value.pop("reburn_only", None)
     if value.pop("compact_delivery", False):
         for key in ("source_index", "asset_copy", "plan", "plan_evidence", "plan_review",
                     "batch_diversity", "clean_delivery", "clean_qc", "subtitle_draft",
@@ -551,6 +588,8 @@ def check_plan(plan: dict, source_index: dict, count: int) -> list[str]:
         return ["plan schema or complete output scope"]
     source_map = {row["source"]["sha256"]: row for row in source_index["sources"]}
     ids = []
+    rejected = read(ROOT / "references/semantic/wuzimu-v20-invalid-intervals.json")["entries"]
+    rejection_gate = module("autonomous_rejected_intervals", "scripts/semantic/scripts/v20_fail_closed.py")
     for output in plan["outputs"]:
         pid = output.get("plan_id")
         ids.append(pid)
@@ -574,7 +613,13 @@ def check_plan(plan: dict, source_index: dict, count: int) -> list[str]:
                 errors.append(f"{pid}: source range beyond end")
             if not normalized(segment.get("text", "")):
                 errors.append(f"{pid}: empty exact speech")
-    if len(ids) != len(set(ids)):
+            if all(type(segment.get(key)) is int for key in ("source_in_frame", "source_out_frame_exclusive", "source_fps_num", "source_fps_den")) and segment["source_fps_num"] > 0 and segment["source_fps_den"] > 0:
+                candidate = {**segment, "source_in": segment["source_in_frame"] * segment["source_fps_den"] / segment["source_fps_num"],
+                             "source_out": segment["source_out_frame_exclusive"] * segment["source_fps_den"] / segment["source_fps_num"]}
+                for entry in rejected:
+                    if rejection_gate.interval_hits(candidate, entry):
+                        errors.append(f"{pid}: rejected original source interval: {entry['entry_id']}")
+    if len(ids) != len({pid.casefold() if isinstance(pid, str) else None for pid in ids}):
         errors.append("duplicate plan ID")
     return errors
 
@@ -819,6 +864,7 @@ def render_clean(args) -> None:
     require_ref(value["plan_review"], "plan review")
     plan_path = require_ref(value["plan"], "plan")
     plan = read(plan_path)
+    start_pending_delivery(job, value)
     renderer = module("autonomous_renderer", "scripts/semantic/scripts/portable_frame_renderer.py")
     rows = []
     for output in plan["outputs"]:
@@ -827,15 +873,15 @@ def render_clean(args) -> None:
         write(unit, {"segments": output["segments"], "transitions": output.get("transitions", [])})
         if value.get("delivery_layout") == "chinese/v1":
             packager = module("autonomous_layout", "scripts/packaging/scripts/package_video.py")
-            packager.ensure_delivery_layout(attempt_dir(value))
-            target = packager.delivery_category(attempt_dir(value), "clean") / f"{pid}.mp4"
+            packager.ensure_delivery_layout(processing_dir(value))
+            target = packager.delivery_category(processing_dir(value), "clean") / f"{pid}.mp4"
         else:
-            target = job / f"attempt-{value['repair_round'] + 1:02d}" / "clean" / f"{pid}.mp4"
+            target = processing_dir(value) / "clean" / f"{pid}.mp4"
         evidence_path = job / f"attempt-{value['repair_round'] + 1:02d}" / "evidence" / "render" / f"{pid}.json"
         renderer.render(unit, target, evidence_path, 1440, 2560, 60, "libx264", overwrite=True)
         rows.append({"plan_id": pid, "output": ref(target), "render_evidence": ref(evidence_path),
                      "expected_text": "".join(segment["text"] for segment in output["segments"])})
-    clean = job / "manifests" / "clean_delivery.json"
+    clean = processing_dir(value) / "临时文件" / "manifests" / "clean_delivery.json"
     write(clean, {"schema": "video-montage-autonomous-clean/v260929", "decision": "pending_qc",
                   "plan": value["plan"], "plan_review": value["plan_review"], "results": rows})
     value["clean_delivery"] = ref(clean)
@@ -850,13 +896,12 @@ def rendered_shot_asr(model, output: Path, rendered: dict, planned: dict,
     silence. Keep that original ASR as evidence; independently verify every
     rendered audio range before using its word timestamps for subtitles.
     """
-    if len(rendered["segments"]) != len(planned["segments"]):
-        raise ValueError("shot ASR plan/render scope mismatch")
+    planned_segments = rendered_plan_segments(planned, rendered)
     directory.mkdir(parents=True, exist_ok=True)
     cursor = 0
     segments = []
     texts = []
-    for index, (shot, original) in enumerate(zip(rendered["segments"], planned["segments"])):
+    for index, (shot, original) in enumerate(zip(rendered["segments"], planned_segments)):
         end = cursor + shot["expected_output_frames"]
         target = directory / f"shot_{index + 1:03d}.wav"
         run([str(FFMPEG), "-v", "error", "-nostdin", "-i", str(output),
@@ -924,7 +969,7 @@ def subtitle_draft(args) -> None:
         raise ValueError("passing clean QC required")
     clean = read(require_ref(value["clean_delivery"], "clean delivery"))
     packager = module("autonomous_packager", "scripts/packaging/scripts/package_video.py")
-    output = attempt_dir(value)
+    output = processing_dir(value)
     rows = []
     for row in clean["results"]:
         draft = packager.draft_one(require_ref(row["output"], "clean output"), row["plan_id"], output, overwrite=True)
@@ -1009,7 +1054,7 @@ def subtitle_review(args) -> None:
             raise ValueError(f"{pid}: corrected cue words do not cover output ASR")
         if subtitle_spelling("".join(cue["after"] for cue in cues)) != subtitle_spelling(expected[pid]):
             raise ValueError(f"{pid}: subtitle words differ from exact source speech")
-        corrected = module("autonomous_subtitle_layout", "scripts/packaging/scripts/package_video.py").subtitle_output(attempt_dir(value), pid)
+        corrected = module("autonomous_subtitle_layout", "scripts/packaging/scripts/package_video.py").subtitle_output(processing_dir(value), pid)
         corrected.write_text("\n\n".join(blocks) + "\n", encoding="utf-8")
         packager.parse_srt(corrected, duration)
         revised.append({"plan_id": pid, "subtitle": ref(corrected), "draft": ref(draft_sub)})
@@ -1018,6 +1063,17 @@ def subtitle_review(args) -> None:
                    "draft": ref(draft_path), "codex_review": ref(args.review), "results": revised,
                    "decision": "pass"})
     value["subtitle_review"] = ref(report)
+    if value.get("reburn_config"):
+        config_path = require_ref(value["reburn_config"], "reburn configuration")
+        config = read(config_path)
+        by_id = {row["plan_id"]: row for row in revised}
+        for row in config["outputs"]:
+            subtitle = by_id[row["plan_id"]]["subtitle"]
+            row.pop("subtitle_srt", None)
+            row["subtitle_txt"] = subtitle["path"]
+            row["subtitle_sha256"] = subtitle["sha256"]
+        write(config_path, config)
+        value["reburn_config"] = ref(config_path)
     save(job, value, "subtitle_approved")
 
 
@@ -1038,17 +1094,21 @@ def package(args) -> None:
         if supplied.resolve() != subtitle or row.get("subtitle_sha256") != sha(subtitle):
             raise ValueError("packaging must use reviewed subtitle hash")
     packager = module("autonomous_packager_render", "scripts/packaging/scripts/package_video.py")
-    manifest = packager.delivery_category(attempt_dir(value), "manifests") / "packaging_manifest.json"
-    packager.render(args.config.resolve(), attempt_dir(value), manifest,
+    manifest = packager.delivery_category(processing_dir(value), "manifests") / "packaging_manifest.json"
+    packager.render(args.config.resolve(), processing_dir(value), manifest,
                     autonomous_clean=require_ref(value["clean_delivery"], "clean delivery"),
                     autonomous_clean_qc=require_ref(value["clean_qc"], "clean QC"), overwrite=True)
     value["packaging_delivery"] = ref(manifest)
-    value["packaging_config"] = ref(args.config)
+    value["packaging_config"] = ref(Path(read(manifest)["config_snapshot_path"]))
+    value["delivery_mode"] = "packaged"
     save(job, value, "packaged")
 
 
 def final_evidence(args) -> None:
     job = args.job_dir.resolve(); value = state(job)
+    if getattr(args, "clean", False):
+        clean_final_evidence(job, value)
+        return
     if value["phase"] not in {"packaged", "repair_required"}:
         raise ValueError("packaging required")
     manifest_path = require_ref(value["packaging_delivery"], "packaging delivery")
@@ -1137,11 +1197,201 @@ def final_evidence(args) -> None:
     save(job, value, "final_evidenced")
 
 
+def require_clean_qc(value: dict) -> tuple[dict, dict]:
+    clean_path = require_ref(value["clean_delivery"], "clean delivery")
+    clean = read(clean_path)
+    qc = read(require_ref(value["clean_qc"], "clean QC"))
+    order = read(require_ref(value["work_order"], "work order"))
+    by_id = {row["plan_id"]: row for row in qc.get("results", [])}
+    ids = [row["plan_id"] for row in clean.get("results", [])]
+    if (qc.get("decision") != "pass" or qc.get("clean_delivery") != ref(clean_path)
+            or len(ids) != int(order["requested_outputs"]) or len(set(ids)) != len(ids)
+            or len(by_id) != len(qc.get("results", [])) or set(by_id) != set(ids)):
+        raise ValueError("complete hash-bound clean QC required")
+    for row in clean["results"]:
+        measured = by_id[row["plan_id"]]
+        require_ref(row["output"], "clean output")
+        require_ref(row["render_evidence"], "clean render evidence")
+        if (measured.get("output") != row["output"] or measured.get("text_match") is not True
+                or measured.get("metrics", {}).get("clipped_samples") != 0
+                or not isinstance(measured.get("cut_pcm"), list)
+                or any(cut.get("decision") != "pass" for cut in measured["cut_pcm"])):
+            raise ValueError("clean QC does not authorize this output")
+    return clean, qc
+
+
+def clean_final_evidence(job: Path, value: dict) -> None:
+    if value["phase"] != "clean_validated":
+        raise ValueError("clean final evidence requires passing clean QC")
+    clean, qc = require_clean_qc(value)
+    measured = {row["plan_id"]: row for row in qc["results"]}
+    rows = []
+    for row in clean["results"]:
+        output = require_ref(row["output"], "clean output")
+        render = read(require_ref(row["render_evidence"], "render evidence"))
+        count = render["actual_output_frames"]
+        numbers = {0, count - 1}
+        for cut in [0, *render_cut_frames(render), count]:
+            numbers.update(range(max(0, cut - 72), min(count, cut + 72)))
+        visual = frames(output, sorted(numbers), job / "evidence" / "clean_final_frames" / row["plan_id"])
+        rows.append({"plan_id": row["plan_id"], "output": row["output"], "frames": visual,
+                     "metrics": measured[row["plan_id"]]["metrics"], "decision": "pass"})
+    path = job / "reports" / "final_evidence.json"
+    write(path, {"schema": "video-montage-autonomous-final-evidence/v260929", "delivery_mode": "clean",
+                 "clean_delivery": value["clean_delivery"], "clean_qc": value["clean_qc"],
+                 "results": rows, "decision": "pass", "failures": []})
+    value["final_evidence"] = ref(path)
+    value["delivery_mode"] = "clean"
+    save(job, value, "final_evidenced")
+
+
+def reburn(args) -> None:
+    """Start a fresh subtitle review from the retained, verified clean inputs."""
+    job = args.job_dir.resolve(); value = state(job)
+    if value["phase"] != "complete" or not value.get("reburn_inputs"):
+        raise ValueError("completed delivery with retained reburn inputs required")
+    inputs = value["reburn_inputs"]
+    for key in ("plan", "source_index", "asset_copy", "clean_delivery", "clean_qc", "packaging_delivery"):
+        require_ref(inputs[key], f"reburn {key}")
+        value[key] = inputs[key]
+    clean, qc = require_clean_qc(value)
+    previous = read(require_ref(value["packaging_delivery"], "previous packaging"))
+    if args.plan_id not in {row["plan_id"] for row in previous["results"]}:
+        raise ValueError("unknown reburn plan ID")
+    edited = args.subtitle_txt.resolve()
+    if not edited.is_file():
+        raise FileNotFoundError(edited)
+    value["repair_round"] = int(value.get("repair_round", 0)) + 1
+    value.pop("compact_delivery", None)
+    value.pop("completion", None)
+    value["reburn_only"] = True
+    value["delivery_mode"] = "packaged"
+    pending = start_pending_delivery(job, value)
+    packager = module("autonomous_reburn_packager", "scripts/packaging/scripts/package_video.py")
+    packager.ensure_delivery_layout(pending)
+    by_id = {row["plan_id"]: row for row in clean["results"]}
+    drafts = []
+    for row in previous["results"]:
+        pid = row["plan_id"]
+        source = edited if pid == args.plan_id else require_ref(row["subtitle_snapshot"], "unchanged subtitle")
+        duration = round(packager.video_spec(require_ref(by_id[pid]["output"], "clean output"))["duration"] * 1000)
+        packager.parse_srt(source, duration)
+        snapshot = job / f"attempt-{value['repair_round'] + 1:02d}" / "evidence" / "subtitle_drafts" / packager.subtitle_filename(pid)
+        snapshot.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, snapshot)
+        drafts.append({"plan_id": pid, "input_path": by_id[pid]["output"]["path"],
+                       "subtitle_txt_path": str(snapshot), "subtitle_txt_sha256": sha(snapshot)})
+    draft_path = job / "reports" / "subtitle_draft.json"
+    write(draft_path, {"schema": "video-montage-autonomous-subtitle-draft/v260929",
+                       "clean_delivery": value["clean_delivery"], "asset_copy": value["asset_copy"], "results": drafts})
+    value["subtitle_draft"] = ref(draft_path)
+    config = read(Path(previous["config_snapshot_path"]))
+    if sha(Path(previous["config_snapshot_path"])) != previous["config_snapshot_sha256"]:
+        raise ValueError("reburn configuration changed")
+    config_path = pending / "临时文件" / "config" / "reburn_config.json"
+    write(config_path, config)
+    value["reburn_config"] = ref(config_path)
+    (job / "video_montage_autonomous_completion.json").unlink(missing_ok=True)
+    save(job, value, "subtitle_drafted")
+    print(json.dumps({"draft": str(draft_path), "config": str(config_path), "next": "subtitle-review"}, ensure_ascii=False))
+
+
+def publish_delivery(job: Path, value: dict) -> list[dict]:
+    """Publish only bytes authorized by the final review; keep reusable bindings local."""
+    pending = processing_dir(value).resolve()
+    delivery = attempt_dir(value).resolve()
+    if pending == delivery:
+        return [row["output"] for row in read(require_ref(value["final_evidence"], "final evidence"))["results"]]
+    packager = module("autonomous_publisher", "scripts/packaging/scripts/package_video.py")
+    clean, qc = require_clean_qc(value)
+    staging = job / f"attempt-{value['repair_round'] + 1:02d}" / "publication"
+    staging.mkdir(parents=True, exist_ok=True)
+    target_manifests = (delivery / "临时文件" if value.get("delivery_layout") == "chinese/v1" else job) / "manifests"
+    copies = []
+
+    def relocate(item):
+        if isinstance(item, dict):
+            return {key: relocate(row) for key, row in item.items()}
+        if isinstance(item, list):
+            return [relocate(row) for row in item]
+        if isinstance(item, str):
+            path = Path(item)
+            if path.is_absolute() and path.is_relative_to(pending):
+                return str(delivery / path.relative_to(pending))
+        return item
+
+    published_clean = {"schema": clean["schema"], "decision": "pass", "results": []}
+    for row in clean["results"]:
+        source = require_ref(row["output"], "authorized clean output")
+        target = Path(relocate(str(source)))
+        if source != target:
+            copies.append((source, target))
+        timeline = read(require_ref(row["render_evidence"], "render evidence"))
+        timeline = {key: timeline[key] for key in ("schema", "segments", "actual_output_frames", "expected_output_frames")}
+        timeline.update(export_path=str(target), export_sha256=row["output"]["sha256"])
+        timeline_path = staging / f"render-{row['plan_id']}.json"
+        timeline_target = target_manifests / timeline_path.name
+        write(timeline_path, timeline)
+        copies.append((timeline_path, timeline_target))
+        published_clean["results"].append({**row, "output": {"path": str(target), "sha256": row["output"]["sha256"]},
+                                          "render_evidence": {"path": str(timeline_target), "sha256": sha(timeline_path)}})
+    clean_path = staging / "clean_delivery.json"
+    clean_target = target_manifests / clean_path.name
+    write(clean_path, published_clean)
+    clean_ref = {"path": str(clean_target), "sha256": sha(clean_path)}
+    copies.append((clean_path, clean_target))
+    qc = relocate(qc)
+    qc["clean_delivery"] = clean_ref
+    for measured in qc["results"]:
+        clean_row = next(row for row in published_clean["results"] if row["plan_id"] == measured["plan_id"])
+        measured["output"] = clean_row["output"]
+        if measured.get("timing_asr"):
+            measured["timing_asr"]["output"] = clean_row["output"]
+    qc_path = staging / "clean_validation.json"
+    qc_target = target_manifests / qc_path.name
+    write(qc_path, qc)
+    qc_ref = {"path": str(qc_target), "sha256": sha(qc_path)}
+    copies.append((qc_path, qc_target))
+    outputs = [row["output"] for row in published_clean["results"]]
+    published = clean_ref
+    if value.get("delivery_mode") != "clean":
+        packaged = read(require_ref(value["packaging_delivery"], "packaging delivery"))
+        final = relocate(packaged)
+        for old, row in zip(packaged["results"], final["results"]):
+            copies.append((Path(old["output_path"]), Path(row["output_path"])))
+            copies.append((Path(old["subtitle_snapshot"]["path"]), Path(row["subtitle_snapshot"]["path"])))
+        original_config = Path(packaged["config_snapshot_path"])
+        config_path = staging / "packaging_config.json"
+        write(config_path, relocate(read(original_config)))
+        config_target = Path(final["config_snapshot_path"])
+        copies.append((config_path, config_target))
+        final.update(config_path=str(config_target), config_sha256=sha(config_path),
+                     config_snapshot_path=str(config_target), config_snapshot_sha256=sha(config_path),
+                     clean_delivery_path=str(clean_target), clean_delivery_sha256=clean_ref["sha256"],
+                     controller_validation_path=str(qc_target), controller_validation_sha256=qc_ref["sha256"])
+        package_path = staging / "packaging_manifest.json"
+        package_target = target_manifests / package_path.name
+        write(package_path, final)
+        copies.append((package_path, package_target))
+        published = {"path": str(package_target), "sha256": sha(package_path)}
+        outputs = [{"path": row["output_path"], "sha256": row["output_sha256"]} for row in final["results"]]
+    packager.publish_files(copies, job)
+    value["published_delivery"] = published
+    value["published_clean"] = clean_ref
+    value["published_clean_qc"] = qc_ref
+    for row in outputs:
+        require_ref(row, "published authorized output")
+    return outputs
+
+
 def audit_provenance(value: dict) -> None:
     """Rehash every source, candidate, review and delivered artifact at completion."""
-    for name in ("work_order", "source_index", "asset_copy", "plan", "plan_evidence", "plan_review",
-                 "clean_delivery", "clean_qc", "subtitle_draft", "subtitle_review", "packaging_config",
-                 "packaging_delivery", "final_evidence"):
+    names = ["work_order", "source_index", "asset_copy", "plan", "clean_delivery", "clean_qc", "final_evidence"]
+    if not value.get("reburn_only"):
+        names += ["plan_evidence", "plan_review"]
+    if value.get("delivery_mode") != "clean":
+        names += ["subtitle_draft", "subtitle_review", "packaging_config", "packaging_delivery"]
+    for name in names:
         require_ref(value[name], name)
     index = read(Path(value["source_index"]["path"]))
     assets = read(require_ref(index["asset_copy_sources"], "asset copy sources"))
@@ -1150,18 +1400,26 @@ def audit_provenance(value: dict) -> None:
     for row in index["sources"]:
         require_ref(row["source"], "original source")
         require_ref(row["asr"], "original source ASR")
-    for row in read(Path(value["plan_evidence"]["path"]))["results"]:
-        require_ref(row["source"], "candidate source")
-        require_ref(row["pcm"], "candidate PCM")
-        for frame in row["frames"]:
-            require_ref(frame, "candidate frame")
-    require_diversity(value, read(Path(value["plan_evidence"]["path"])))
+    if value.get("reburn_only"):
+        require_clean_qc(value)
+        errors = check_plan(read(require_ref(value["plan"], "reburn plan")), index,
+                            int(read(require_ref(value["work_order"], "work order"))["requested_outputs"]))
+        if errors:
+            raise ValueError(f"reburn source plan rejected: {errors}")
+    else:
+        for row in read(Path(value["plan_evidence"]["path"]))["results"]:
+            require_ref(row["source"], "candidate source")
+            require_ref(row["pcm"], "candidate PCM")
+            for frame in row["frames"]:
+                require_ref(frame, "candidate frame")
+        require_diversity(value, read(Path(value["plan_evidence"]["path"])))
     for row in read(Path(value["clean_delivery"]["path"]))["results"]:
         require_ref(row["output"], "clean output")
         require_ref(row["render_evidence"], "clean render evidence")
-    for row in read(Path(value["subtitle_review"]["path"]))["results"]:
-        require_ref(row["draft"], "subtitle draft")
-        require_ref(row["subtitle"], "reviewed subtitle")
+    if value.get("delivery_mode") != "clean":
+        for row in read(Path(value["subtitle_review"]["path"]))["results"]:
+            require_ref(row["draft"], "subtitle draft")
+            require_ref(row["subtitle"], "reviewed subtitle")
     for row in read(Path(value["final_evidence"]["path"]))["results"]:
         require_ref(row["output"], "packaged output")
         for frame in row["frames"]:
@@ -1177,25 +1435,45 @@ def complete(args) -> None:
     if (review.get("schema") != REVIEW_SCHEMA or review.get("stage") != "final"
             or review.get("reviewer_role") != "codex" or review.get("evidence_sha256") != sha(evidence_path)):
         raise ValueError("Codex final visual review binding invalid")
+    if evidence.get("decision", "pass") != "pass":
+        raise ValueError("passing final evidence required")
     audit_provenance(value)
     by_id = {row.get("plan_id"): row for row in review.get("outputs", [])}
     if set(by_id) != {row["plan_id"] for row in evidence["results"]} or len(by_id) != len(review.get("outputs", [])):
         raise ValueError("final review scope mismatch")
     for row in evidence["results"]:
         finding = by_id[row["plan_id"]]
+        required_passes = ("visual_pass",) if value.get("delivery_mode") == "clean" else ("visual_pass", "subtitle_pass", "overlay_pass")
         if (finding.get("output_sha256") != row["output"]["sha256"]
-                or finding.get("visual_pass") is not True or finding.get("subtitle_pass") is not True
-                or finding.get("overlay_pass") is not True or not finding.get("reason")):
+                or any(finding.get(key) is not True for key in required_passes) or not finding.get("reason")):
             fail_round(job, value, "codex_final_review", [f"{row['plan_id']}: incomplete visual finding"])
         require_ref(row["output"], "packaged output")
         for frame in row["frames"]:
             require_ref(frame, "reviewed packaged frame")
     packager = module("autonomous_packager_validate", "scripts/packaging/scripts/package_video.py")
     technical_path = job / "reports" / "packaging_technical.json"
-    technical = packager.validate(require_ref(value["packaging_delivery"], "packaging delivery"), technical_path,
-                                  autonomous_evidence=evidence_path, autonomous_review=args.review)
+    if value.get("delivery_mode") == "clean":
+        clean, _ = require_clean_qc(value)
+        if evidence.get("clean_delivery") != value["clean_delivery"] or evidence.get("clean_qc") != value["clean_qc"]:
+            raise ValueError("clean final evidence binding changed")
+        failures = []
+        for row in clean["results"]:
+            output = require_ref(row["output"], "clean output")
+            spec = packager.video_spec(output)
+            render = read(require_ref(row["render_evidence"], "render evidence"))
+            if ((spec["width"], spec["height"]) != (1440, 2560)
+                    or spec["video_codec"] != "h264" or spec["audio_codec"] != "aac"
+                    or not packager.packaged_streams_ok(spec) or spec["frames"] != render["actual_output_frames"]):
+                failures.append(f"{row['plan_id']}: clean specification")
+            run([str(FFMPEG), "-v", "error", "-i", str(output), "-f", "null", "NUL"])
+        technical = {"decision": "reject" if failures else "pass", "failures": failures, "delivery_mode": "clean"}
+        write(technical_path, technical)
+    else:
+        technical = packager.validate(require_ref(value["packaging_delivery"], "packaging delivery"), technical_path,
+                                      autonomous_evidence=evidence_path, autonomous_review=args.review)
     if technical["decision"] != "pass":
         fail_round(job, value, "packaging_technical", technical["failures"])
+    published_outputs = publish_delivery(job, value)
     receipt = job / "video_montage_autonomous_completion.json"
     write(receipt, {"schema": "video-montage-autonomous-completion/v260929", "decision": "pass",
                     "repair_round_count": value.get("repair_round", 0),
@@ -1203,13 +1481,14 @@ def complete(args) -> None:
                     "review_mode": "codex_asr_pcm", "forced_alignment_claimed": False,
                     "human_listening_claimed": False, "work_order": value["work_order"],
                     "source_index": value["source_index"], "asset_copy": value["asset_copy"],
-                    "plan": value["plan"], "plan_evidence": value["plan_evidence"],
+                    "plan": value["plan"], "delivery_mode": value.get("delivery_mode", "packaged"),
+                    "reburn_only": value.get("reburn_only", False),
+                    **{key: value[key] for key in ("plan_evidence", "plan_review", "subtitle_review", "packaging_delivery", "published_delivery") if value.get(key)},
                     **({"batch_diversity": value["batch_diversity"]} if value.get("batch_diversity") else {}),
-                    "plan_review": value["plan_review"], "clean_delivery": value["clean_delivery"],
-                    "clean_qc": value["clean_qc"], "subtitle_review": value["subtitle_review"],
-                    "packaging_delivery": value["packaging_delivery"], "packaging_technical": ref(technical_path),
+                    "clean_delivery": value["clean_delivery"],
+                    "clean_qc": value["clean_qc"], "packaging_technical": ref(technical_path),
                     "final_evidence": value["final_evidence"], "final_review": ref(args.review),
-                    "outputs": [row["output"] for row in evidence["results"]]})
+                    "outputs": published_outputs})
     value["completion"] = ref(receipt)
     save(job, value, "complete")
     if value.get("delivery_layout") == "chinese/v1":
@@ -1228,7 +1507,8 @@ def compact_delivery(job: Path, value: dict) -> None:
         if folder.exists():
             keep.update(path.resolve() for path in folder.rglob("*") if path.is_file())
     # Reburn's render gate still needs the bound clean manifest and its QC receipt.
-    packaging_path = require_ref(value["packaging_delivery"], "packaging delivery")
+    package_reference = value.get("published_delivery") or value.get("packaging_delivery")
+    packaging_path = require_ref(package_reference, "published delivery")
     packaging = read(packaging_path)
     if packaging.get("controller_validation_path"):
         previous_qc = Path(packaging["controller_validation_path"]).resolve()
@@ -1239,6 +1519,14 @@ def compact_delivery(job: Path, value: dict) -> None:
         packaging["controller_validation_path"] = str(reusable_qc)
         write(packaging_path, packaging)
         keep.add(reusable_qc)
+    if packaging.get("config_snapshot_path"):
+        snapshot = Path(packaging["config_snapshot_path"]).resolve()
+        if not snapshot.is_file() or sha(snapshot) != packaging["config_snapshot_sha256"]:
+            raise ValueError("retained packaging configuration changed")
+        packaging["config_path"] = str(snapshot)
+        packaging["config_sha256"] = sha(snapshot)
+        write(packaging_path, packaging)
+        keep.add(snapshot)
 
     for key in ("clean_delivery_path", "controller_validation_path"):
         if packaging.get(key):
@@ -1249,6 +1537,43 @@ def compact_delivery(job: Path, value: dict) -> None:
         "temporary_root", "repair_round", "max_repair_rounds", "continue_until_complete",
         "continuation_authorization") if key in value}
     retained.update(phase="complete", compact_delivery=True)
+    retained["delivery_mode"] = value.get("delivery_mode", "packaged")
+    inputs = {}
+    for key in ("plan", "asset_copy", "source_index"):
+        if value.get(key):
+            source = require_ref(value[key], key)
+            target = root / "manifests" / f"reburn_{key}.json"
+            document = read(source)
+            if key == "source_index":
+                for index, row in enumerate(document["sources"], 1):
+                    asr = require_ref(row["asr"], "source ASR")
+                    destination = root / "manifests" / "source_asr" / f"source_{index:03d}.json"
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    if asr != destination:
+                        shutil.copyfile(asr, destination)
+                    row["asr"] = ref(destination)
+                    keep.add(destination)
+                assets = require_ref(document["asset_copy_sources"], "asset copy sources")
+                destination = root / "manifests" / "asset_copy_sources.json"
+                if assets != destination:
+                    shutil.copyfile(assets, destination)
+                document["asset_copy_sources"] = ref(destination)
+                keep.add(destination)
+            write(target, document)
+            inputs[key] = ref(target)
+            keep.add(target)
+    inputs["packaging_delivery"] = ref(packaging_path)
+    for key, preferred, field in (("clean_delivery", "published_clean", "clean_delivery_path"),
+                                  ("clean_qc", "published_clean_qc", "controller_validation_path")):
+        if value.get(preferred):
+            inputs[key] = value[preferred]
+        elif packaging.get(field):
+            inputs[key] = ref(Path(packaging[field]))
+    if value.get("delivery_mode") != "clean" and all(key in inputs for key in ("plan", "source_index", "asset_copy", "clean_delivery", "clean_qc")):
+        retained["reburn_inputs"] = inputs
+    retained["outputs"] = [{"path": row["output_path"], "sha256": row["output_sha256"]} for row in packaging.get("results", []) if row.get("output_path")]
+    if value.get("delivery_mode") == "clean":
+        retained["outputs"] = [row["output"] for row in packaging["results"]]
     write(root / "autonomous_state.json", retained)
     for path in root.rglob("*"):
         if path.is_file() and path.resolve() not in keep:
@@ -1262,7 +1587,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("init", "prepare", "asset-copy", "diversify-plan", "plan-evidence", "approve-plan", "render-clean",
-                 "clean-qc", "subtitle-draft", "subtitle-review", "package", "final-evidence", "complete", "repair", "status"):
+                 "clean-qc", "subtitle-draft", "subtitle-review", "package", "final-evidence", "complete", "repair", "reburn", "status"):
         action = sub.add_parser(name)
         action.add_argument("--job-dir", type=Path, required=name != "init")
         if name == "init": action.add_argument("--work-order", type=Path, required=True)
@@ -1273,6 +1598,10 @@ def main() -> None:
             action.add_argument("--plan", type=Path, required=True)
         if name in {"approve-plan", "subtitle-review", "complete"}: action.add_argument("--review", type=Path, required=True)
         if name == "package": action.add_argument("--config", type=Path, required=True)
+        if name == "final-evidence": action.add_argument("--clean", action="store_true")
+        if name == "reburn":
+            action.add_argument("--plan-id", required=True)
+            action.add_argument("--subtitle-txt", type=Path, required=True)
         if name == "repair":
             action.add_argument("--reason", required=True)
             action.add_argument("--continue-until-complete", action="store_true")
@@ -1282,7 +1611,7 @@ def main() -> None:
                "plan-evidence": plan_evidence,
                "approve-plan": approve_plan, "render-clean": render_clean, "clean-qc": clean_qc,
                "subtitle-draft": subtitle_draft, "subtitle-review": subtitle_review, "package": package,
-               "final-evidence": final_evidence, "complete": complete, "repair": repair}
+               "final-evidence": final_evidence, "complete": complete, "repair": repair, "reburn": reburn}
     if args.command == "status":
         print(json.dumps(state(args.job_dir.resolve()), ensure_ascii=False, indent=2))
         return

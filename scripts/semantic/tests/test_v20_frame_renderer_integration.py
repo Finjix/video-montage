@@ -20,6 +20,27 @@ FFPROBE = portable_frame_renderer.runtime_binary("ffprobe")
 
 
 class FrameRendererIntegrationTests(unittest.TestCase):
+    def test_variable_frame_rate_is_rejected_before_encoding(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "variable.mp4"
+            subprocess.run([str(FFMPEG), "-v", "error", "-f", "lavfi", "-i",
+                            "color=c=blue:s=160x284:r=20:d=1", "-f", "lavfi", "-i",
+                            "sine=frequency=440:sample_rate=48000:duration=1", "-vf",
+                            "settb=1/1000,setpts='if(lt(N,10),N*0.01,0.1+(N-10)*0.09)/TB'",
+                            "-fps_mode", "vfr", "-enc_time_base:v", "1/1000", "-c:v", "libx264",
+                            "-preset", "ultrafast", "-c:a", "aac", "-y", str(source)], check=True, capture_output=True)
+            stream = next(row for row in portable_frame_renderer.probe(FFPROBE, source)["streams"] if row["codec_type"] == "video")
+            num, den = map(int, stream["avg_frame_rate"].split("/"))
+            plan = root / "plan.json"
+            portable_frame_renderer.atomic_json(plan, {"segments": [{"source_path": str(source),
+                "source_sha256": portable_frame_renderer.sha256(source), "source_in_frame": 10,
+                "speech_end_frame": 15, "source_out_frame_exclusive": 20,
+                "source_fps_num": num, "source_fps_den": den}]})
+            with self.assertRaisesRegex(ValueError, "variable frame rate"):
+                portable_frame_renderer.render(plan, root / "out.mp4", root / "evidence.json", 160, 284, 60, "libx264")
+            self.assertFalse((root / "out.mp4").exists())
+
     def test_render_then_delete_exact_frames(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

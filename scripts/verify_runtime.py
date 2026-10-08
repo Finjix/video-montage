@@ -17,9 +17,11 @@ REQUIRED = (
     "scripts/semantic/scripts/v15_orchestrator.py",
     "scripts/semantic/scripts/v20_frame_plan_gate.py",
     "scripts/semantic/scripts/portable_frame_renderer.py",
+    "scripts/semantic/scripts/source_timing.py",
     "scripts/semantic/scripts/frame_range_repair.py",
     "scripts/controller/scripts/ffmpeg_controller.py",
     "scripts/packaging/scripts/package_video.py",
+    "scripts/packaging/scripts/delivery_files.py",
     "scripts/executor/scripts/three_suite_ff.py",
     "scripts/autonomous/scripts/autonomous_montage.py",
 )

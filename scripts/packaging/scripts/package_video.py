@@ -10,12 +10,15 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 
 ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from delivery_files import publish_files
 FFMPEG = ROOT / "assets/dependencies/ffmpeg/bin/ffmpeg.exe"
 FFPROBE = ROOT / "assets/dependencies/ffmpeg/bin/ffprobe.exe"
 MODEL_ROOT = ROOT / "assets/dependencies/models"
@@ -523,7 +526,7 @@ def prepared_rows(config_path: Path, expected_inputs: dict[str, str] | None = No
     rows = []
     for row in config["outputs"]:
         plan_id = row.get("plan_id")
-        if not isinstance(plan_id, str) or not PLAN_ID.fullmatch(plan_id) or any(item["plan_id"] == plan_id for item in rows):
+        if not isinstance(plan_id, str) or not PLAN_ID.fullmatch(plan_id) or any(item["plan_id"].casefold() == plan_id.casefold() for item in rows):
             raise ValueError(f"unsafe or duplicate plan ID: {plan_id}")
         source = resolve_file(base, row.get("input_path"), row.get("input_sha256"))
         if expected_inputs is not None and expected_inputs.get(plan_id) != source["sha256"]:
@@ -678,46 +681,61 @@ def render(config_path: Path, output_dir: Path, manifest_path: Path, delivery_ma
     for source, target in copies:
         if source.resolve() != target.resolve() and target.exists() and not overwrite:
             raise FileExistsError(f"refusing to overwrite packaging file: {target}")
-    if OUTPUT_NAME.fullmatch(output_dir.name):
-        # Preserve the clean inputs with the delivery, so subtitle reburns do not
-        # depend on an internal job directory surviving.
-        for row in rows:
-            source = Path(row["input"]["path"])
-            target = delivery_category(output_dir, "clean") / f"{row['plan_id']}.mp4"
-            if source.resolve() != target.resolve() and target.exists() and not overwrite:
-                raise FileExistsError(f"refusing overwrite: {target}")
-        for row in rows:
-            source = Path(row["input"]["path"])
-            target = delivery_category(output_dir, "clean") / f"{row['plan_id']}.mp4"
-            if source.resolve() != target.resolve():
-                shutil.copyfile(source, target)
-            if sha(target) != row["input"]["sha256"]:
-                raise ValueError("clean input changed during delivery copy")
-            row["input"]["path"] = str(target.resolve())
+    for row in rows:
+        target = delivery_category(output_dir, "video") / f"{row['plan_id']}.mp4"
+        if target.exists() and not overwrite:
+            raise FileExistsError(f"refusing overwrite: {target}")
+    temporary_root = runtime_directory(output_dir) if OUTPUT_NAME.fullmatch(output_dir.name) else output_dir
+    temporary_root.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(prefix="encode-batch-", dir=temporary_root) as directory:
+        staging = Path(directory)
+        (staging / "videos").mkdir()
+        # No delivered file is touched until every encoder has succeeded.
+        results = [render_one(row, staging / "videos") for row in rows]
+        publication = []
+        for index, (row, result, snapshot) in enumerate(zip(rows, results, snapshots)):
+            for item in (row["input"], row["subtitles"]):
+                if sha(Path(item["path"])) != item["sha256"]:
+                    raise ValueError("packaging input changed during encoding")
+            if result.get("output_path"):
+                encoded = Path(result["output_path"])
+                target = delivery_category(output_dir, "video") / f"{row['plan_id']}.mp4"
+                publication.append((encoded, target))
+                result["output_path"] = str(target.resolve())
+            if OUTPUT_NAME.fullmatch(output_dir.name):
+                clean_source = Path(row["input"]["path"])
+                clean_target = delivery_category(output_dir, "clean") / f"{row['plan_id']}.mp4"
+                if clean_source.resolve() != clean_target.resolve():
+                    if clean_target.exists() and not overwrite:
+                        raise FileExistsError(f"refusing overwrite: {clean_target}")
+                    publication.append((clean_source, clean_target))
+                row["input"] = {**row["input"], "path": str(clean_target.resolve())}
+                result["input"] = row["input"]
+            subtitle = staging / f"subtitle-{index}.txt"
+            shutil.copyfile(row["subtitles"]["path"], subtitle)
+            publication.append((subtitle, snapshot))
+            result["subtitles"] = {**row["subtitles"], "path": str(snapshot.resolve())}
+            result["subtitle_snapshot"] = {"path": str(snapshot.resolve()), "sha256": sha(subtitle)}
+        staged_config = staging / "config.json"
+        atomic(staged_config, relocated_config(config_path, rows, snapshots, config_snapshot))
+        publication.append((staged_config, config_snapshot))
+        mode = "complete_montage" if delivery_manifest else "complete_autonomous" if autonomous_clean else "standalone_test"
+        manifest = {"schema": "video-montage-packaging-delivery/v1", "mode": mode,
+                    "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                    "subtitle_style": rows[0]["subtitle_style"],
+                    "config_path": str(config_snapshot.resolve()), "config_sha256": sha(staged_config),
+                    "config_snapshot_path": str(config_snapshot.resolve()), "config_snapshot_sha256": sha(staged_config),
+                    "clean_delivery_path": str((delivery_manifest or autonomous_clean).resolve()) if delivery_manifest or autonomous_clean else None,
+                    "clean_delivery_sha256": sha(delivery_manifest or autonomous_clean) if delivery_manifest or autonomous_clean else None,
+                    "controller_validation_path": str((controller_validation or autonomous_clean_qc).resolve()) if controller_validation or autonomous_clean_qc else None,
+                    "controller_validation_sha256": sha(controller_validation or autonomous_clean_qc) if controller_validation or autonomous_clean_qc else None,
+                    "output_count": len(results), "results": results}
+        staged_manifest = staging / "manifest.json"
+        atomic(staged_manifest, manifest)
+        publication.append((staged_manifest, manifest_path))
+        publish_files(publication, temporary_root)
     if overwrite:
         invalidate_delivery_receipts(output_dir)
-        for row in rows:
-            row["_overwrite"] = True
-    results = [render_one(row, output_dir) for row in rows]
-    for row, result, snapshot in zip(rows, results, snapshots):
-        if Path(row["subtitles"]["path"]).resolve() != snapshot.resolve():
-            snapshot.parent.mkdir(parents=True, exist_ok=True)
-            snapshot.write_bytes(Path(row["subtitles"]["path"]).read_bytes())
-        result["subtitle_snapshot"] = {"path": str(snapshot.resolve()), "sha256": sha(snapshot)}
-    if config_path.resolve() != config_snapshot.resolve() or OUTPUT_NAME.fullmatch(output_dir.name):
-        atomic(config_snapshot, relocated_config(config_path, rows, snapshots, config_snapshot))
-    mode = "complete_montage" if delivery_manifest else "complete_autonomous" if autonomous_clean else "standalone_test"
-    manifest = {"schema": "video-montage-packaging-delivery/v1", "mode": mode,
-                "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
-                "subtitle_style": rows[0]["subtitle_style"],
-                "config_path": str(config_path.resolve()), "config_sha256": sha(config_path),
-                "config_snapshot_path": str(config_snapshot.resolve()), "config_snapshot_sha256": sha(config_snapshot),
-                "clean_delivery_path": str((delivery_manifest or autonomous_clean).resolve()) if delivery_manifest or autonomous_clean else None,
-                "clean_delivery_sha256": sha(delivery_manifest or autonomous_clean) if delivery_manifest or autonomous_clean else None,
-                "controller_validation_path": str((controller_validation or autonomous_clean_qc).resolve()) if controller_validation or autonomous_clean_qc else None,
-                "controller_validation_sha256": sha(controller_validation or autonomous_clean_qc) if controller_validation or autonomous_clean_qc else None,
-                "output_count": len(results), "results": results}
-    atomic(manifest_path, manifest)
     return manifest
 
 
@@ -770,19 +788,19 @@ def reburn(previous_manifest_path: Path, plan_id: str, subtitle_txt: Path, outpu
 def pcm_stats(path: Path) -> dict:
     import numpy as np
     command = [str(FFMPEG), "-v", "error", "-i", str(path), "-map", "0:a:0", "-ac", "2", "-ar", "48000", "-f", "s16le", "-"]
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     clipped = count = 0
     peak = 0
-    assert process.stdout is not None
-    while block := process.stdout.read(2 * 48000):
-        values = np.frombuffer(block, dtype="<i2").astype(np.int32)
-        absolute = np.abs(values)
-        clipped += int(np.count_nonzero(absolute >= 32760))
-        peak = max(peak, int(absolute.max(initial=0)))
-        count += len(values)
-    stderr = process.stderr.read() if process.stderr else b""
-    if process.wait():
-        raise RuntimeError(f"audio decode failed: {stderr[-1000:]!r}")
+    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE) as process:
+        assert process.stdout is not None
+        while block := process.stdout.read(2 * 48000):
+            values = np.frombuffer(block, dtype="<i2").astype(np.int32)
+            absolute = np.abs(values)
+            clipped += int(np.count_nonzero(absolute >= 32760))
+            peak = max(peak, int(absolute.max(initial=0)))
+            count += len(values)
+        stderr = process.stderr.read() if process.stderr else b""
+        if process.wait():
+            raise RuntimeError(f"audio decode failed: {stderr[-1000:]!r}")
     return {"samples_per_channel": count // 2, "channels_checked": 2, "clipped_samples": clipped, "peak_fraction": round(peak / 32768, 6)}
 
 

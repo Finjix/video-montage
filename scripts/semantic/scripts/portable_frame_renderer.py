@@ -14,6 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from v20_frame_plan_gate import validate_plan_value
+from source_timing import require_constant_frame_rate
 
 
 RENDER_MODE = "source_frame_ranges/v1"
@@ -140,6 +141,7 @@ def render(plan_path: Path, output: Path, evidence: Path, width: int, height: in
         speed = float(segment.get("speed", 1.0))
         info = probe(ffprobe, source)
         video = next(item for item in info["streams"] if item["codec_type"] == "video")
+        require_constant_frame_rate(ffprobe, source, video)
         probed_fps = Fraction(video["avg_frame_rate"])
         if probed_fps != source_fps:
             raise ValueError(f"source fps mismatch for {source}: declared={source_fps}, probed={probed_fps}")

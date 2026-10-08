@@ -64,6 +64,7 @@ class PackagingContractTests(unittest.TestCase):
             target = packaging.delivery_category(root, "video") / f"{row['plan_id']}.mp4"
             target.write_bytes(b"packaged video")
             return {"plan_id": row["plan_id"], "input": row["input"],
+                    "output_path": str(target), "output_sha256": packaging.sha(target),
                     "subtitles": row["subtitles"], "text_pins": row["text_pins"]}
 
         with patch.object(packaging, "video_spec", return_value=self.spec), \
@@ -105,6 +106,35 @@ class PackagingContractTests(unittest.TestCase):
         self.pin.write_bytes(b"changed image")
         with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
             self.prepare()
+
+    def test_case_insensitive_plan_ids_cannot_share_output_files(self):
+        packaging.atomic(self.config, {"schema": packaging.SCHEMA,
+            "outputs": [self.row, {**self.row, "plan_id": "p1"}]})
+        with self.assertRaisesRegex(ValueError, "duplicate plan ID"):
+            self.prepare()
+
+    def test_second_encoder_failure_preserves_entire_previous_batch(self):
+        output = self.root / "自动化混剪_20261008_120000"
+        packaging.ensure_delivery_layout(output)
+        manifest = output / "临时文件" / "manifests" / "packaging_manifest.json"
+        manifest.write_bytes(b"previous manifest")
+        packaging.atomic(self.config, {"schema": packaging.SCHEMA,
+            "outputs": [self.row, {**self.row, "plan_id": "P2"}]})
+        for pid in ("P1", "P2"):
+            (output / "成片" / f"{pid}.mp4").write_bytes(f"previous {pid}".encode())
+        def encode(row, directory):
+            if row["plan_id"] == "P2":
+                raise RuntimeError("second encoder failed")
+            target = directory / "P1.mp4"
+            target.write_bytes(b"replacement")
+            return {"plan_id": "P1", "output_path": str(target)}
+        with patch.object(packaging, "video_spec", return_value=self.spec), \
+             patch.object(packaging, "render_one", side_effect=encode):
+            with self.assertRaisesRegex(RuntimeError, "second encoder failed"):
+                packaging.render(self.config, output, manifest, overwrite=True)
+        self.assertEqual(b"previous manifest", manifest.read_bytes())
+        for pid in ("P1", "P2"):
+            self.assertEqual(f"previous {pid}".encode(), (output / "成片" / f"{pid}.mp4").read_bytes())
 
     def test_delivery_rejects_records_outside_temporary_subdirectory(self):
         output = self.root / "work" / "自动化混剪_20260930_153000_123456"

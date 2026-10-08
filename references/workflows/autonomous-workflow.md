@@ -32,12 +32,21 @@ or rebuild and run the required checks again until complete delivery passes.
 There is no three-round stopping rule and no repeated continuation approval.
 Use `repair --reason <defect>` to resume an existing failed job, preserving
 all previous failures, evidence, and round numbers. Continue
-repairing or rebuilding until every requested packaged video passes; never replace
+repairing or rebuilding until every requested video passes; never replace
 quality checks with invented approvals or deliver partial results as completion.
 Reuse the original delivery directory for every repair and reburn; do not create
 new version folders. Render and check temporary video files before replacing
 existing MP4s, update subtitles and manifests in place, and invalidate stale
 completion receipts until the replacement batch passes all delivery checks.
+Use `final-evidence --clean` after `clean-qc` for requests without packaging,
+then complete with a fresh hash-bound final visual review. Skip subtitle and
+packaging stages in that case. For a completed compact packaged job, use
+`reburn --plan-id <ID> --subtitle-txt <TXT>`, obtain a new subtitle review,
+package using the returned config, regenerate final evidence and review, then
+complete. Bound clean QC and small source/plan/copy contexts are retained for
+this route. Require accessible unchanged original sources and assets.
+Autonomous processing uses staging files; only completion publishes the entire
+approved batch, and replacement failures roll back already replaced files.
 For every candidate, inspect the first and last 30 native frames in order,
 including the required first and last 13 frames and any original source
 transition near them. Report entry and exit visual findings separately.

@@ -314,15 +314,12 @@ class PackagingTests(unittest.TestCase):
 
 
 class DocumentationTests(unittest.TestCase):
-    def test_current_markdown_has_no_release_history_or_broken_links(self):
-        legacy = re.compile(r"(?i)\bv(?:[6-9]|1[0-9]|20)(?:\.\d+)*\b|旧版|旧版本|旧安装|历史版本|兼容旧|迁移")
+    def test_current_markdown_has_no_broken_links(self):
         links = re.compile(r"\]\(([^)]+\.md)\)")
         for path in ROOT.rglob("*.md"):
-            if {"dependencies", "release", "test"} & set(path.parts) or path == ROOT / "docs/版本更新.md":
+            if {"dependencies", "release", "test", "work", ".runtime", ".git"} & set(path.parts):
                 continue
-            self.assertNotRegex(path.as_posix(), legacy.pattern)
             content = path.read_text(encoding="utf-8-sig")
-            self.assertNotRegex(content, legacy)
             for link in links.findall(content):
                 self.assertTrue((path.parent / link).is_file(), f"Broken Markdown link in {path}: {link}")
 

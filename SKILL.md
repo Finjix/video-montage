@@ -2,7 +2,7 @@
 name: video-montage
 description: Produce and repair Chinese spoken-video montage batches with native-frame editing, Codex semantic and visual review, subtitle packaging, and post-encode QC. Use the autonomous workflow for new jobs and preserve the independent-review workflow for existing legacy jobs.
 metadata:
-  version: "v260928"
+  version: "v261008"
 ---
 
 # Video montage
@@ -42,6 +42,9 @@ bounds and source FPS. Reject seconds-only cuts, rejected source ranges, stale
 evidence and incomplete speech. Keep the requested batch scope; technical decode
 or a generated pass alone cannot authorize completion. Render through the bundled
 portable frame renderer and apply the selected workflow's quality gates.
+Require decoded constant-rate timestamps starting at zero; reject variable-rate
+or shifted sources before authorizing frame/FPS audio cuts. Plan IDs must also
+be unique ignoring case on Windows.
 
 Honor the current user's packaging request. Do not add music, captions, overlays
 or extra audio without that request. Packaging uses a validated clean video to
@@ -50,6 +53,9 @@ create a separate output and preserves the clean video. Read the
 reburn commands. Subtitles burn into the picture only; the default style uses
 the calibrated WenYue W8 yellow, black-outlined OTF from
 `assets/packaging/fonts`.
+Without packaging, use `clean-qc`, `final-evidence --clean` and `complete` with
+a fresh final visual review. For packaged delivery, use the subtitle and
+packaging stages before final evidence and completion.
 
 New deliveries use `work/自动化混剪_YYYYMMDD_HHMMSS` in Beijing time. Refuse collisions rather than overwriting another job.
 
@@ -57,7 +63,8 @@ New deliveries use `work/自动化混剪_YYYYMMDD_HHMMSS` in Beijing time. Refus
 - `混剪（无包装）/`: clean MP4s for reburns.
 - `字幕/`: editable `subtitle-xx.txt` and the extensionless instruction file.
 - `临时文件/config/`: reusable packaging configuration.
-- `临时文件/manifests/`: packaging manifest and clean-input authorization needed for reburn.
+- `临时文件/manifests/`: packaging manifest, clean-input authorization and bound
+  plan, source ASR and asset-copy context needed for reburn.
 - `临时文件/`: minimal job state and work order needed to restart repairs.
 
 All subdirectories inside `临时文件/` use English names. Generate logs, evidence,
@@ -66,11 +73,17 @@ completion. Preserve only files necessary for subsequent editing, reburn and rep
 A compact completed autonomous job regenerates evidence from sources on repair;
 never reuse deleted evidence or claim old approvals remain valid. Legacy jobs retain
 their existing hash-bound paths until their workflow supports compact delivery.
+For subtitle-only edits on a completed autonomous job, use `reburn --plan-id <ID>
+--subtitle-txt <TXT>`, then obtain new subtitle and final reviews. The command
+returns the configuration for the next packaging stage.
 For autonomous init, work-order `output_root` is the project `work/` directory;
 use the returned `job_dir` and actual delivery path from status.
 
 Repairs and subtitle reburns reuse the existing delivery directory. Render and
 check temporary videos before replacing MP4s, invalidate stale completion
 receipts, and refresh manifests, reviews and verification before delivery.
+Autonomous completion publishes the whole approved batch; file replacement
+errors roll back previous replacements. Packaging finishes every encoder before
+publishing any delivered file.
 Use the selected workflow's repair and reburn commands and stopping conditions.
 Never report a partial batch as complete or invent approvals.
