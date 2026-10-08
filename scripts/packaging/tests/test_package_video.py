@@ -31,6 +31,13 @@ class PackagingContractTests(unittest.TestCase):
             mocked = patch.object(packaging, name, value)
             mocked.start()
             self.addCleanup(mocked.stop)
+        font_mock = patch.dict(packaging.subtitle_fonts.FONTS, {"w8": {
+            **packaging.subtitle_fonts.FONTS["w8"], "path": str(self.font), "sha256": packaging.sha(self.font)}})
+        font_mock.start()
+        self.addCleanup(font_mock.stop)
+        choice_mock = patch.object(packaging.subtitle_fonts.secrets, "choice", return_value="w8")
+        choice_mock.start()
+        self.addCleanup(choice_mock.stop)
         self.video = self.root / "clean.mp4"
         self.video.write_bytes(b"clean video")
         self.srt = self.root / "subtitle-P1.txt"
@@ -205,7 +212,7 @@ class PackagingContractTests(unittest.TestCase):
         with_subtitle_track = {**self.spec, "subtitle_streams": 1}
         self.assertFalse(packaging.packaged_streams_ok(with_subtitle_track))
 
-    def test_default_subtitle_style_and_single_line_ass(self):
+    def test_w8_subtitle_style_and_single_line_ass(self):
         style = self.prepare()[0]["subtitle_style"]
         self.assertEqual({"path": str(self.font), "sha256": packaging.sha(self.font)}, style["font"])
         self.assertEqual(8, style["capcut_reference"]["font_size"])
@@ -215,7 +222,9 @@ class PackagingContractTests(unittest.TestCase):
         self.assertEqual("无尽冬日", style["emphasis"]["text"])
         self.assertEqual(9, style["emphasis"]["capcut_font_size"])
         self.assertEqual(230, style["emphasis"]["ass_font_size"])
-        self.assertEqual("pastel_cyan_extrusion_v3", style["emphasis"]["effect"])
+        self.assertEqual("dynamic_font_shader_v2", style["emphasis"]["effect"])
+        self.assertEqual("random_ice", style["emphasis"]["selection"])
+        self.assertEqual({"fire1", "ice1", "ice2"}, set(style["emphasis"]["effects"]))
         ass = self.root / "sample.ass"
         packaging.write_ass(ass, [{"start_ms": 0, "end_ms": 900, "text": "是兄弟就来"}], style)
         content = ass.read_text(encoding="utf-8-sig")
@@ -229,7 +238,7 @@ class PackagingContractTests(unittest.TestCase):
     def test_every_game_title_occurrence_uses_size_9(self):
         style = self.prepare()[0]["subtitle_style"]
         ass = self.root / "emphasis.ass"
-        packaging.write_ass(ass, [
+        occurrences = packaging.write_ass(ass, [
             {"start_ms": 0, "end_ms": 900, "text": "玩无尽冬日，再玩无尽冬日"},
             {"start_ms": 900, "end_ms": 1350, "text": "普通字幕"},
             {"start_ms": 1350, "end_ms": 1800, "text": "无尽冬日"},
@@ -243,9 +252,12 @@ class PackagingContractTests(unittest.TestCase):
         self.assertIn(f"玩{gap}{enlarged}{gap}，再玩{gap}{enlarged}", base_lines[0])
         self.assertIn("普通字幕", base_lines[1])
         self.assertIn(enlarged, base_lines[2])
-        self.assertEqual(31, content.count("Dialogue: "))
-        self.assertIn(r"\clip(1,m ", content)
-        self.assertIn(r"{\alpha&H00&}无{\alpha&HFF&}尽", content)
+        self.assertEqual(3, content.count("Dialogue: "))
+        self.assertNotIn(r"\clip(", content)
+        self.assertEqual(3, len(occurrences))
+        self.assertEqual({"ice1", "ice2"}, {item["style_id"] for item in occurrences})
+        self.assertEqual([0, 1, 0], [item["occurrence_index"] for item in occurrences])
+        self.assertEqual([0, 0, 2], [item["cue_index"] for item in occurrences])
 
     def test_real_flower_outlines_clear_adjacent_subtitles(self):
         import cv2
@@ -254,25 +266,82 @@ class PackagingContractTests(unittest.TestCase):
         font_dir.mkdir()
         (font_dir / "font.otf").write_bytes((packaging.ROOT / "assets/packaging/fonts/WenYue-XinQingNianTi-W8.otf").read_bytes())
         style = self.prepare()[0]["subtitle_style"]
-        for text in ["玩无尽冬日啊", "才入坑的无尽冬日"]:
-            ass = self.root / "full.ass"
-            packaging.write_ass(ass, [dict(start_ms=0, end_ms=100, text=text)], style)
-            content = ass.read_text(encoding="utf-8-sig")
-            header, events = content.split("Dialogue:", 1)
-            rows = ["Dialogue:" + row for row in events.split("Dialogue:")]
-            masks = []
-            for name, base in [("ordinary", True), ("flower", False)]:
-                selected = [row for row in rows if row.startswith("Dialogue: 0,") == base]
+        style["font"]["path"] = str(font_dir / "font.otf")
+        for mode in ("ice1", "ice2", "fire1"):
+            style["emphasis"]["selection"] = mode
+            for text in ["玩无尽冬日啊", "才入坑的无尽冬日"]:
+                ass = self.root / "full.ass"
+                occurrences = packaging.write_ass(ass, [dict(start_ms=0, end_ms=100, text=text)], style)
+                track = packaging.flower_effects.prepare_track(packaging.FFMPEG, self.root, ass, occurrences, style,
+                                                               font_dir, 100)
                 # White outline exposes the normally black stroke against the black test canvas.
-                (self.root / f"{name}.ass").write_text(header.replace("&H00000000", "&H00FFFFFF") + "".join(selected), encoding="utf-8-sig")
+                (self.root / "ordinary.ass").write_text(ass.read_text(encoding="utf-8-sig").replace("&H00000000", "&H00FFFFFF"), encoding="utf-8-sig")
                 subprocess.run([str(packaging.FFMPEG), "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi",
-                    "-i", "color=black:s=1440x2560:d=0.04", "-vf", f"ass={name}.ass:fontsdir=fonts", "-frames:v", "1", f"{name}.png"],
+                    "-i", "color=black:s=1440x2560:d=0.04", "-vf", "ass=ordinary.ass:fontsdir=fonts", "-frames:v", "1", "ordinary.png"],
                     cwd=self.root, check=True, capture_output=True)
-                masks.append(np.max(cv2.imread(str(self.root / f"{name}.png")), axis=2) > 16)
-            self.assertTrue(all(mask.any() for mask in masks))
-            self.assertFalse(np.any(masks[0] & masks[1]))
-            distance = cv2.distanceTransform((~masks[0]).astype(np.uint8), cv2.DIST_L2, cv2.DIST_MASK_PRECISE)
-            self.assertGreaterEqual(float(distance[masks[1]].min()), 8, text)
+                ordinary = np.max(cv2.imread(str(self.root / "ordinary.png")), axis=2) > 16
+                flower = np.zeros(ordinary.shape, bool)
+                alpha = np.asarray(Image.open(self.root / "flower-cue-0.png"))[:, :, 3] > 16
+                flower[track["y"]:track["y"] + alpha.shape[0]] = alpha
+                self.assertTrue(ordinary.any() and flower.any())
+                self.assertFalse(np.any(ordinary & flower))
+                distance = cv2.distanceTransform((~ordinary).astype(np.uint8), cv2.DIST_L2, cv2.DIST_MASK_PRECISE)
+                self.assertGreaterEqual(float(distance[flower].min()), 8, (mode, text))
+
+    def test_random_selection_is_reproducible_and_excludes_fire(self):
+        flower = packaging.flower_effects
+        choices = flower.choose("random_ice", 100, 42)
+        self.assertEqual({"ice1", "ice2"}, set(choices))
+        self.assertEqual(choices, flower.choose("random_ice", 100, 42))
+        self.assertNotEqual(choices, flower.choose("random_ice", 100, 43))
+        for mode in ("ice1", "ice2", "fire1"):
+            self.assertEqual([mode] * 3, flower.choose(mode, 3, 42))
+        self.assertEqual({"pixel_format": "yuv420p", "crf": 18, "overlay_format": "auto"}, flower.video_encoding(choices))
+        self.assertEqual({"pixel_format": "yuv444p", "crf": 8, "overlay_format": "rgb"}, flower.video_encoding(["fire1"]))
+        with self.assertRaises(ValueError):
+            packaging.subtitle_style({"subtitle_flower": "old_effect"}, self.root)
+        self.row["subtitle_flower_seed"] = 42
+        self.write_config()
+        self.assertEqual(42, self.prepare()[0]["subtitle_flower_seed"])
+        self.row["subtitle_flower_seed"] = True
+        self.write_config()
+        with self.assertRaisesRegex(ValueError, "64-bit"):
+            self.prepare()
+
+    def test_flower_effect_hash_and_dynamic_transparency(self):
+        from unittest.mock import patch
+        flower = packaging.flower_effects
+        assets = flower.effect_styles()
+        font = str(packaging.ROOT / "assets/packaging/fonts/WenYue-XinQingNianTi-W8.otf")
+        for spec in assets["styles"].values():
+            for text in ("无尽冬日", "冰雪世界", "新", "全新挑战ABC"):
+                with patch.object(Image, "open", side_effect=AssertionError("fixed artwork must not be read")):
+                    image, bounds = flower.dynamic_flowers.render_text(text, spec, font)
+                self.assertEqual("RGBA", image.mode)
+                self.assertEqual((0, 255), image.getchannel("A").getextrema())
+                self.assertEqual(0, image.getpixel((0, 0))[3])
+                self.assertGreater(bounds[2], bounds[0])
+            reference, _ = flower.dynamic_flowers.render_text("无尽冬日", spec, font)
+            changed, _ = flower.dynamic_flowers.render_text("冰雪世界", spec, font)
+            self.assertNotEqual(reference.tobytes(), changed.tobytes())
+        with patch.object(flower, "sha", return_value="changed"):
+            with self.assertRaisesRegex(ValueError, "effect changed"):
+                flower.effect_styles()
+
+    def test_custom_keywords_and_whole_line_use_actual_text(self):
+        config = {"subtitle_flower_texts": ["冰雪", "冰雪世界", "全新挑战"], "subtitle_flower": "ice2"}
+        style = packaging.subtitle_style(config, self.root)
+        ass = self.root / "custom.ass"
+        occurrences = packaging.write_ass(ass, [dict(start_ms=0, end_ms=900, text="来冰雪世界玩全新挑战")], style)
+        self.assertEqual(["冰雪世界", "全新挑战"], [item["text"] for item in occurrences])
+        self.assertTrue(all(item["style_id"] == "ice2" for item in occurrences))
+        self.assertNotIn("无尽冬日", ass.read_text(encoding="utf-8-sig"))
+        style = packaging.subtitle_style({"subtitle_flower_scope": "all", "subtitle_flower_texts": []}, self.root)
+        occurrences = packaging.write_ass(ass, [dict(start_ms=0, end_ms=900, text="开启新世界！")], style)
+        self.assertEqual(["开启新世界！"], [item["text"] for item in occurrences])
+        for texts in ([], "冰雪世界", ["冰雪", "冰雪"], [""], ["一\n二"], [{}]):
+            with self.assertRaisesRegex(ValueError, "subtitle_flower_texts"):
+                packaging.subtitle_style({"subtitle_flower_texts": texts}, self.root)
 
     def test_missing_or_changed_subtitle_font_is_rejected(self):
         value = {"schema": packaging.SCHEMA, "subtitle_font_path": "missing.otf", "outputs": [self.row]}
@@ -283,7 +352,7 @@ class PackagingContractTests(unittest.TestCase):
         other.write_bytes(b"different font")
         value["subtitle_font_path"] = other.name
         self.config.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
-        with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
+        with self.assertRaisesRegex(ValueError, "SHA-256"):
             self.prepare()
         other.write_bytes(self.font.read_bytes())
         self.assertEqual(str(other), self.prepare()[0]["subtitle_style"]["font"]["path"])
@@ -360,7 +429,9 @@ class PackagingContractTests(unittest.TestCase):
         self.row.update(input_sha256=packaging.sha(self.video), subtitle_sha256=packaging.sha(self.srt), text_pins=[])
         self.write_config()
         with patch.object(packaging, "DEFAULT_SUBTITLE_FONT_PATH", real_font), \
-             patch.object(packaging, "SUBTITLE_FONT_SHA256", REFERENCE_FONT_SHA256):
+             patch.object(packaging, "SUBTITLE_FONT_SHA256", REFERENCE_FONT_SHA256), \
+             patch.dict(packaging.subtitle_fonts.FONTS, {"w8": {
+                 **packaging.subtitle_fonts.FONTS["w8"], "path": str(real_font), "sha256": REFERENCE_FONT_SHA256}}):
             row = packaging.prepared_rows(self.config)[0]
             output_dir = self.root / "rendered"
             result = packaging.render_one(row, output_dir)

@@ -8,6 +8,7 @@ import importlib.util
 import json
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import sys
@@ -19,6 +20,8 @@ from tempfile import TemporaryDirectory
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from delivery_files import publish_files
+import flower_effects
+import subtitle_fonts
 FFMPEG = ROOT / "assets/dependencies/ffmpeg/bin/ffmpeg.exe"
 FFPROBE = ROOT / "assets/dependencies/ffmpeg/bin/ffprobe.exe"
 MODEL_ROOT = ROOT / "assets/dependencies/models"
@@ -94,18 +97,8 @@ SUBTITLE_ASS = {"play_res_x": 1920, "play_res_y": 3414,
 SUBTITLE_EMPHASIS = {
     "text": "无尽冬日", "capcut_font_size": 9,
     "ass_font_size": round(187 / 12 * 9 * SUBTITLE_REFERENCE["scale_percent"] / 100),
-    "effect": "pastel_cyan_extrusion_v3",
+    "effect": "dynamic_font_shader_v2", "selection": "random_ice",
     "gap_font_size": round(100 * SUBTITLE_REFERENCE["scale_percent"] / 100), "gap_scale_x": 280,
-    "reference_geometry": {"size": 85.5, "x": 131, "y": 52.3125,
-        "outer_x": 10.8125, "outer_y": 8.5, "pink_x": 7.6875, "pink_y": 5.1875,
-        "white": 3.8625, "depth": 5.5875, "blue_depth_ratio": .55625,
-        "expand": .1, "blur": .375, "shadow_border": 7.1875, "shadow_x": 5.625, "shadow_y": .0625},
-    "textures": [
-        {"slope": .61, "period": 12.25, "phase": 7.46484375, "band": 5.21582},
-        {"slope": .605, "period": 12.35, "phase": .9166, "band": 5.11367},
-        {"slope": .605, "period": 12.25, "phase": 5.16797, "band": 5.21582},
-        {"slope": .615, "period": 12.15, "phase": 9.68203, "band": 5.17324},
-    ],
 }
 
 
@@ -169,10 +162,11 @@ def subtitle_output(output_dir: Path, plan_id: str) -> Path:
 def relocated_config(config_path: Path, rows: list[dict], snapshots: list[Path], target: Path) -> dict:
     """Keep a copied config usable after moving it into the output directory."""
     config = read(config_path)
-    if config.get("subtitle_font_path"):
-        config["subtitle_font_path"] = rows[0]["subtitle_style"]["font"]["path"]
+    config["subtitle_font"] = rows[0]["subtitle_style"]["font_id"]
+    config["subtitle_font_path"] = rows[0]["subtitle_style"]["font"]["path"]
     for original, prepared, subtitle in zip(config["outputs"], rows, snapshots):
         original["input_path"] = prepared["input"]["path"]
+        original["subtitle_flower_seed"] = prepared["subtitle_flower_seed"]
         subtitle_key = "subtitle_txt" if original.get("subtitle_txt") else "subtitle_srt"
         original[subtitle_key] = os.path.relpath(subtitle, target.parent)
         for key in ("nameplate", "disclaimer", "bgm"):
@@ -254,13 +248,37 @@ def resolve_file(base: Path, value: str, expected_sha: str | None = None) -> dic
 
 
 def subtitle_style(config: dict, base: Path) -> dict:
-    font_path = config.get("subtitle_font_path", str(DEFAULT_SUBTITLE_FONT_PATH))
-    font = resolve_file(base, font_path, SUBTITLE_FONT_SHA256)
+    selection = config.get("subtitle_font", "random")
+    if config.get("subtitle_font_path"):
+        font = resolve_file(base, config["subtitle_font_path"])
+        font_id, spec = subtitle_fonts.by_hash(font["sha256"])
+        if selection != "random" and selection != font_id:
+            raise ValueError("subtitle_font and subtitle_font_path identify different fonts")
+    else:
+        font_id, spec = subtitle_fonts.select(selection)
+        font = resolve_file(base, spec["path"], spec["sha256"])
     if Path(font["path"]).suffix.lower() != ".otf":
-        raise ValueError("subtitle font must be the supplied W8 OTF file")
-    return {"font": font, "font_family": SUBTITLE_FONT_FAMILY,
-            "capcut_reference": dict(SUBTITLE_REFERENCE), "ass": dict(SUBTITLE_ASS),
-            "emphasis": dict(SUBTITLE_EMPHASIS)}
+        raise ValueError("subtitle font must be a supplied OTF file")
+    mode = config.get("subtitle_flower", "random_ice")
+    if mode not in flower_effects.MODES:
+        raise ValueError(f"subtitle_flower must be one of {flower_effects.MODES}")
+    scope = config.get("subtitle_flower_scope", "keywords")
+    if scope not in ("keywords", "all"):
+        raise ValueError("subtitle_flower_scope must be keywords or all")
+    texts = config.get("subtitle_flower_texts", [SUBTITLE_EMPHASIS["text"]])
+    if (not isinstance(texts, list) or not texts and scope == "keywords"
+            or any(not isinstance(text, str) or not text.strip() or "\n" in text or "\r" in text for text in texts)
+            or len(texts) != len(set(texts))):
+        raise ValueError("subtitle_flower_texts must contain distinct nonempty single-line strings")
+    emphasis = {**SUBTITLE_EMPHASIS, "selection": mode, "scope": scope, "texts": texts,
+                "effects": flower_effects.effect_styles()["styles"]}
+    ass = dict(SUBTITLE_ASS)
+    ass["font_size"] = round(ass["font_size"] * spec["size_scale"])
+    emphasis["ass_font_size"] = round(emphasis["ass_font_size"] * spec["size_scale"])
+    return {"font": font, "font_id": font_id, "font_label": spec["label"],
+            "font_family": spec["family"], "font_postscript": spec["postscript"],
+            "capcut_reference": dict(SUBTITLE_REFERENCE), "ass": ass,
+            "emphasis": emphasis}
 
 
 def resolve_overlay(base: Path, value: str, expected_sha: str | None = None) -> dict:
@@ -458,68 +476,32 @@ def ass_time(ms: int) -> str:
     return f"{hour}:{minute:02}:{second:02}.{centi:02}"
 
 
-def ass_color(rgb: str) -> str:
-    return "&H" + rgb[5:7] + rgb[3:5] + rgb[1:3] + "&"
+def clean_ass_text(text: str) -> str:
+    return text.replace("{", "（").replace("}", "）").replace("\\", "／")
 
 
-def diagonal_stripe_clip(ass: dict, emphasis: dict, texture: dict) -> str:
-    geometry = emphasis["reference_geometry"]
-    scale = emphasis["ass_font_size"] / geometry["size"]
-    y0, y1 = -200, 300
-    paths = []
-    def point(x, y):
-        return f"{ass['position_x'] + (x - geometry['x']) * scale:.4f} {ass['position_y'] + (y - geometry['y']) * scale:.4f}"
-    for k in range(-100, 120):
-        x = k * texture["period"] + texture["phase"] + y0 / texture["slope"]
-        x1 = x + texture["band"]
-        shift = (y1 - y0) / texture["slope"]
-        paths.append(f"m {point(x, y0)} l {point(x1, y0)} {point(x1 + shift, y1)} {point(x + shift, y1)}")
-    return "\\clip(1," + " ".join(paths) + ")"
+def flower_fragments(clean: str, emphasis: dict) -> list[tuple[str, bool]]:
+    if emphasis["scope"] == "all":
+        return [(clean, True)]
+    pattern = "|".join(re.escape(clean_ass_text(text)) for text in sorted(emphasis["texts"], key=len, reverse=True))
+    fragments, cursor = [], 0
+    for match in re.finditer(pattern, clean):
+        if match.start() > cursor:
+            fragments.append((clean[cursor:match.start()], False))
+        fragments.append((match.group(), True))
+        cursor = match.end()
+    if cursor < len(clean):
+        fragments.append((clean[cursor:], False))
+    return fragments
 
 
-def flower_layers(style: dict, render_width: int) -> list[dict]:
-    ass, emphasis = style["ass"], style["emphasis"]
-    geometry = emphasis["reference_geometry"]
-    scale = emphasis["ass_font_size"] / geometry["size"]
-    # ASS border widths are output pixels when ScaledBorderAndShadow is disabled.
-    pixel_scale = scale * render_width / ass["play_res_x"]
-    layers = []
-    def add(dx, dy, border, rgb, fill=None, extra="", glyph=None, border_x=None, border_y=None):
-        tags = (f"\\blur{geometry['blur'] * pixel_scale:.4f}\\bord{border * pixel_scale:.4f}"
-                f"\\3c{ass_color(rgb)}\\1c{ass_color(fill or rgb)}{extra}")
-        if border_x is not None:
-            tags += f"\\xbord{border_x * pixel_scale:.4f}\\ybord{border_y * pixel_scale:.4f}"
-        layers.append({"dx": dx * scale, "dy": dy * scale, "tags": tags, "glyph": glyph})
-    for dy in (0, geometry["depth"]):
-        add(geometry["shadow_x"], dy + geometry["shadow_y"], geometry["shadow_border"], "#72D6E9")
-    for rgb, edge in [("#FFEA94", "outer"), ("#FAA8D6", "pink")]:
-        axes = dict(border_x=geometry[f"{edge}_x"], border_y=geometry[f"{edge}_y"])
-        add(0, geometry["depth"], 0, rgb, **axes)
-        add(0, 0, 0, rgb, **axes)
-    add(0, geometry["depth"], geometry["white"], "#008396")
-    add(0, geometry["depth"] * geometry["blue_depth_ratio"], geometry["white"], "#64B6F7")
-    add(0, 0, geometry["white"], "#E7F8F4", "#26C0DD")
-    add(0, 0, geometry["expand"], "#26C0DD")
-    for glyph, texture in enumerate(emphasis["textures"]):
-        add(0, 0, geometry["expand"], "#72D6E9", extra=diagonal_stripe_clip(ass, emphasis, texture), glyph=glyph)
-    return layers
+def write_ass(path: Path, cues: list[dict], style: dict, *, render_width: int = 1440,
+              flower_seed: int = 0) -> list[dict]:
+    """Write ordinary subtitles and reserve title space; return sprite placements.
 
-
-def pad_flower_word(clean: str, word: str, ass: dict, emphasis: dict) -> str:
-    gap = f"{{\\fs{emphasis['gap_font_size']}\\fscx{emphasis['gap_scale_x']}}}\\h{{\\fs{ass['font_size']}\\fscx100}}"
-    lines = []
-    for line in clean.split("\\N"):
-        tokens = [token for token in re.split(f"({re.escape(word)})", line) if token]
-        padded = []
-        for index, token in enumerate(tokens):
-            if index and (token == word or tokens[index - 1] == word):
-                padded.append(gap)
-            padded.append(token)
-        lines.append("".join(padded))
-    return "\\N".join(lines)
-
-
-def write_ass(path: Path, cues: list[dict], style: dict, *, render_width: int = 1440) -> None:
+    The returned occurrences must be composited with flower_effects.prepare_track.
+    Each occurrence selects a style once, never once per video frame.
+    """
     if any("\n" in cue["text"] or "\r" in cue["text"] for cue in cues):
         raise ValueError("ASS subtitle cues must contain one line")
     ass = style["ass"]
@@ -540,34 +522,45 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
     lines = []
     position = f"{{\\pos({ass['position_x']},{ass['position_y']})}}"
     emphasis = style["emphasis"]
-    word = emphasis["text"]
-    enlarged = f"{{\\fs{emphasis['ass_font_size']}\\alpha&HFF&}}{word}{{\\fs{ass['font_size']}\\alpha&H00&}}"
-    effect_layers = flower_layers(style, render_width)
-    for cue in cues:
-        clean = cue["text"].replace("{", "（").replace("}", "）").replace("\\", "／").replace("\n", "\\N")
+    fragments_by_cue = [flower_fragments(clean_ass_text(cue["text"]), emphasis) for cue in cues]
+    selections = iter(flower_effects.choose(emphasis["selection"], sum(flag for parts in fragments_by_cue for _, flag in parts), flower_seed))
+    gap = f"{{\\fs{emphasis['gap_font_size']}\\fscx{emphasis['gap_scale_x']}}}\\h{{\\fs{ass['font_size']}\\fscx100}}"
+    occurrences = []
+    for cue_index, cue in enumerate(cues):
+        fragments = fragments_by_cue[cue_index]
         timing = f"{ass_time(cue['start_ms'])},{ass_time(cue['end_ms'])},Default,,0,0,0,,"
         prefix = timing + position
-        if word not in clean:
-            lines.append(f"Dialogue: 0,{prefix}{clean}")
+        if not any(flag for _, flag in fragments):
+            lines.append(f"Dialogue: 0,{prefix}{clean_ass_text(cue['text'])}")
             continue
-        clean = pad_flower_word(clean, word, ass, emphasis)
-        lines.append(f"Dialogue: 0,{prefix}{clean.replace(word, enlarged)}")
-        pieces = clean.split(word)
-        for layer_number, layer in enumerate(effect_layers, start=1):
-            painted_word = word if layer["glyph"] is None else "".join(
-                ("{\\alpha&H00&}" if i == layer["glyph"] else "{\\alpha&HFF&}") + ch for i, ch in enumerate(word))
-            visible = f"{{\\fs{emphasis['ass_font_size']}\\alpha&H00&{layer['tags']}}}{painted_word}{{\\fs{ass['font_size']}\\alpha&HFF&}}"
-            layer_text = "{\\alpha&HFF&}" + visible.join(pieces)
-            layer_position = f"{{\\pos({ass['position_x'] + layer['dx']:.4f},{ass['position_y'] + layer['dy']:.4f})}}"
-            lines.append(f"Dialogue: {layer_number},{timing}{layer_position}{layer_text}")
+        padded = []
+        for index, (text, flag) in enumerate(fragments):
+            if index and (flag or fragments[index - 1][1]):
+                padded.append((gap, False))
+            padded.append((text, flag))
+        enlarged = lambda text: f"{{\\fs{emphasis['ass_font_size']}\\alpha&HFF&}}{text}{{\\fs{ass['font_size']}\\alpha&H00&}}"
+        lines.append(f"Dialogue: 0,{prefix}" + "".join(enlarged(text) if flag else text for text, flag in padded))
+        targets = [(index, text) for index, (text, flag) in enumerate(padded) if flag]
+        for occurrence_index, (target_index, target_text) in enumerate(targets):
+            marker = ""
+            for index, (text, flag) in enumerate(padded):
+                if flag:
+                    alpha = "00" if index == target_index else "FF"
+                    marker += (f"{{\\fs{emphasis['ass_font_size']}\\alpha&H{alpha}&}}{text}"
+                               f"{{\\fs{ass['font_size']}\\alpha&HFF&}}")
+                else:
+                    marker += text
+            occurrences.append({"cue_index": cue_index, "occurrence_index": occurrence_index,
+                                "start_ms": cue["start_ms"], "end_ms": cue["end_ms"],
+                                "style_id": next(selections), "text": target_text,
+                                "marker_text": position + r"{\alpha&HFF&}" + marker})
     path.write_text(header + "\n".join(lines) + "\n", encoding="utf-8-sig")
+    return occurrences
 
 
-def require_subtitle_font(log: str) -> None:
-    request = f"fontselect: ({SUBTITLE_FONT_FAMILY},"
-    selected = f"-> {SUBTITLE_FONT_POSTSCRIPT},"
-    if not any(request in line and selected in line for line in log.splitlines()):
-        raise RuntimeError(f"FFmpeg did not select the supplied subtitle font: {SUBTITLE_FONT_FAMILY}")
+def require_subtitle_font(log: str, style: dict | None = None) -> None:
+    style = style or {"font_family": SUBTITLE_FONT_FAMILY, "font_postscript": SUBTITLE_FONT_POSTSCRIPT}
+    subtitle_fonts.require_selected(log, style["font_family"], style["font_postscript"])
 
 
 def prepared_rows(config_path: Path, expected_inputs: dict[str, str] | None = None) -> list[dict]:
@@ -591,7 +584,11 @@ def prepared_rows(config_path: Path, expected_inputs: dict[str, str] | None = No
             raise ValueError("choose one subtitle file")
         subtitles = resolve_file(base, row.get("subtitle_txt") or row.get("subtitle_srt"), row.get("subtitle_sha256"))
         cues = parse_srt(Path(subtitles["path"]), round(spec["duration"] * 1000))
+        seed = row.get("subtitle_flower_seed", secrets.randbits(64))
+        if type(seed) is not int or not 0 <= seed < 2 ** 64:
+            raise ValueError("subtitle_flower_seed must be an unsigned 64-bit integer")
         prepared = {"plan_id": plan_id, "input": source, "spec": spec, "subtitles": {**subtitles, "cue_count": len(cues)}, "cues": cues,
+                    "subtitle_flower_seed": seed,
                     "subtitle_style": style,
                     "nameplate": None, "text_pins": [], "disclaimer": None, "bgm": None}
         if row.get("nameplate"):
@@ -635,7 +632,10 @@ def render_one(row: dict, output_dir: Path) -> dict:
             shutil.copyfile(row["subtitle_style"]["font"]["path"], local_font)
             if sha(local_font) != row["subtitle_style"]["font"]["sha256"]:
                 raise ValueError("subtitle font changed before rendering")
-            write_ass(ass, row["cues"], row["subtitle_style"])
+            occurrences = write_ass(ass, row["cues"], row["subtitle_style"], flower_seed=row["subtitle_flower_seed"])
+            encoding = flower_effects.video_encoding([item["style_id"] for item in occurrences])
+            track = flower_effects.prepare_track(FFMPEG, Path(font_directory), ass, occurrences, row["subtitle_style"],
+                                                 Path(font_directory), round(row["spec"]["duration"] * 1000))
             command = [str(FFMPEG), "-hide_banner", "-loglevel", "verbose", "-nostdin", "-y", "-i", row["input"]["path"]]
             filters = []
             current = "[0:v]"
@@ -654,7 +654,15 @@ def render_one(row: dict, output_dir: Path) -> dict:
                 filters.append(f"{current}[layer{index}]overlay=0:0:format=auto{enable}[{label}]")
                 current = f"[{label}]"
                 index += 1
-            filters.append(f"{current}ass=filename={ass.name}:fontsdir={Path(font_directory).name},format=yuv420p,setpts=(PTS-STARTPTS)/1.2,fps=60:round=up[vout]")
+            filters.append(f"{current}ass=filename={ass.name}:fontsdir={Path(font_directory).name}[captioned]")
+            current = "[captioned]"
+            if track:
+                command += ["-f", "concat", "-safe", "0", "-i", track["path"]]
+                filters.append(f"[{index}:v]fps=60:round=up,format=rgba[flowers]")
+                filters.append(f"{current}[flowers]overlay=0:{track['y']}:format={encoding['overlay_format']}:eof_action=pass[flowered]")
+                current = "[flowered]"
+                index += 1
+            filters.append(f"{current}format={encoding['pixel_format']},setpts=(PTS-STARTPTS)/1.2,fps=60:round=up[vout]")
             if row["bgm"]:
                 command += ["-stream_loop", "-1", "-i", row["bgm"]["path"]]
                 filters.append(f"[{index}:a]volume={row['bgm']['gain_db']}dB[bgm]")
@@ -663,11 +671,11 @@ def render_one(row: dict, output_dir: Path) -> dict:
                 filters.append("[0:a]asetpts=PTS-STARTPTS,atempo=1.2,apad[aout]")
             frames = final_frames(row["spec"]["frames"])
             command += ["-filter_complex", ";".join(filters), "-map", "[vout]", "-map", "[aout]", "-frames:v", str(frames),
-                        "-r", "60", "-fps_mode", "cfr", "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+                        "-r", "60", "-fps_mode", "cfr", "-c:v", "libx264", "-preset", "veryfast", "-crf", str(encoding["crf"]),
                         "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
                         "-t", f"{frames / 60:.6f}", "-movflags", "+faststart", str(partial)]
             completed = run(command, cwd=temporary_dir)
-            require_subtitle_font(completed.stderr)
+            require_subtitle_font(completed.stderr, row["subtitle_style"])
             spec = video_spec(partial)
             if (spec["frames"] != frames or (spec["width"], spec["height"]) != (1440, 2560)
                     or spec["video_codec"] != "h264" or spec["audio_codec"] != "aac" or not packaged_streams_ok(spec)):
@@ -681,7 +689,9 @@ def render_one(row: dict, output_dir: Path) -> dict:
     return {"plan_id": plan_id, "input": row["input"], "input_frames": row["spec"]["frames"],
             "final_speed": FINAL_SPEED, "output_frames": frames, "output_path": str(output.resolve()),
             "output_sha256": sha(output), "output_spec": spec, "subtitles": row["subtitles"],
-            "nameplate": row["nameplate"], "text_pins": row["text_pins"], "disclaimer": row["disclaimer"], "bgm": row["bgm"]}
+            "nameplate": row["nameplate"], "text_pins": row["text_pins"], "disclaimer": row["disclaimer"], "bgm": row["bgm"],
+            "subtitle_flower_seed": row["subtitle_flower_seed"], "flower_choices": track["choices"] if track else [],
+            "video_encoding": encoding}
 
 
 def render(config_path: Path, output_dir: Path, manifest_path: Path, delivery_manifest: Path | None = None,
@@ -813,19 +823,29 @@ def reburn(previous_manifest_path: Path, plan_id: str, subtitle_txt: Path, outpu
         row = {"plan_id": old["plan_id"], "input_path": old["input"]["path"],
                "input_sha256": old["input"]["sha256"], "subtitle_txt": subtitle["path"],
                "subtitle_sha256": subtitle["sha256"]}
+        if "subtitle_flower_seed" in old:
+            row["subtitle_flower_seed"] = old["subtitle_flower_seed"]
         for key in ("nameplate", "disclaimer", "bgm"):
             if old.get(key):
                 row[key] = old[key]
         if old.get("text_pins"):
             row["text_pins"] = old["text_pins"]
         rows.append(row)
-    if previous.get("subtitle_style") is not None:
-        font = previous["subtitle_style"]["font"]
-        if font["sha256"] != SUBTITLE_FONT_SHA256:
-            raise ValueError("previous subtitle font differs from the bundled W8 font")
+    previous_font = (previous.get("subtitle_style") or {}).get("font")
+    # An old external path may have moved; recover the same bundled font by hash.
+    font_id = subtitle_fonts.by_hash(previous_font["sha256"])[0] if previous_font else None
     output_dir.mkdir(parents=True, exist_ok=True)
     config_path = delivery_category(output_dir, "config") / "reburn_config.json"
     config = {"schema": SCHEMA, "outputs": rows}
+    if font_id is not None:
+        config["subtitle_font"] = font_id
+    previous_emphasis = (previous.get("subtitle_style") or {}).get("emphasis", {})
+    if previous_emphasis.get("selection") in flower_effects.MODES:
+        config["subtitle_flower"] = previous_emphasis["selection"]
+    if previous_emphasis.get("texts"):
+        config["subtitle_flower_texts"] = previous_emphasis["texts"]
+    if previous_emphasis.get("scope") in ("keywords", "all"):
+        config["subtitle_flower_scope"] = previous_emphasis["scope"]
     atomic(config_path, config)
     delivery = Path(previous["clean_delivery_path"]) if previous.get("clean_delivery_path") else None
     controller = Path(previous["controller_validation_path"]) if previous.get("controller_validation_path") else None
@@ -980,6 +1000,17 @@ def validate(manifest_path: Path, report_path: Path, review_path: Path | None = 
             font_path = Path(font["path"])
             if not font_path.is_file() or sha(font_path) != font["sha256"]:
                 failures.append("subtitle_font_changed")
+        artwork = style.get("emphasis", {}).get("effects", style.get("emphasis", {}).get("artwork", {})) if isinstance(style, dict) else {}
+        if not isinstance(artwork, dict):
+            failures.append("subtitle_flower_record")
+        else:
+            for spec in artwork.values():
+                if not isinstance(spec, dict) or not spec.get("path") or not spec.get("sha256"):
+                    failures.append("subtitle_flower_record")
+                    continue
+                path = Path(spec["path"])
+                if not path.is_file() or sha(path) != spec["sha256"]:
+                    failures.append("subtitle_flower_changed")
     source = manifest.get("reburn_source")
     if source:
         previous_path = Path(str(source.get("manifest_path") or ""))

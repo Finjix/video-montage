@@ -62,9 +62,11 @@ Honor the current user's packaging request. Do not add music, captions, overlays
 or extra audio without that request. Packaging uses a validated clean video to
 create a separate output and preserves the clean video. Read the
 [packaging workflow](references/packaging/workflow.md) for configuration and
-reburn commands. Subtitles burn into the picture only; the default style uses
-the calibrated WenYue W8 yellow, black-outlined OTF from
-`assets/packaging/fonts`.
+reburn commands. Subtitles burn into the picture only. Each new packaging task
+randomly selects one of WenYue W8, Smiley Sans (得意黑) or FangTang (方糖体)
+from `assets/packaging/fonts`, using it throughout the batch and preserving the
+selection for reburns. All three fonts support the dynamic flower styles;
+ordinary subtitles remain yellow with a black outline.
 Without packaging, use `clean-qc`, `final-evidence --clean` and `complete` with
 a fresh final visual review. For packaged delivery, use the subtitle and
 packaging stages before final evidence and completion.

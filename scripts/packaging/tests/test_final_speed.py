@@ -62,7 +62,7 @@ class FinalSpeedTests(unittest.TestCase):
             "sine=frequency=220:sample_rate=48000:duration=0.4", "-af", "volume=0.01",
             str(music)], check=True, capture_output=True)
         config = self.root / "config.json"
-        packager.atomic(config, {"schema": packager.SCHEMA, "outputs": [{"plan_id": "P1",
+        packager.atomic(config, {"schema": packager.SCHEMA, "subtitle_font": "w8", "outputs": [{"plan_id": "P1",
             "input_path": str(self.source), "subtitle_txt": str(subtitles),
             "bgm": {"path": str(music), "gain_db": -18}}]})
         row = packager.render_one(packager.prepared_rows(config)[0], self.root / "packaged")
@@ -93,6 +93,35 @@ class FinalSpeedTests(unittest.TestCase):
                 self.assertLessEqual(abs(float(audio["duration"]) - row["output_frames"] / 60), 1 / 60)
                 proof = auto.delivery_mix_evidence(auto.pcm(Path(row["output_path"])), row)
                 self.assertEqual("pass", proof["decision"], proof)
+
+    def test_flower_selection_visibility_and_gaps_follow_final_timeline(self):
+        subtitles = self.root / "flower-subtitle.txt"
+        subtitles.write_text("1\n00:00:00,200 --> 00:00:00,700\n玩无尽冬日啊\n\n"
+                             "2\n00:00:00,900 --> 00:00:01,300\n冰雪世界\n\n"
+                             "3\n00:00:01,400 --> 00:00:01,800\n普通字幕\n", encoding="utf-8")
+        config = self.root / "flower-config.json"
+        music = self.root / "flower-music.wav"
+        subprocess.run([str(packager.FFMPEG), "-v", "error", "-y", "-f", "lavfi", "-i",
+                        "sine=frequency=220:sample_rate=48000:duration=0.4", "-af", "volume=0.01",
+                        str(music)], check=True, capture_output=True)
+        packager.atomic(config, {"schema": packager.SCHEMA, "subtitle_font": "w8", "subtitle_flower_texts": ["无尽冬日", "冰雪世界"],
+                                 "outputs": [{"plan_id": "FLOWER",
+            "input_path": str(self.source), "subtitle_txt": str(subtitles), "subtitle_flower_seed": 4,
+            "bgm": {"path": str(music), "gain_db": -18}}]})
+        row = packager.render_one(packager.prepared_rows(config)[0], self.root / "flower-packaged")
+        self.assertEqual(["ice1", "ice2"], [item["style_id"] for item in row["flower_choices"]])
+        self.assertEqual(["无尽冬日", "冰雪世界"], [item["text"] for item in row["flower_choices"]])
+        self.assertEqual(4, row["subtitle_flower_seed"])
+        self.assertEqual(100, row["output_spec"]["frames"])
+        # Evaluate frames before, during and after each effect, including an empty gap.
+        for frame_number, visible in ((5, False), (10, True), (20, True), (35, False),
+                                      (44, False), (45, True), (55, True), (65, False), (80, False), (95, False)):
+            target = self.root / f"flower-frame-{frame_number}.png"
+            subprocess.run([str(packager.FFMPEG), "-v", "error", "-i", row["output_path"],
+                "-vf", f"select=eq(n\\,{frame_number})", "-frames:v", "1", str(target)], check=True, capture_output=True)
+            pixels = np.asarray(Image.open(target).convert("RGB")).astype(np.int16)
+            blue = (pixels[:, :, 2] > 140) & (pixels[:, :, 2] > pixels[:, :, 0] + 25) & (pixels[:, :, 1] > 60)
+            self.assertEqual(visible, bool(blue.any()), frame_number)
 
     def test_legacy_final_speed_receipt_and_double_speed_guard(self):
         render = self.root / "render.json"

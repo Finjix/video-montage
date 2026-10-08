@@ -25,8 +25,9 @@ configuration, then run `packaging-finalize` and `packaging-validate` after
 `controller-validate` and before `complete`. Read the
 [packaging workflow](../packaging/workflow.md). Without packaging,
 keep the clean delivery behavior.
-Packaging burns the calibrated WenYue W8 yellow, black-outlined subtitle style
-by default, using the fixed OTF in `assets/packaging/fonts`.
+Packaging randomly selects bundled WenYue W8, Smiley Sans or FangTang once per
+task and burns yellow, black-outlined subtitles by default. The selected OTF in
+`assets/packaging/fonts` is shared by the batch and retained for reburns.
 Burn subtitles into the video picture only. All new deliveries must use a
 `work/自动化混剪_YYYYMMDD_HHMMSS` directory (Beijing time). Put packaged MP4s in
 `成片/`, clean MP4s in `混剪（无包装）/`, editable `subtitle-xx.txt` in

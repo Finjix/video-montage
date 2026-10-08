@@ -1,10 +1,10 @@
-"""Reproduce the W8 flower comparison using the actual subtitle renderer."""
+"""Measure procedural flower text against references and actual burned video."""
 from __future__ import annotations
 
 import argparse
 import importlib.util
 import json
-import shutil
+import sys
 import subprocess
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -14,6 +14,8 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/packaging/scripts/package_video.py"
+sys.path.insert(0, str(SCRIPT.parent))
+import flower_effects
 
 
 def foreground_ssim(reference: np.ndarray, rendered: np.ndarray) -> float:
@@ -29,59 +31,100 @@ def foreground_ssim(reference: np.ndarray, rendered: np.ndarray) -> float:
     return float(score[foreground].mean())
 
 
-def compare(reference_path: Path, output_dir: Path) -> dict:
+def video_roundtrip(packaging, reference: np.ndarray, directory: Path, style_id: str) -> tuple[float, dict]:
+    """Exercise the complete 1440x2560 H.264 burn-in, then restore reference size."""
+    source = directory / "source.mp4"
+    packaging.run([str(packaging.FFMPEG), "-v", "error", "-y", "-f", "lavfi", "-i",
+                   "color=black:s=1440x2560:r=60:d=1", "-f", "lavfi", "-i",
+                   "anullsrc=r=48000:cl=stereo", "-t", "1", "-c:v", "libx264", "-preset", "ultrafast",
+                   "-pix_fmt", "yuv420p", "-c:a", "aac", str(source)])
+    subtitles = directory / "subtitle.txt"
+    subtitles.write_text("1\n00:00:00,000 --> 00:00:00,900\n无尽冬日\n", encoding="utf-8")
+    config = directory / "config.json"
+    packaging.atomic(config, {"schema": packaging.SCHEMA, "subtitle_flower": style_id, "subtitle_font": "w8",
+                              "outputs": [{"plan_id": "comparison", "input_path": str(source),
+                                           "subtitle_txt": str(subtitles), "subtitle_flower_seed": 0}]})
+    result = packaging.render_one(packaging.prepared_rows(config)[0], directory / "video")
+    x, y, width, height = result["flower_choices"][0]["bounds"]
+    frame = directory / "decoded.png"
+    packaging.run([str(packaging.FFMPEG), "-v", "error", "-y", "-i", result["output_path"],
+                   "-vf", f"select=eq(n\\,20),format=rgb24,crop={width}:{height}:{x}:{y}",
+                   "-frames:v", "1", str(frame)])
+    decoded = cv2.imread(str(frame))
+    restored = cv2.resize(decoded, (reference.shape[1], reference.shape[0]), interpolation=cv2.INTER_AREA)
+    cv2.imwrite(str(directory / "video-roundtrip.png"), restored)
+    return foreground_ssim(reference, restored), result["video_encoding"]
+
+
+def compare(reference_path: Path, output_dir: Path, style_id: str) -> dict:
     spec = importlib.util.spec_from_file_location("packaging_comparison", SCRIPT)
     packaging = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(packaging)
     reference = cv2.imread(str(reference_path))
-    if reference is None or reference.shape != (115, 264, 3):
-        raise ValueError("expected the supplied 264x115 reference image")
+    if reference is None:
+        raise ValueError(f"cannot read reference: {reference_path}")
     output_dir.mkdir(parents=True, exist_ok=True)
-    style = packaging.subtitle_style({}, ROOT)
-    geometry = style["emphasis"]["reference_geometry"]
-    recorded_style = json.loads(json.dumps(style))
-    # Uniform size and translation align the screenshot. No image warping or reference pixels are used.
-    style["ass"].update(play_res_x=264, play_res_y=115, position_x=geometry["x"], position_y=geometry["y"],
-                        font_size=style["ass"]["font_size"] / style["emphasis"]["ass_font_size"] * geometry["size"])
-    style["emphasis"]["ass_font_size"] = geometry["size"]
+    style = packaging.subtitle_style({"subtitle_font": "w8"}, ROOT)
+    spec = style["emphasis"]["effects"][style_id]
+    height, width = reference.shape[:2]
+    if spec["canvas"] != [width, height]:
+        raise ValueError("reference dimensions differ from this style's calibration")
     with TemporaryDirectory(prefix="flower-comparison-") as temp:
         work = Path(temp)
-        (work / "fonts").mkdir()
-        shutil.copyfile(recorded_style["font"]["path"], work / "fonts/font.otf")
-        packaging.write_ass(work / "sample.ass", [dict(start_ms=0, end_ms=1000, text="无尽冬日")], style,
-                            render_width=1056)
+        from PIL import Image
+        sprite, _ = flower_effects.dynamic_flowers.render_text("无尽冬日", spec, style["font"]["path"], reference_canvas=True)
+        sprite.save(work / "sprite.png")
         command = [str(packaging.FFMPEG), "-hide_banner", "-loglevel", "verbose", "-y", "-f", "lavfi",
-                   "-i", "color=black:s=1056x460:d=0.04", "-vf",
-                   "ass=sample.ass:fontsdir=fonts,scale=264:115:flags=area", "-frames:v", "1", "sample.png"]
+                   "-i", f"color=black:s={width}x{height}:d=0.04,format=rgb24", "-i", "sprite.png",
+                   "-filter_complex", "[0:v][1:v]overlay=format=rgb,format=rgb24",
+                   "-frames:v", "1", "sample.png"]
         result = subprocess.run(command, cwd=work, capture_output=True, text=True, encoding="utf-8", errors="replace")
         if result.returncode:
             raise RuntimeError(result.stderr[-3000:])
-        packaging.require_subtitle_font(result.stderr)
         rendered = cv2.imread(str(work / "sample.png"))
-        shutil.copyfile(work / "sample.png", output_dir / "rendered.png")
-    shutil.copyfile(reference_path, output_dir / "reference.png")
+        (output_dir / "rendered.png").write_bytes((work / "sample.png").read_bytes())
+        video_score, encoding = video_roundtrip(packaging, reference, work, style_id)
+        (output_dir / "video-roundtrip.png").write_bytes((work / "video-roundtrip.png").read_bytes())
+    (output_dir / "reference.png").write_bytes(reference_path.read_bytes())
     score = foreground_ssim(reference, rendered)
     report = {
         "metric": "RGB SSIM; 11x11 Gaussian window, sigma 1.5; mean over union foreground dilated 2px",
-        "alignment": "uniform font-size scale and translation to reference; no nonuniform warp",
-        "score": score, "threshold": .9, "pass": score >= .9,
+        "alignment": "reference font geometry; production font renderer and FFmpeg RGB overlay",
+        "method": "font contours with distance-height-normal shader; reference pixels are never read by renderer",
+        "style_id": style_id, "score": score, "video_roundtrip_score": video_score,
+        "video_roundtrip": "production 1440x2560 H.264 burn-in; sprite crop uniformly restored to reference size",
+        "video_encoding": encoding,
+        "threshold": .95, "pass": min(score, video_score) >= .95, "video_roundtrip_pass": video_score >= .95,
+        "pass_scope": "both procedural text at reference size and actual production video burn-in",
         "reference_sha256": packaging.sha(reference_path), "renderer_sha256": packaging.sha(SCRIPT),
-        "subtitle_style": recorded_style,
+        "effect_sha256": spec["sha256"], "font_renderer_sha256": packaging.sha(Path(flower_effects.dynamic_flowers.__file__)),
+        "subtitle_style": style,
     }
     (output_dir / "comparison.json").write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    side_by_side = cv2.resize(np.hstack([reference, rendered]), None, fx=3, fy=3, interpolation=cv2.INTER_CUBIC)
+    restored = cv2.imread(str(output_dir / "video-roundtrip.png"))
+    side_by_side = cv2.resize(np.hstack([reference, rendered, restored]), None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
     cv2.imwrite(str(output_dir / "comparison.png"), side_by_side)
     return report
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--reference", required=True, type=Path)
+    parser.add_argument("--reference", type=Path)
+    parser.add_argument("--style", choices=("fire1", "ice1", "ice2"))
     parser.add_argument("--output-dir", required=True, type=Path)
     args = parser.parse_args()
-    report = compare(args.reference.resolve(), args.output_dir.resolve())
-    print(json.dumps({key: report[key] for key in ("metric", "score", "threshold", "pass")}))
-    raise SystemExit(0 if report["pass"] else 1)
+    if args.reference and not args.style:
+        parser.error("--reference requires --style")
+    reports = []
+    for style_id in ([args.style] if args.style else ["fire1", "ice1", "ice2"]):
+        reference = args.reference or flower_effects.ASSET_ROOT / "references" / f"{style_id}.png"
+        report = compare(reference.resolve(), args.output_dir.resolve() / style_id, style_id)
+        reports.append({key: report[key] for key in ("style_id", "metric", "score", "video_roundtrip_score",
+                                                    "video_roundtrip_pass", "video_encoding", "threshold", "pass", "pass_scope")})
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    (args.output_dir / "summary.json").write_text(json.dumps(reports, indent=2) + "\n", encoding="utf-8")
+    print(json.dumps(reports))
+    raise SystemExit(0 if all(report["pass"] for report in reports) else 1)
 
 
 if __name__ == "__main__":

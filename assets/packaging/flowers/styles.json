@@ -1,0 +1,57 @@
+{
+  "schema": "subtitle-flower-effects/v2",
+  "method": "font signed-distance and normal shader",
+  "styles": {
+    "fire1": {
+      "label": "火1",
+      "reference": "references/fire1.png",
+      "reference_sha256": "427be20e612d56169a0497418026486e4daf60e30c5aabae0cb5b64a73eb44d3",
+      "path": "fire1.json",
+      "sha256": "3649e6f7d70e8e0098e6325a987b8f8346694590dc10b6fa853df7713cf05d2b",
+      "canvas": [
+        320,
+        129
+      ],
+      "face_bbox": [
+        47,
+        26,
+        272,
+        92
+      ]
+    },
+    "ice1": {
+      "label": "冰1",
+      "reference": "references/ice1.png",
+      "reference_sha256": "d591f8857287323270aad20d4dd0ce9fd0e2a2a2c6fae0858372ce45fe3c7973",
+      "path": "ice1.json",
+      "sha256": "975769c7c83624214f060a897cccb5039dc6d76b35e60d4fed5ddbea5e84daf7",
+      "canvas": [
+        301,
+        146
+      ],
+      "face_bbox": [
+        40,
+        36,
+        265,
+        101
+      ]
+    },
+    "ice2": {
+      "label": "冰2",
+      "reference": "references/ice2.png",
+      "reference_sha256": "9c05dad6788035d2ae4952321ea70283405906509fd36ae6505728ed6e40c22a",
+      "path": "ice2.json",
+      "sha256": "3681acdeac1f812461eea3c795117d29da1637d0e5ac01d99a90ebeede67e18b",
+      "canvas": [
+        339,
+        139
+      ],
+      "face_bbox": [
+        53,
+        28,
+        279,
+        94
+      ]
+    }
+  }
+}
