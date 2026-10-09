@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[3]
 CATALOG = ROOT / "assets/packaging/design/catalog.json"
 COLORS = {"yellow": "#FFDE00", "white": "#FFFFFF"}
 FLOWERS = ("ice1", "ice2", "fire1")
-ENTRANCES = ("none", "fade", "bounce_up", "shout_wave", "ice_drift")
+ENTRANCES = ("none", "bounce_up", "shout_wave", "ice_drift")
 TEMPLATES = ()
 FONT_SIZES = (8, 9)
 
@@ -104,7 +104,8 @@ def cue_style(row: dict, cue: dict, names: list[str], default_flower: str, game_
     for i, span in enumerate(flowers):
         if any(max(span["start"], other["start"]) < min(span["end"], other["end"]) for other in flowers[:i]):
             raise ValueError("flower spans must not overlap")
-    for game in game_spans(cue["text"], names, default_flower):
+    games = game_spans(cue["text"], names, default_flower)
+    for game in games:
         overlapping = [s for s in flowers if max(s["start"], game["start"]) < min(s["end"], game["end"])]
         if overlapping:
             if len(overlapping) != 1 or overlapping[0]["start"] > game["start"] or overlapping[0]["end"] < game["end"]:
@@ -120,6 +121,17 @@ def cue_style(row: dict, cue: dict, names: list[str], default_flower: str, game_
             if "font_size" in span and max(span["start"], game["start"]) < min(span["end"], game["end"]):
                 if span["font_size"] != chosen_size:
                     raise ValueError("a complete game name must use one font_size, 9")
+    # Match the renderer's ordered span overrides. Only actual game-name
+    # characters may differ from the ordinary text's uniform size.
+    character_sizes = [size] * len(cue["text"])
+    for span in spans:
+        if "font_size" in span:
+            character_sizes[span["start"]:span["end"]] = [span["font_size"]] * (span["end"] - span["start"])
+    game_characters = {i for game in games for i in range(game["start"], game["end"])}
+    ordinary_sizes = {value for i, value in enumerate(character_sizes)
+                      if i not in game_characters and not cue["text"][i].isspace()}
+    if len(ordinary_sizes) > 1:
+        raise ValueError("only game names may use a different font_size within a cue; ordinary emphasis must display separately at one uniform size")
     breaks = row.get("line_breaks", [])
     if not isinstance(breaks, list) or breaks:
         raise ValueError("line_breaks is unsupported: subtitles must stay on one line")

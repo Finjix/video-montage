@@ -79,7 +79,9 @@ uses a Codex-authored design for each video: choose its main font from WenYue
 W8, Smiley Sans (得意黑) or FangTang (方糖体), keep ordinary text primarily yellow
 with white support, and use complete flower text for every actual game name.
 Only two reference-calibrated font sizes, 8 and 9, are allowed: ordinary text defaults to 8;
-game names and special emphasis use 9. Ordinary yellow/white text uses
+game names use 9 and are the only allowed mixed-size text within a caption.
+Other emphasis may use 9 only as a separately displayed, uniformly sized caption;
+never enlarge individual ordinary words inside an 8-size line. Ordinary yellow/white text uses
 the calibrated CapCut black outline 40 (12.3px at 1440 width, text scale 164%),
 independent of font and size. Flower outlines/glows retain the existing effect
 without an additional ordinary stroke. Never use layout.size or shrink
@@ -94,7 +96,7 @@ If none fits, use static subtitles. Only choose documented controls such as
 verified text, main font, yellow/white color, size 8/9, layout and duration;
 do not invent effect parameters or change calibrated implementations.
 Use the existing ice1/ice2/fire1 flowers
-and bounce_up/shout_wave/ice_drift entrances, or static/short fade; keep ordinary
+and bounce_up/shout_wave/ice_drift entrances, or static (none); fade is not allowed; keep ordinary
 narration readable and mostly static. Do not add decorative cards or the removed
 reference-derived text templates. Review actual final motion and composition,
 providing `design_pass` and a concrete `design_reason`. Old configurations without design

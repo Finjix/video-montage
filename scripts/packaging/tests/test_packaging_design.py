@@ -77,6 +77,26 @@ class DesignTests(unittest.TestCase):
             self.assertTrue(1.10 <= heights[1] / heights[0] <= 1.16, (key, heights))
         self.assertEqual(.69, design.layout(None)["y"])
 
+    def test_only_game_names_may_mix_sizes_within_one_caption(self):
+        cue = {"start_ms": 0, "end_ms": 2000, "text": "冰雪末日里活下去"}
+        value = fixture([cue]); value["cues"][0]["spans"] = [{"start": 5, "end": 8, "font_size": 9}]
+        with self.assertRaisesRegex(ValueError, "display separately"):
+            self.prepare(value, cues=[cue])
+        value["cues"][0].update(font_size=9, spans=[])
+        self.assertEqual(9, self.prepare(value, cues=[cue])["cues"][0]["font_size"])
+        value["cues"][0]["spans"] = [{"start": 0, "end": 2, "font_size": 8}]
+        with self.assertRaisesRegex(ValueError, "display separately"):
+            self.prepare(value, cues=[cue])
+        value["cues"][0].update(font_size=8, spans=[{"start": 0, "end": 8, "font_size": 9}])
+        self.prepare(value, cues=[cue])  # Whole-caption emphasis is uniform.
+        cue = {"start_ms": 0, "end_ms": 2000, "text": "无尽冬日点击即玩"}
+        value = self.prepare(cues=[cue])
+        self.assertEqual(9, value["cues"][0]["spans"][0]["font_size"])
+        self.assertEqual(8, value["cues"][0]["font_size"])
+        spoof = fixture([cue]); spoof["cues"][0]["spans"] = [{"start": 4, "end": 6, "font_size": 9, "game_name": "假的游戏名"}]
+        with self.assertRaisesRegex(ValueError, "display separately"):
+            self.prepare(spoof, cues=[cue])
+
     def test_outline_covers_every_glyph_edge_in_three_fonts(self):
         # Independent 3px neighborhood must be opaque around even W8's sharp corners.
         for key in subtitle_fonts.FONTS:
@@ -240,10 +260,18 @@ class DesignTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "protected"):
             renderer.prepare_track(self.root, self.cues, value, subtitle_fonts.FONTS["smiley"]["path"], 120)
 
+    def test_fade_is_rejected_and_only_three_animations_are_available(self):
+        self.assertEqual({"none", "bounce_up", "shout_wave", "ice_drift"}, set(design.ENTRANCES))
+        self.assertEqual(set(design.ENTRANCES), set(pack.read(design.CATALOG)["entrances"]))
+        value = fixture(self.cues)
+        value["cues"][0]["entrance"] = {"effect": "fade", "duration_ms": 100}
+        with self.assertRaises(ValueError):
+            self.prepare(value)
+
     def test_short_cues_and_long_text(self):
         cue = {"start_ms": 0, "end_ms": 100, "text": "夯"}
         value = fixture([cue]); value["game_names"] = []
-        value["cues"][0]["entrance"] = {"effect": "fade", "duration_ms": 50}
+        value["cues"][0]["entrance"] = {"effect": "bounce_up", "duration_ms": 50}
         prepared = design.prepare(value, [cue], "subtitle", [], self.root, 6)
         track = renderer.prepare_track(self.root, [cue], prepared, subtitle_fonts.FONTS["smiley"]["path"], 6)
         self.assertEqual(3, track["record"]["events"][0]["entrance_frames"])

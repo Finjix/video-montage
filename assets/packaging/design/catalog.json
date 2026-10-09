@@ -32,28 +32,6 @@
         "layout": "x/y normalized center; max_width; font_size 8/9/10, no arbitrary scaling"
       }
     },
-    "fade": {
-      "label": "短淡入",
-      "intensity": "light",
-      "use": "柔和承接、轻提示",
-      "preview": {
-        "path": "previews/fade.png",
-        "sha256": "1c69d8112d860a91ebd73836a1b580d40ff49842d7a67edff9410cfdd3e24097"
-      },
-      "motion_preview": {
-        "path": "previews/fade.webp",
-        "sha256": "ccae9b4d3914a2097309ea41fcef8d5abceee242afbabd3cf997cb35467e4f64"
-      },
-      "fonts": [
-        "w8",
-        "smiley",
-        "fangtang"
-      ],
-      "controls": {
-        "duration_ms": "0 for none; otherwise >=50 and <= half display interval",
-        "layout": "x/y normalized center; max_width; font_size 8/9/10, no arbitrary scaling"
-      }
-    },
     "bounce_up": {
       "label": "向上弹入",
       "intensity": "medium",

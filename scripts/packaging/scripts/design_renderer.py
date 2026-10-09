@@ -176,10 +176,7 @@ def paint_event(event: dict, frame: int) -> tuple[Image.Image, int, int]:
         y = event["base_y"] + ry * ratio
         return sprite, round(x), round(y)
     if progress < 1:
-        if effect == "fade":
-            sprite = sprite.copy()
-            sprite.putalpha(sprite.getchannel("A").point(lambda a: round(a * progress)))
-        elif effect == "bounce_up":
+        if effect == "bounce_up":
             item = motion_parameters(effect)["frames"][min(29, int(progress * 30))]
             if not item.get("visible", True):
                 return Image.new("RGBA", (1, 1)), event["base_x"], event["base_y"]
