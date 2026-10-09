@@ -279,7 +279,7 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--effect", choices=["bounce_up", "shout_wave"], required=True)
-    parser.add_argument("--parameter-dir", type=Path, default=LAB / "parameters")
+    parser.add_argument("--parameter-dir", type=Path, default=LAB.parents[1] / "assets/packaging/animations/parameters")
     parser.add_argument("--analysis-dir", type=Path, default=ROOT / "work/subtitle-animation-calibration/motion")
     parser.add_argument("--surface-refine", action="store_true")
     parser.add_argument("--horizontal-refine", action="store_true")

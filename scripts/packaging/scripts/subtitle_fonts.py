@@ -5,6 +5,18 @@ import secrets
 from pathlib import Path
 
 FONT_ROOT = Path(__file__).resolve().parents[3] / "assets/packaging/fonts"
+# Existing editor calibration: 164% scale, 1920-wide reference -> 1440 delivery.
+EDITOR_PIXELS = {8: 153, 9: 173, 10: 192}
+# Calibrated CapCut stroke 40 -> 10 reference pixels, at text scale 164%.
+# Stroke is independent of selected font/size; flowers retain their own shader.
+EDITOR_OUTLINE_WIDTH = 40
+OUTLINE_PIXELS = round(EDITOR_OUTLINE_WIDTH / 4 * 1.64 * 1440 / 1920, 3)
+
+
+def pixels(font: str, editor_size: int) -> int:
+    if type(editor_size) is not int or editor_size not in EDITOR_PIXELS:
+        raise ValueError("font_size must be 8, 9 or 10")
+    return round(EDITOR_PIXELS[editor_size] * FONTS[font]["size_scale"])
 FONTS = {
     "w8": {"label": "文悦新青年体 W8", "path": str(FONT_ROOT / "WenYue-XinQingNianTi-W8.otf"),
            "sha256": "20b03dfe8dc982a19946726fe4acf156f9bb8b45adae8aac22a4a3590bb9a6bf",

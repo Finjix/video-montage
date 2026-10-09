@@ -26,6 +26,11 @@ in the plan review's `diversity_reason`. After rejecting a candidate, rebuild th
 whole batch from the remaining usable alternatives instead of copying one safe
 opening into every output. All normal quality gates still apply.
 
+For requested packaging, after subtitle review read [AI packaging design](../packaging/design.md).
+Choose a main font for each video, write a hash-bound subtitle design without decorative cards, inspect catalog previews, then package. New jobs require these explicit
+decisions; final review also requires `design_pass` and a concrete `design_reason`.
+Retain subtitle choices and timing with the configuration for reburn.
+
 Codex itself examines source ASR, native decoded frames, the asset copy pack,
 candidate evidence and final packaged frame evidence. Submit honest,
 hash-bound `reviewer_role: codex` findings. Never claim an independent reviewer,

@@ -1,0 +1,152 @@
+{
+  "schema": "video-montage-design-catalog/v1",
+  "fonts": [
+    "w8",
+    "smiley",
+    "fangtang"
+  ],
+  "palette": {
+    "primary": "#FFDE00",
+    "secondary": "#FFFFFF"
+  },
+  "entrances": {
+    "none": {
+      "label": "静态阅读",
+      "intensity": "quiet",
+      "use": "叙述、解释、密集信息",
+      "preview": {
+        "path": "previews/none.png",
+        "sha256": "7acc346e3d91d6f142ce71da1285dbf45442b69c791d61d9b6e34a798eb6c508"
+      },
+      "motion_preview": {
+        "path": "previews/none.webp",
+        "sha256": "3fbdb1e5b462692833fff2fab61a7c6e59db553642c25cf41d266b1ec2f9f70c"
+      },
+      "fonts": [
+        "w8",
+        "smiley",
+        "fangtang"
+      ],
+      "controls": {
+        "duration_ms": "0 for none; otherwise >=50 and <= half display interval",
+        "layout": "x/y normalized center; max_width; font_size 8/9/10, no arbitrary scaling"
+      }
+    },
+    "fade": {
+      "label": "短淡入",
+      "intensity": "light",
+      "use": "柔和承接、轻提示",
+      "preview": {
+        "path": "previews/fade.png",
+        "sha256": "1c69d8112d860a91ebd73836a1b580d40ff49842d7a67edff9410cfdd3e24097"
+      },
+      "motion_preview": {
+        "path": "previews/fade.webp",
+        "sha256": "ccae9b4d3914a2097309ea41fcef8d5abceee242afbabd3cf997cb35467e4f64"
+      },
+      "fonts": [
+        "w8",
+        "smiley",
+        "fangtang"
+      ],
+      "controls": {
+        "duration_ms": "0 for none; otherwise >=50 and <= half display interval",
+        "layout": "x/y normalized center; max_width; font_size 8/9/10, no arbitrary scaling"
+      }
+    },
+    "bounce_up": {
+      "label": "向上弹入",
+      "intensity": "medium",
+      "use": "短重点、积极卖点",
+      "parameters": "../animations/parameters/bounce_up.json",
+      "preview": {
+        "path": "previews/bounce_up.png",
+        "sha256": "d17ada6e614958cad51f8b157bcf9487f8bcd3ff841d5d2c2431350b84a9a31a"
+      },
+      "motion_preview": {
+        "path": "previews/bounce_up.webp",
+        "sha256": "194e0b9a8415edd2767f992fdc9274c3de6b414889bfdafd4e83143186663b05"
+      },
+      "fonts": [
+        "w8",
+        "smiley",
+        "fangtang"
+      ],
+      "controls": {
+        "duration_ms": "0 for none; otherwise >=50 and <= half display interval",
+        "layout": "x/y normalized center; max_width; font_size 8/9/10, no arbitrary scaling"
+      },
+      "precision": "w8 + full ice2: calibrated shader/motion; other fonts or mixed runs: generic motion with selected glyphs"
+    },
+    "shout_wave": {
+      "label": "呐喊声波",
+      "intensity": "strong",
+      "use": "情绪爆点、反问、强提醒",
+      "parameters": "../animations/parameters/shout_wave.json",
+      "preview": {
+        "path": "previews/shout_wave.png",
+        "sha256": "b3be4d7b226e40e9730a4c929ed4ad4aafe3c8e919933dc67efba6fc6b640c58"
+      },
+      "motion_preview": {
+        "path": "previews/shout_wave.webp",
+        "sha256": "e1327cc0be0acc7ef3bfef4441dfb66e725491293de9dfbd3a4df9711c7def6c"
+      },
+      "fonts": [
+        "w8",
+        "smiley",
+        "fangtang"
+      ],
+      "controls": {
+        "duration_ms": "0 for none; otherwise >=50 and <= half display interval",
+        "layout": "x/y normalized center; max_width; font_size 8/9/10, no arbitrary scaling"
+      },
+      "precision": "w8 + full ice2: calibrated shader/motion; other fonts or mixed runs: generic motion with selected glyphs"
+    },
+    "ice_drift": {
+      "label": "冰雪飘动",
+      "intensity": "medium",
+      "use": "冰雪主题、游戏名、氛围重点",
+      "parameters": "../animations/parameters/ice_drift.json",
+      "preview": {
+        "path": "previews/ice_drift.png",
+        "sha256": "b1544db32e9c923078a7fd53de5f01a8dccc29860a20be9c56f6dc00f5e9c2ff"
+      },
+      "motion_preview": {
+        "path": "previews/ice_drift.webp",
+        "sha256": "73964198b0d2434b5c445b4fccc7f5f81a3dca6e37eacb6cd3713613f3b3d1ad"
+      },
+      "fonts": [
+        "w8",
+        "smiley",
+        "fangtang"
+      ],
+      "controls": {
+        "duration_ms": "0 for none; otherwise >=50 and <= half display interval",
+        "layout": "x/y normalized center; max_width; font_size 8/9/10, no arbitrary scaling"
+      },
+      "precision": "w8 + full ice2: calibrated shader/motion; other fonts or mixed runs: generic motion with selected glyphs"
+    }
+  },
+  "flowers": {
+    "ice1": "蓝白冰面，适合冰雪与品牌",
+    "ice2": "白青渐变与紫光，适合品牌与冷色氛围",
+    "fire1": "黄橙渐变与红边，适合热烈情绪和强卖点"
+  },
+  "graphics": {},
+  "guidance": "普通字幕黄主白辅，主字体按视频选择，完整游戏名使用既有冰/火花字；叙述以静态为主，按内容选择三种既有入场动画或轻淡入。不添加装饰卡片或新增复刻文字效果。 AI只选择和搭配现成效果，不临时创造效果、动画、花字、着色器或装饰素材。只用文档参数；无合适效果时使用静态字幕。",
+  "font_sizes": {
+    "allowed": [
+      8,
+      9,
+      10
+    ],
+    "ordinary_default": 8,
+    "game_allowed": [
+      9,
+      10
+    ],
+    "game_default": 9,
+    "long_text": "wrap at fixed size up to two lines; otherwise revise reviewed cues"
+  },
+  "effect_policy": "existing_library_only"
+}

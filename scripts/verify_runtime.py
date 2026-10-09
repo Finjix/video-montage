@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import hashlib
 import json
 import subprocess
 import sys
@@ -22,13 +23,60 @@ REQUIRED = (
     "scripts/controller/scripts/ffmpeg_controller.py",
     "scripts/packaging/scripts/package_video.py",
     "scripts/packaging/scripts/delivery_files.py",
+    "scripts/packaging/scripts/packaging_design.py",
+    "scripts/packaging/scripts/design_renderer.py",
+    "scripts/packaging/scripts/reference_animation.py",
+    "scripts/packaging/scripts/animation_common.py",
+    "scripts/packaging/scripts/animation_shader.py",
+    "assets/packaging/design/catalog.json",
+    "assets/packaging/animations/parameters/static.json",
+    "assets/packaging/animations/parameters/bounce_up.json",
+    "assets/packaging/animations/parameters/shout_wave.json",
+    "assets/packaging/animations/parameters/ice_drift.json",
     "scripts/executor/scripts/three_suite_ff.py",
     "scripts/autonomous/scripts/autonomous_montage.py",
 )
 
 
+def packaging_resources() -> list[str]:
+    failures = []
+    checked = {}
+    def check(path: Path, expected=None):
+        if not path.is_file():
+            failures.append(f"missing packaging resource: {path}")
+        elif expected:
+            if path not in checked:
+                hasher = hashlib.sha256()
+                with path.open("rb") as source:
+                    for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                        hasher.update(chunk)
+                checked[path] = hasher.hexdigest()
+            if checked[path] != expected:
+                failures.append(f"changed packaging resource: {path}")
+    def visit(item, base):
+        if isinstance(item, dict):
+            if item.get("table_file"):
+                check(base / item["table_file"], item.get("table_sha256"))
+            if isinstance(item.get("preview"), dict):
+                check(base / item["preview"]["path"], item["preview"].get("sha256"))
+            if isinstance(item.get("motion_preview"), dict):
+                check(base / item["motion_preview"]["path"], item["motion_preview"].get("sha256"))
+            for child in item.values():
+                visit(child, base)
+        elif isinstance(item, list):
+            for child in item:
+                visit(child, base)
+    for path in [ROOT / "assets/packaging/design/catalog.json", *(ROOT / "assets/packaging/animations/parameters").glob("*.json")]:
+        try:
+            visit(json.loads(path.read_text(encoding="utf-8")), path.parent)
+        except (OSError, ValueError, KeyError) as exc:
+            failures.append(f"invalid packaging resource: {path}: {exc}")
+    return failures
+
+
 def verify() -> dict:
     failures = [f"missing: {path}" for path in REQUIRED if not (ROOT / path).is_file()]
+    failures.extend(packaging_resources())
     if sys.version_info[:3] != (3, 13, 15) or sys.maxsize <= 2**32:
         failures.append("bundled 64-bit Python 3.13.15 required")
     for name in ("faster_whisper", "numpy", "PIL", "av", "cv2", "onnxruntime", "yaml"):

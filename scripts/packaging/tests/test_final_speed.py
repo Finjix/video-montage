@@ -24,6 +24,20 @@ auto = module("speed_auto", "scripts/autonomous/scripts/autonomous_montage.py")
 controller = module("speed_controller", "scripts/controller/scripts/ffmpeg_controller.py")
 
 
+def presentation(subtitles, flowers=None):
+    cues = packager.parse_srt(subtitles, 2000)
+    settings = []
+    for i, c in enumerate(cues, 1):
+        z = {"index": i, "text": c["text"], "color": "yellow", "entrance": {"effect": "none"}}
+        if flowers and i <= 2:
+            word = "无尽冬日" if i == 1 else "冰雪世界"
+            start = c["text"].index(word)
+            z["spans"] = [{"start": start, "end": start+len(word), "flower": flowers[i-1]}]
+        settings.append(z)
+    return {"subtitle_sha256": packager.sha(subtitles), "font": "w8", "game_names": [],
+            "reason": "Test explicit timeline and flower ranges", "cues": settings}
+
+
 class FinalSpeedTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -62,8 +76,8 @@ class FinalSpeedTests(unittest.TestCase):
             "sine=frequency=220:sample_rate=48000:duration=0.4", "-af", "volume=0.01",
             str(music)], check=True, capture_output=True)
         config = self.root / "config.json"
-        packager.atomic(config, {"schema": packager.SCHEMA, "subtitle_font": "w8", "outputs": [{"plan_id": "P1",
-            "input_path": str(self.source), "subtitle_txt": str(subtitles),
+        packager.atomic(config, {"schema": packager.SCHEMA, "outputs": [{"plan_id": "P1",
+            "input_path": str(self.source), "subtitle_txt": str(subtitles), "subtitle_design": presentation(subtitles),
             "bgm": {"path": str(music), "gain_db": -18}}]})
         row = packager.render_one(packager.prepared_rows(config)[0], self.root / "packaged")
         self.assertEqual(100, row["output_spec"]["frames"])
@@ -104,13 +118,12 @@ class FinalSpeedTests(unittest.TestCase):
         subprocess.run([str(packager.FFMPEG), "-v", "error", "-y", "-f", "lavfi", "-i",
                         "sine=frequency=220:sample_rate=48000:duration=0.4", "-af", "volume=0.01",
                         str(music)], check=True, capture_output=True)
-        packager.atomic(config, {"schema": packager.SCHEMA, "subtitle_font": "w8", "subtitle_flower_texts": ["无尽冬日", "冰雪世界"],
+        packager.atomic(config, {"schema": packager.SCHEMA,
                                  "outputs": [{"plan_id": "FLOWER",
-            "input_path": str(self.source), "subtitle_txt": str(subtitles), "subtitle_flower_seed": 4,
+            "input_path": str(self.source), "subtitle_txt": str(subtitles), "subtitle_design": presentation(subtitles, ["ice1", "ice2"]), "subtitle_flower_seed": 4,
             "bgm": {"path": str(music), "gain_db": -18}}]})
         row = packager.render_one(packager.prepared_rows(config)[0], self.root / "flower-packaged")
-        self.assertEqual(["ice1", "ice2"], [item["style_id"] for item in row["flower_choices"]])
-        self.assertEqual(["无尽冬日", "冰雪世界"], [item["text"] for item in row["flower_choices"]])
+        self.assertEqual(["ice1", "ice2"], [c["spans"][0]["flower"] for c in row["design"]["cues"][:2]])
         self.assertEqual(4, row["subtitle_flower_seed"])
         self.assertEqual(100, row["output_spec"]["frames"])
         # Evaluate frames before, during and after each effect, including an empty gap.

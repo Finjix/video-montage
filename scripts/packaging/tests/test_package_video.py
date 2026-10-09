@@ -57,6 +57,14 @@ class PackagingContractTests(unittest.TestCase):
         self.write_config()
 
     def write_config(self):
+        try:
+            cues = packaging.parse_srt(self.srt, 1000)
+        except ValueError:
+            cues = []
+        self.row["subtitle_design"] = {"subtitle_sha256": packaging.sha(self.srt), "font": "w8", "game_names": [],
+            "game_flower": "ice2", "reason": "Test reviewed explicit layout",
+            "cues": [{"index": i, "text": c["text"], "color": "yellow", "entrance": {"effect": "none"}}
+                     for i, c in enumerate(cues, 1)]}
         self.config.write_text(json.dumps({"schema": packaging.SCHEMA, "outputs": [self.row]}, ensure_ascii=False), encoding="utf-8")
 
     def prepare(self):
@@ -71,7 +79,7 @@ class PackagingContractTests(unittest.TestCase):
             target = packaging.delivery_category(root, "video") / f"{row['plan_id']}.mp4"
             target.write_bytes(b"packaged video")
             return {"plan_id": row["plan_id"], "input": row["input"],
-                    "output_path": str(target), "output_sha256": packaging.sha(target),
+                    "input_frames": 60, "output_path": str(target), "output_sha256": packaging.sha(target),
                     "subtitles": row["subtitles"], "text_pins": row["text_pins"]}
 
         with patch.object(packaging, "video_spec", return_value=self.spec), \
@@ -89,7 +97,7 @@ class PackagingContractTests(unittest.TestCase):
             packaging.ensure_delivery_layout(first)
             self.assertEqual("用户保留的说明", marker.read_text(encoding="utf-8"))
             edited = first / "字幕" / "subtitle-P1.txt"
-            edited.write_text("1\n00:00:00,000 --> 00:00:00,900\n新字幕\n", encoding="utf-8")
+            edited.write_text("1\n00:00:00,000 --> 00:00:00,900\n已修订字幕\n", encoding="utf-8")
             self.video.unlink()  # Reburn must use the delivered clean copy.
             previous_hash = packaging.sha(manifest)
             second = first
@@ -343,19 +351,31 @@ class PackagingContractTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "subtitle_flower_texts"):
                 packaging.subtitle_style({"subtitle_flower_texts": texts}, self.root)
 
-    def test_missing_or_changed_subtitle_font_is_rejected(self):
-        value = {"schema": packaging.SCHEMA, "subtitle_font_path": "missing.otf", "outputs": [self.row]}
-        self.config.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
-        with self.assertRaises(FileNotFoundError):
+    def test_missing_design_old_subtitle_alias_and_changed_font_are_rejected(self):
+        self.row.pop("subtitle_design")
+        packaging.atomic(self.config, {"schema": packaging.SCHEMA, "outputs": [self.row]})
+        with self.assertRaisesRegex(ValueError, "requires subtitle_design"):
             self.prepare()
-        other = self.root / "other.otf"
-        other.write_bytes(b"different font")
-        value["subtitle_font_path"] = other.name
-        self.config.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
+        self.write_config()
+        self.row["subtitle_srt"] = self.row.pop("subtitle_txt")
+        packaging.atomic(self.config, {"schema": packaging.SCHEMA, "outputs": [self.row]})
+        with self.assertRaisesRegex(ValueError, "subtitle_srt is no longer supported"):
+            self.prepare()
+        self.row["subtitle_txt"] = self.row.pop("subtitle_srt")
+        self.write_config()
+        self.font.write_bytes(b"changed font")
         with self.assertRaisesRegex(ValueError, "SHA-256"):
             self.prepare()
-        other.write_bytes(self.font.read_bytes())
-        self.assertEqual(str(other), self.prepare()[0]["subtitle_style"]["font"]["path"])
+
+    def test_retired_random_font_and_flower_fields_are_rejected(self):
+        for key in ("subtitle_font", "subtitle_font_path", "subtitle_flower", "subtitle_flower_scope", "subtitle_flower_texts"):
+            for in_output in (False, True):
+                with self.subTest(key=key, in_output=in_output):
+                    value = {"schema": packaging.SCHEMA, "outputs": [dict(self.row)]}
+                    (value["outputs"][0] if in_output else value)[key] = "random"
+                    packaging.atomic(self.config, value)
+                    with self.assertRaisesRegex(ValueError, "legacy font/flower"):
+                        self.prepare()
 
     def test_overlong_cue_is_rejected_and_multiple_lines_are_sequential(self):
         self.srt.write_text("1\n00:00:00,000 --> 00:00:00,900\n" + "中" * 15 + "\n", encoding="utf-8")
@@ -416,7 +436,7 @@ class PackagingContractTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "did not select"):
             packaging.require_subtitle_font("fontselect: (WenYue XinQingNianTi J W8, 400, 0) -> ArialMT, 0, ArialMT")
 
-    def test_real_font_burn_matches_reference_geometry(self):
+    def test_real_font_burn_matches_design_geometry(self):
         real_font = packaging.ROOT / "assets/packaging/fonts/WenYue-XinQingNianTi-W8.otf"
         self.assertTrue(real_font.is_file())
         self.assertEqual(REFERENCE_FONT_SHA256, packaging.sha(real_font))
@@ -450,8 +470,8 @@ class PackagingContractTests(unittest.TestCase):
         right, bottom = max(x for x, _ in yellow), max(y for _, y in yellow)
         self.assertLessEqual(abs((left + right) / 2 - 720), 5)
         self.assertLessEqual(abs((top + bottom) / 2 - 1768), 5)
-        self.assertTrue(442 <= right - left + 1 <= 475)
-        self.assertTrue(92 <= bottom - top + 1 <= 109)
+        self.assertTrue(630 <= right - left + 1 <= 650)
+        self.assertTrue(130 <= bottom - top + 1 <= 145)
 
     def test_render_keeps_subtitle_as_named_txt(self):
         output = self.root / "rendered"
@@ -491,29 +511,17 @@ class PackagingContractTests(unittest.TestCase):
                 packaging.render(self.config, output, output / "subtitles" / "subtitle-P1.txt")
             encode.assert_not_called()
 
-    def test_reburn_uses_edited_srt_and_new_config(self):
+    def test_reburn_requires_review_when_text_changes(self):
         previous = self.root / "previous.json"
-        old_srt = self.root / "old-subtitle.txt"
-        old_srt.write_text("1\n00:00:00,000 --> 00:00:00,900\n旧字幕\n", encoding="utf-8")
         packaging.atomic(previous, {"schema": "video-montage-packaging-delivery/v1",
-                                    "subtitle_style": {"font": {"path": str(self.root / "old-external.otf"),
-                                                                "sha256": packaging.sha(self.font)}},
-                                    "results": [{"plan_id": "P1", "input": {"path": str(self.video), "sha256": packaging.sha(self.video)},
-                                                 "subtitle_snapshot": {"path": str(old_srt), "sha256": packaging.sha(old_srt)},
-                                                 "nameplate": None, "text_pins": [], "disclaimer": None, "bgm": None}]})
-        output = self.root / "new"
-        manifest = output / "packaging_manifest.json"
-        with patch.object(packaging, "render", return_value={"schema": "video-montage-packaging-delivery/v1"}) as mock_render:
-            result = packaging.reburn(previous, "P1", self.srt, output, manifest)
-        config = json.loads((output / "config" / "reburn_config.json").read_text(encoding="utf-8"))
-        self.assertEqual(str(self.srt), config["outputs"][0]["subtitle_txt"])
-        self.assertEqual(packaging.sha(self.srt), config["outputs"][0]["subtitle_sha256"])
-        self.assertEqual(str(self.video), config["outputs"][0]["input_path"])
-        self.assertNotIn("subtitle_font_path", config)
-        self.assertEqual(str(self.font), packaging.subtitle_style(config, output)["font"]["path"])
-        self.assertEqual((output / "config" / "reburn_config.json", output, manifest, None, None), mock_render.call_args.args)
-        self.assertEqual(packaging.sha(previous), result["reburn_source"]["manifest_sha256"])
-        self.assertTrue(mock_render.call_args.kwargs["overwrite"])
+            "config_snapshot_path": str(self.config), "config_snapshot_sha256": packaging.sha(self.config),
+            "results": [{"plan_id": "P1", "input": {"path": str(self.video), "sha256": packaging.sha(self.video)},
+                         "input_frames": 60, "subtitle_snapshot": {"path": str(self.srt), "sha256": packaging.sha(self.srt)}}]})
+        edited = self.root / "edited.txt"
+        edited.write_text("1\n00:00:00,000 --> 00:00:00,900\n新字幕\n", encoding="utf-8")
+        with patch.object(packaging, "render") as render, self.assertRaisesRegex(ValueError, "revise retained subtitle_design"):
+            packaging.reburn(previous, "P1", edited, self.root / "new", self.root / "new/manifest.json")
+        render.assert_not_called()
 
     def test_failed_overwrite_encoding_preserves_existing_video(self):
         row = self.prepare()[0]
@@ -521,7 +529,7 @@ class PackagingContractTests(unittest.TestCase):
         output = self.root / "work" / "自动化混剪_20260930_153000_123456"
         packaging.ensure_delivery_layout(output)
         target = output / "成片" / "P1.mp4"; target.write_bytes(b"previous complete video")
-        with patch.object(packaging, "run", side_effect=RuntimeError("encoder failed")) as encode:
+        with patch.object(packaging.design_renderer, "prepare_track", return_value={"path": "track.ffconcat", "y": 1500, "record": {}}), patch.object(packaging, "run", side_effect=RuntimeError("encoder failed")) as encode:
             with self.assertRaisesRegex(RuntimeError, "encoder failed"):
                 packaging.render_one(row, output)
         self.assertEqual(output / "临时文件", encode.call_args.kwargs["cwd"])
@@ -531,18 +539,18 @@ class PackagingContractTests(unittest.TestCase):
         self.assertFalse((output / "临时文件" / "P1.partial.mp4").exists())
         self.assertFalse((output / "临时文件" / "P1.ass").exists())
 
-    def test_reburn_old_manifest_uses_new_default_style(self):
+    def test_reburn_old_manifest_is_rejected(self):
         previous = self.root / "old-manifest.json"
-        packaging.atomic(previous, {"schema": "video-montage-packaging-delivery/v1",
-                                    "results": [{"plan_id": "P1", "input": {"path": str(self.video), "sha256": packaging.sha(self.video)},
-                                                 "subtitle_snapshot": {"path": str(self.srt), "sha256": packaging.sha(self.srt)},
-                                                 "nameplate": None, "text_pins": [], "disclaimer": None, "bgm": None}]})
-        output = self.root / "old-reburn"
-        with patch.object(packaging, "render", return_value={"schema": "video-montage-packaging-delivery/v1"}):
-            packaging.reburn(previous, "P1", self.srt, output, output / "manifest.json")
-        config = packaging.read(output / "config" / "reburn_config.json")
-        self.assertNotIn("subtitle_font_path", config)
-        self.assertEqual(str(self.font), packaging.subtitle_style(config, output)["font"]["path"])
+        record = {"schema": "video-montage-packaging-delivery/v1", "results": [{"plan_id": "P1"}]}
+        packaging.atomic(previous, record)
+        with self.assertRaisesRegex(ValueError, "design configuration snapshot"):
+            packaging.reburn(previous, "P1", self.srt, self.root / "new", self.root / "new/manifest.json")
+        self.row.pop("subtitle_design")
+        packaging.atomic(self.config, {"schema": packaging.SCHEMA, "outputs": [self.row]})
+        record.update(config_snapshot_path=str(self.config), config_snapshot_sha256=packaging.sha(self.config))
+        packaging.atomic(previous, record)
+        with self.assertRaisesRegex(ValueError, "legacy configurations are unsupported"):
+            packaging.reburn(previous, "P1", self.srt, self.root / "new", self.root / "new/manifest.json")
 
     def test_changed_config_or_source_invalidates_receipt(self):
         output = self.root / "out"

@@ -66,7 +66,7 @@ def stars(reference,base,distance,geometry):
 
 
 def refine(frames,output):
-    parameters=read_json(LAB/'parameters/ice_drift.json')
+    parameters=read_json(LAB.parents[1] / 'assets/packaging/animations/parameters/ice_drift.json')
     origin,shape=(560,2120),(480,860)
     analysis=ROOT/'work/subtitle-animation-calibration/motion'
     for n,reference in enumerate(decode(LAB/'references/ice_drift.mp4',(*origin,shape[1],shape[0]))):
@@ -76,7 +76,7 @@ def refine(frames,output):
         geometry=item['geometry'];text=REFERENCE_TEXT[:min(4,n//7+1)]
         distance=signed_distance(glyph_alpha(text,geometry,shape))
         base=shade_light(distance,item['shader'])
-        static=read_json(LAB/'parameters/static.json')['shader']
+        static=read_json(LAB.parents[1] / 'assets/packaging/animations/parameters/static.json')['shader']
         settling=[0.]*len(text)
         # Once the flash passes a glyph, restore its original opaque face/stroke.
         # Calibration selects only a scalar opacity, never a reference glyph image.

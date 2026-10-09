@@ -63,10 +63,29 @@ or extra audio without that request. Packaging uses a validated clean video to
 create a separate output and preserves the clean video. Read the
 [packaging workflow](references/packaging/workflow.md) for configuration and
 reburn commands. Subtitles burn into the picture only. Each new packaging task
-randomly selects one of WenYue W8, Smiley Sans (得意黑) or FangTang (方糖体)
-from `assets/packaging/fonts`, using it throughout the batch and preserving the
-selection for reburns. All three fonts support the dynamic flower styles;
-ordinary subtitles remain yellow with a black outline.
+uses a Codex-authored design for each video: choose its main font from WenYue
+W8, Smiley Sans (得意黑) or FangTang (方糖体), keep ordinary text primarily yellow
+with white support, and use complete flower text for every actual game name.
+Only editor font sizes 8, 9 and 10 are allowed: ordinary text defaults to 8;
+game names and special emphasis use 9 or 10. Ordinary yellow/white text uses
+the calibrated CapCut black outline 40 (12.3px at 1440 width, text scale 164%),
+independent of font and size. Flower outlines/glows retain the existing effect
+without an additional ordinary stroke. Never use layout.size or shrink
+long text; wrap up to two lines or revise the reviewed subtitle segmentation.
+After subtitle review, read [AI packaging design](references/packaging/design.md),
+inspect the effect catalog and relevant previews, then write `subtitle_design`
+with `graphic_layers` omitted or empty. Select only existing installed library
+resources. Codex judges suitability, emphasis and effect density; it must not
+create temporary effects, animations, shaders, flower styles or decorative assets.
+If none fits, use static subtitles. Only choose documented controls such as
+verified text, main font, yellow/white color, size 8/9/10, layout and duration;
+do not invent effect parameters or change calibrated implementations.
+Use the existing ice1/ice2/fire1 flowers
+and bounce_up/shout_wave/ice_drift entrances, or static/short fade; keep ordinary
+narration readable and mostly static. Do not add decorative cards or the removed
+reference-derived text templates. Review actual final motion and composition,
+providing `design_pass` and a concrete `design_reason`. Old configurations without design
+fields are rejected; every packaging and reburn configuration requires an explicit design.
 Without packaging, use `clean-qc`, `final-evidence --clean` and `complete` with
 a fresh final visual review. For packaged delivery, use the subtitle and
 packaging stages before final evidence and completion.

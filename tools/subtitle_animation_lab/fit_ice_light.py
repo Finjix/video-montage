@@ -14,12 +14,12 @@ from renderer import paint_particle
 
 
 def fit(frames=None, iterations=90, spacing=20):
-    static = read_json(LAB / "parameters/static.json")
+    static = read_json(LAB.parents[1] / 'assets/packaging/animations/parameters/static.json')
     prior = expanded_ice_shader(static["shader"], True)
     origin, shape = (560, 2120), (480, 860)
     geometry = {**static["geometry"], "x": static["origin"][0] + static["geometry"]["x"] - origin[0],
                 "y": static["origin"][1] + static["geometry"]["y"] - origin[1]}
-    path = LAB / "parameters/ice_drift.json"
+    path = LAB.parents[1] / 'assets/packaging/animations/parameters/ice_drift.json'
     result = read_json(path) if path.exists() else {"schema": "subtitle-animation-motion/v1", "effect": "ice_drift",
            "fps": FPS, "frames": [{"visible": False}] * 30, "calibration_scores": [0.] * 30}
     result.update({"model": "contour_light", "seed": 0, "reference_sha256": sha(LAB / "references/ice_drift.mp4"),
@@ -66,7 +66,7 @@ def fit(frames=None, iterations=90, spacing=20):
                 best = score, gain, image
         score, gain, image = best
         particles = [{**p, "rgb": (np.asarray(p["rgb"]) * gain).tolist()} for p in candidates] if gain else []
-        meta = freeze(shader, LAB / "parameters", f"ice-light-{n:02}.npz")
+        meta = freeze(shader, LAB.parents[1] / "assets/packaging/animations/parameters", f"ice-light-{n:02}.npz")
         result["frames"][n] = {"visible": True, "geometry": frame_geometry, "drift_x": drift, "shader": meta, "particles": particles}
         result["calibration_scores"][n] = score
         result["calibration_entry_mean"] = float(np.mean(result["calibration_scores"]))

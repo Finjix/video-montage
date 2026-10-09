@@ -22,6 +22,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from delivery_files import publish_files
 import flower_effects
 import subtitle_fonts
+import packaging_design
+import design_renderer
 FFMPEG = ROOT / "assets/dependencies/ffmpeg/bin/ffmpeg.exe"
 FFPROBE = ROOT / "assets/dependencies/ffmpeg/bin/ffprobe.exe"
 MODEL_ROOT = ROOT / "assets/dependencies/models"
@@ -86,12 +88,12 @@ SUBTITLE_FONT_SHA256 = "20b03dfe8dc982a19946726fe4acf156f9bb8b45adae8aac22a4a359
 SUBTITLE_FONT_FAMILY = "WenYue XinQingNianTi J W8"
 SUBTITLE_FONT_POSTSCRIPT = "WenYue_XinQingNianTi_J-W8"
 SUBTITLE_REFERENCE = {"canvas_width": 1920, "canvas_height": 3414, "font_size": 8, "scale_percent": 164,
-                      "color": "#FFDE00", "outline_color": "#000000", "outline_width": 40, "y": -1300}
+                      "color": "#FFDE00", "outline_color": "#000000", "outline_width": subtitle_fonts.EDITOR_OUTLINE_WIDTH, "y": -1300}
 # Preserve the calibrated CapCut font/stroke conversion, applying its text scale.
 # CapCut Y is upward-positive and uses twice the reference canvas pixel offset.
 SUBTITLE_ASS = {"play_res_x": 1920, "play_res_y": 3414,
                 "font_size": round(187 / 12 * SUBTITLE_REFERENCE["font_size"] * SUBTITLE_REFERENCE["scale_percent"] / 100),
-                "outline": 10 * SUBTITLE_REFERENCE["scale_percent"] / 100,
+                "outline": SUBTITLE_REFERENCE["outline_width"] / 4 * SUBTITLE_REFERENCE["scale_percent"] / 100,
                 "alignment": 5, "position_x": 960,
                 "position_y": (SUBTITLE_REFERENCE["canvas_height"] - SUBTITLE_REFERENCE["y"]) // 2}
 SUBTITLE_EMPHASIS = {
@@ -162,13 +164,12 @@ def subtitle_output(output_dir: Path, plan_id: str) -> Path:
 def relocated_config(config_path: Path, rows: list[dict], snapshots: list[Path], target: Path) -> dict:
     """Keep a copied config usable after moving it into the output directory."""
     config = read(config_path)
-    config["subtitle_font"] = rows[0]["subtitle_style"]["font_id"]
-    config["subtitle_font_path"] = rows[0]["subtitle_style"]["font"]["path"]
     for original, prepared, subtitle in zip(config["outputs"], rows, snapshots):
         original["input_path"] = prepared["input"]["path"]
         original["subtitle_flower_seed"] = prepared["subtitle_flower_seed"]
-        subtitle_key = "subtitle_txt" if original.get("subtitle_txt") else "subtitle_srt"
-        original[subtitle_key] = os.path.relpath(subtitle, target.parent)
+        original["subtitle_design"] = {key: value for key, value in prepared["subtitle_design"].items() if key != "graphic_layers"}
+        original["graphic_layers"] = []
+        original["subtitle_txt"] = os.path.relpath(subtitle, target.parent)
         for key in ("nameplate", "disclaimer", "bgm"):
             if prepared[key]:
                 original[key]["path"] = prepared[key]["path"]
@@ -563,12 +564,28 @@ def require_subtitle_font(log: str, style: dict | None = None) -> None:
     subtitle_fonts.require_selected(log, style["font_family"], style["font_postscript"])
 
 
-def prepared_rows(config_path: Path, expected_inputs: dict[str, str] | None = None) -> list[dict]:
-    config = read(config_path)
+def require_design_config(config: dict) -> None:
     if config.get("schema") != SCHEMA or not isinstance(config.get("outputs"), list) or not config["outputs"]:
         raise ValueError(f"{SCHEMA} with nonempty outputs required")
+    retired = {"subtitle_font", "subtitle_font_path", "subtitle_flower", "subtitle_flower_scope", "subtitle_flower_texts"}
+    for item in [config, *config["outputs"]]:
+        if not isinstance(item, dict):
+            raise ValueError("packaging output must be an object")
+        if retired.intersection(item):
+            raise ValueError("legacy font/flower configuration fields are unsupported; use subtitle_design")
+    for row in config["outputs"]:
+        if "subtitle_srt" in row:
+            raise ValueError("subtitle_srt is no longer supported; use subtitle_txt and subtitle_design")
+        if not isinstance(row.get("subtitle_design"), dict):
+            raise ValueError("every packaging output requires subtitle_design; legacy configurations are unsupported")
+        if not isinstance(row.get("subtitle_txt"), str) or not row["subtitle_txt"]:
+            raise ValueError("every packaging output requires subtitle_txt")
+
+
+def prepared_rows(config_path: Path, expected_inputs: dict[str, str] | None = None) -> list[dict]:
+    config = read(config_path)
+    require_design_config(config)
     base = config_path.resolve().parent
-    style = subtitle_style(config, base)
     rows = []
     for row in config["outputs"]:
         plan_id = row.get("plan_id")
@@ -580,16 +597,18 @@ def prepared_rows(config_path: Path, expected_inputs: dict[str, str] | None = No
         spec = video_spec(Path(source["path"]))
         if (spec["width"], spec["height"]) != (1440, 2560):
             raise ValueError("clean video must be 1440x2560")
-        if row.get("subtitle_txt") and row.get("subtitle_srt"):
-            raise ValueError("choose one subtitle file")
-        subtitles = resolve_file(base, row.get("subtitle_txt") or row.get("subtitle_srt"), row.get("subtitle_sha256"))
+        subtitles = resolve_file(base, row.get("subtitle_txt"), row.get("subtitle_sha256"))
         cues = parse_srt(Path(subtitles["path"]), round(spec["duration"] * 1000))
-        seed = row.get("subtitle_flower_seed", secrets.randbits(64))
+        design = packaging_design.prepare(row["subtitle_design"], cues, subtitles["sha256"],
+                                           row.get("graphic_layers", []), base, spec["frames"])
+        style = subtitle_style({"subtitle_font": design["font"]}, base)
+        seed = row.get("subtitle_flower_seed", 0)
         if type(seed) is not int or not 0 <= seed < 2 ** 64:
             raise ValueError("subtitle_flower_seed must be an unsigned 64-bit integer")
         prepared = {"plan_id": plan_id, "input": source, "spec": spec, "subtitles": {**subtitles, "cue_count": len(cues)}, "cues": cues,
                     "subtitle_flower_seed": seed,
-                    "subtitle_style": style,
+                    "subtitle_style": style, "subtitle_design": design,
+                    "graphic_layers": design["graphic_layers"],
                     "nameplate": None, "text_pins": [], "disclaimer": None, "bgm": None}
         if row.get("nameplate"):
             item = row["nameplate"]
@@ -621,8 +640,7 @@ def render_one(row: dict, output_dir: Path) -> dict:
     output_dir = delivery_category(output_dir, "video")
     output = output_dir / f"{plan_id}.mp4"
     partial = temporary_dir / f"{plan_id}.partial.mp4"
-    ass = temporary_dir / f"{plan_id}.ass"
-    if partial.exists() or ass.exists() or (output.exists() and not row.get("_overwrite", False)):
+    if partial.exists() or (output.exists() and not row.get("_overwrite", False)):
         raise FileExistsError(f"refusing overwrite: {output}")
     output_dir.mkdir(parents=True, exist_ok=True)
     temporary_dir.mkdir(parents=True, exist_ok=True)
@@ -632,10 +650,10 @@ def render_one(row: dict, output_dir: Path) -> dict:
             shutil.copyfile(row["subtitle_style"]["font"]["path"], local_font)
             if sha(local_font) != row["subtitle_style"]["font"]["sha256"]:
                 raise ValueError("subtitle font changed before rendering")
-            occurrences = write_ass(ass, row["cues"], row["subtitle_style"], flower_seed=row["subtitle_flower_seed"])
-            encoding = flower_effects.video_encoding([item["style_id"] for item in occurrences])
-            track = flower_effects.prepare_track(FFMPEG, Path(font_directory), ass, occurrences, row["subtitle_style"],
-                                                 Path(font_directory), round(row["spec"]["duration"] * 1000))
+            track = design_renderer.prepare_track(Path(font_directory), row["cues"], row["subtitle_design"],
+                                                  row["subtitle_style"]["font"]["path"], row["spec"]["frames"])
+            styles = [span["flower"] for cue in row["subtitle_design"]["cues"] for span in cue["spans"] if span.get("flower")]
+            encoding = flower_effects.video_encoding(styles)
             command = [str(FFMPEG), "-hide_banner", "-loglevel", "verbose", "-nostdin", "-y", "-i", row["input"]["path"]]
             filters = []
             current = "[0:v]"
@@ -654,8 +672,6 @@ def render_one(row: dict, output_dir: Path) -> dict:
                 filters.append(f"{current}[layer{index}]overlay=0:0:format=auto{enable}[{label}]")
                 current = f"[{label}]"
                 index += 1
-            filters.append(f"{current}ass=filename={ass.name}:fontsdir={Path(font_directory).name}[captioned]")
-            current = "[captioned]"
             if track:
                 command += ["-f", "concat", "-safe", "0", "-i", track["path"]]
                 filters.append(f"[{index}:v]fps=60:round=up,format=rgba[flowers]")
@@ -675,7 +691,6 @@ def render_one(row: dict, output_dir: Path) -> dict:
                         "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
                         "-t", f"{frames / 60:.6f}", "-movflags", "+faststart", str(partial)]
             completed = run(command, cwd=temporary_dir)
-            require_subtitle_font(completed.stderr, row["subtitle_style"])
             spec = video_spec(partial)
             if (spec["frames"] != frames or (spec["width"], spec["height"]) != (1440, 2560)
                     or spec["video_codec"] != "h264" or spec["audio_codec"] != "aac" or not packaged_streams_ok(spec)):
@@ -684,13 +699,13 @@ def render_one(row: dict, output_dir: Path) -> dict:
     except Exception:
         partial.unlink(missing_ok=True)
         raise
-    finally:
-        ass.unlink(missing_ok=True)
     return {"plan_id": plan_id, "input": row["input"], "input_frames": row["spec"]["frames"],
             "final_speed": FINAL_SPEED, "output_frames": frames, "output_path": str(output.resolve()),
             "output_sha256": sha(output), "output_spec": spec, "subtitles": row["subtitles"],
             "nameplate": row["nameplate"], "text_pins": row["text_pins"], "disclaimer": row["disclaimer"], "bgm": row["bgm"],
-            "subtitle_flower_seed": row["subtitle_flower_seed"], "flower_choices": track["choices"] if track else [],
+            "subtitle_flower_seed": row["subtitle_flower_seed"], "flower_choices": track.get("choices", []) if track else [],
+            "subtitle_style": row["subtitle_style"],
+            "design": track["record"],
             "video_encoding": encoding}
 
 
@@ -816,6 +831,11 @@ def reburn(previous_manifest_path: Path, plan_id: str, subtitle_txt: Path, outpu
         raise ValueError(f"unknown plan ID in previous packaging: {plan_id}")
     previous_sha256 = sha(previous_manifest_path)
     edited = resolve_file(Path.cwd(), str(subtitle_txt))
+    snapshot = Path(str(previous.get("config_snapshot_path") or ""))
+    if not snapshot.is_file() or sha(snapshot) != previous.get("config_snapshot_sha256"):
+        raise ValueError("hash-bound design configuration snapshot required for reburn")
+    old_config = read(snapshot)
+    require_design_config(old_config)
     rows = []
     for old in results:
         selected = old["plan_id"] == plan_id
@@ -825,27 +845,23 @@ def reburn(previous_manifest_path: Path, plan_id: str, subtitle_txt: Path, outpu
                "subtitle_sha256": subtitle["sha256"]}
         if "subtitle_flower_seed" in old:
             row["subtitle_flower_seed"] = old["subtitle_flower_seed"]
+        old_row = next((r for r in old_config.get("outputs", []) if r["plan_id"] == old["plan_id"]), {})
+        if not isinstance(old_row.get("subtitle_design"), dict):
+            raise ValueError("reburn requires subtitle_design for every output")
+        source_cues = parse_srt(Path(subtitle["path"]), round(old["input_frames"] / 60 * 1000))
+        row["subtitle_design"] = packaging_design.refresh(old_row["subtitle_design"], source_cues, subtitle["sha256"])
+        row["graphic_layers"] = []
+        if row["subtitle_design"].get("needs_design_review"):
+            raise ValueError("subtitle text changed; revise retained subtitle_design before rendering through render/package")
         for key in ("nameplate", "disclaimer", "bgm"):
             if old.get(key):
                 row[key] = old[key]
         if old.get("text_pins"):
             row["text_pins"] = old["text_pins"]
         rows.append(row)
-    previous_font = (previous.get("subtitle_style") or {}).get("font")
-    # An old external path may have moved; recover the same bundled font by hash.
-    font_id = subtitle_fonts.by_hash(previous_font["sha256"])[0] if previous_font else None
     output_dir.mkdir(parents=True, exist_ok=True)
     config_path = delivery_category(output_dir, "config") / "reburn_config.json"
     config = {"schema": SCHEMA, "outputs": rows}
-    if font_id is not None:
-        config["subtitle_font"] = font_id
-    previous_emphasis = (previous.get("subtitle_style") or {}).get("emphasis", {})
-    if previous_emphasis.get("selection") in flower_effects.MODES:
-        config["subtitle_flower"] = previous_emphasis["selection"]
-    if previous_emphasis.get("texts"):
-        config["subtitle_flower_texts"] = previous_emphasis["texts"]
-    if previous_emphasis.get("scope") in ("keywords", "all"):
-        config["subtitle_flower_scope"] = previous_emphasis["scope"]
     atomic(config_path, config)
     delivery = Path(previous["clean_delivery_path"]) if previous.get("clean_delivery_path") else None
     controller = Path(previous["controller_validation_path"]) if previous.get("controller_validation_path") else None
@@ -989,6 +1005,12 @@ def validate(manifest_path: Path, report_path: Path, review_path: Path | None = 
                         if not path.is_file() or sha(path) != frame.get("sha256"):
                             failures.append(f"autonomous_frame:{pid}")
                             break
+                    if item.get("design"):
+                        indices = {frame.get("frame") for frame in measured.get("frames", [])}
+                        required = packaging_design.evidence_frames(item["design"], delivery_speed(item), item["output_frames"])
+                        if (measured.get("design") != item["design"] or measured.get("design_required") is not True
+                                or not set(required).issubset(indices)):
+                            failures.append(f"autonomous_design_evidence:{pid}")
     if manifest.get("schema") != "video-montage-packaging-delivery/v1":
         failures.append("schema")
     style = manifest.get("subtitle_style")
@@ -1082,6 +1104,17 @@ def validate(manifest_path: Path, report_path: Path, review_path: Path | None = 
                 changes.append(f"decode:{exc}")
                 audio = None
         finding = reviews.get(plan_id) or auto_findings.get(plan_id)
+        if row.get("subtitle_style"):
+            font = row["subtitle_style"]["font"]
+            if not Path(font["path"]).is_file() or sha(Path(font["path"])) != font["sha256"]:
+                changes.append("subtitle_font_changed")
+        if row.get("design"):
+            for resource in row["design"].get("resources", []):
+                path = Path(resource["path"])
+                if not path.is_file() or sha(path) != resource["sha256"]:
+                    changes.append("design_resource_changed")
+            if (review is not None or automatic is not None) and not packaging_design.review_ok(row["design"], finding):
+                changes.append("design_review")
         if review is not None and (not finding or finding.get("output_sha256") != row.get("output_sha256")
                                    or finding.get("visual_pass") is not True or finding.get("audio_pass") is not True
                                    or finding.get("subtitle_pass") is not True or finding.get("overlay_pass") is not True):

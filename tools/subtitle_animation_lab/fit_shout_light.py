@@ -12,8 +12,8 @@ from fit_motion import expanded_ice_shader
 
 
 def fit(frames):
-    static=read_json(LAB/'parameters/static.json')
-    parameters=read_json(LAB/'parameters/shout_wave.json')
+    static=read_json(LAB.parents[1] / 'assets/packaging/animations/parameters/static.json')
+    parameters=read_json(LAB.parents[1] / 'assets/packaging/animations/parameters/shout_wave.json')
     sprite=text_sprite(REFERENCE_TEXT)
     origin,shape=(420,2130),(460,1080)
     scales={10:1.066,11:1.066,12:1.066,13:1.064,14:1.044,15:1.021}
@@ -45,11 +45,11 @@ def fit(frames):
         score=foreground_ssim(ref,generated)
         print(f'Shout contour light {n:02}: {score:.6f}',flush=True)
         if score>parameters['calibration_scores'][n]:
-            metadata=freeze(shader,LAB/'parameters',f'shout-light-{n:02}.npz')
+            metadata=freeze(shader,LAB.parents[1] / 'assets/packaging/animations/parameters',f'shout-light-{n:02}.npz')
             parameters['frames'][n]={'model':'surface','geometry':geometry,'shader':metadata,'layers':layers,'echo_occlusion':True}
             parameters['calibration_scores'][n]=score
             parameters['calibration_entry_mean']=float(np.mean(parameters['calibration_scores']))
-            write_json(LAB/'parameters/shout_wave.json',parameters)
+            write_json(LAB.parents[1] / 'assets/packaging/animations/parameters/shout_wave.json',parameters)
         cv2.imwrite(str(analysis/f'shout-light-{n:02}.png'),cv2.cvtColor(np.hstack([ref,generated]),cv2.COLOR_RGB2BGR))
 
 

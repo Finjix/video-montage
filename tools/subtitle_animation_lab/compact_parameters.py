@@ -7,7 +7,7 @@ from common import LAB,read_json,write_json,sha
 
 
 def compact():
-    path=LAB/'parameters/shout_wave.json';parameters=read_json(path)
+    path=LAB.parents[1] / 'assets/packaging/animations/parameters/shout_wave.json';parameters=read_json(path)
     for n,item in enumerate(parameters['frames']):
         shader=item.get('shader',{})
         if 'rgb' not in shader:continue

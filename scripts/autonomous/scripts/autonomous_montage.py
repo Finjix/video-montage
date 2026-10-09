@@ -548,6 +548,7 @@ def init(args) -> None:
                "asset_root": str(asset), "output_root": str(output), "delivery_directory": str(output),
                "repair_delivery_policy": "overwrite", "delivery_layout": "chinese/v1", "records_policy": "delivery-temporary/v1",
                "temporary_root": str(output / "临时文件"), "repair_round": 0,
+               "packaging_design_policy": "codex/v1",
                "max_repair_rounds": MAX_ROUNDS, "continue_until_complete": True}, "initialized")
     print(json.dumps({"job_dir": str(job), "delivery_directory": str(output)}, ensure_ascii=False))
 
@@ -1099,9 +1100,11 @@ def subtitle_review(args) -> None:
         by_id = {row["plan_id"]: row for row in revised}
         for row in config["outputs"]:
             subtitle = by_id[row["plan_id"]]["subtitle"]
-            row.pop("subtitle_srt", None)
             row["subtitle_txt"] = subtitle["path"]
             row["subtitle_sha256"] = subtitle["sha256"]
+            if row.get("subtitle_design"):
+                cues = packager.parse_srt(Path(subtitle["path"]), round(packager.video_spec(Path(row["input_path"]))["duration"] * 1000))
+                row["subtitle_design"] = packager.packaging_design.refresh(row["subtitle_design"], cues, subtitle["sha256"])
         write(config_path, config)
         value["reburn_config"] = ref(config_path)
     save(job, value, "subtitle_approved")
@@ -1124,6 +1127,16 @@ def package(args) -> None:
         if supplied.resolve() != subtitle or row.get("subtitle_sha256") != sha(subtitle):
             raise ValueError("packaging must use reviewed subtitle hash")
     packager = module("autonomous_packager_render", "scripts/packaging/scripts/package_video.py")
+    if any(not isinstance(row.get("subtitle_design"), dict) for row in config["outputs"]):
+        raise ValueError("every packaging output requires a Codex-authored subtitle_design; legacy configurations are unsupported")
+    clean = read(require_ref(value["clean_delivery"], "clean delivery"))
+    clean_by_id = {row["plan_id"]: row for row in clean["results"]}
+    asset_copy = read(require_ref(value["asset_copy"], "verified asset copy"))
+    order = read(require_ref(value["work_order"], "work order"))
+    for prepared in packager.prepared_rows(args.config.resolve()):
+        if prepared.get("subtitle_design"):
+            packager.packaging_design.verify_sources(prepared["subtitle_design"], prepared["cues"], asset_copy,
+                clean_by_id[prepared["plan_id"]]["expected_text"], json.dumps(order.get("packaging_request", ""), ensure_ascii=False))
     manifest = packager.delivery_category(processing_dir(value), "manifests") / "packaging_manifest.json"
     packager.render(args.config.resolve(), processing_dir(value), manifest,
                     autonomous_clean=require_ref(value["clean_delivery"], "clean delivery"),
@@ -1207,6 +1220,8 @@ def final_evidence(args) -> None:
             cut_positions.append(math.ceil(cumulative / speed))
         for cut in cut_positions:
             frame_numbers.extend(range(max(0, cut - 72), min(output_frames, cut + 72)))
+        if row.get("design"):
+            frame_numbers += packager.packaging_design.evidence_frames(row["design"], speed, output_frames)
         frame_numbers += [0, output_frames - 1]
         visual = frames(output, frame_numbers, job / f"attempt-{value['repair_round'] + 1:02d}" / "evidence" / "packaged_frames" / pid)
         decision = ((asr_match or speech_preserved) and subtitle_timing_pass and metrics["clipped_samples"] == 0
@@ -1219,6 +1234,8 @@ def final_evidence(args) -> None:
                      "speech_preserved": speech_preserved, "mix_evidence": mix_evidence,
                      "metrics": metrics, "cut_pcm": cut_metrics, "voice_over_bgm_db": bgm_db, "frames": visual,
                      "subtitle_cue_count": len(cues), "subtitle_timing_pass": subtitle_timing_pass,
+                     "design_required": bool(row.get("design")),
+                     **({"design": row["design"]} if row.get("design") else {}),
                      "decision": "pass" if decision else "reject"})
     report = job / "reports" / "final_evidence.json"
     write(report, {"schema": "video-montage-autonomous-final-evidence/v260929", "manifest": ref(manifest_path),
@@ -1342,6 +1359,7 @@ def reburn(args) -> None:
                        "clean_delivery": value["clean_delivery"], "asset_copy": value["asset_copy"], "results": drafts})
     value["subtitle_draft"] = ref(draft_path)
     config = read(Path(previous["config_snapshot_path"]))
+    packager.require_design_config(config)
     if sha(Path(previous["config_snapshot_path"])) != previous["config_snapshot_sha256"]:
         raise ValueError("reburn configuration changed")
     config_path = pending / "临时文件" / "config" / "reburn_config.json"
@@ -1433,6 +1451,12 @@ def publish_delivery(job: Path, value: dict) -> list[dict]:
             copies.append((Path(old["output_path"]), Path(row["output_path"])))
             copies.append((Path(old["subtitle_snapshot"]["path"]), Path(row["subtitle_snapshot"]["path"])))
         original_config = Path(packaged["config_snapshot_path"])
+        # Retain task-created artwork with the same atomic batch publication.
+        assets = original_config.parent / "assets"
+        if assets.exists():
+            for asset in assets.rglob("*"):
+                if asset.is_file():
+                    copies.append((asset, Path(relocate(str(asset)))))
         config_path = staging / "packaging_config.json"
         write(config_path, relocate(read(original_config)))
         config_target = Path(final["config_snapshot_path"])
@@ -1517,7 +1541,8 @@ def complete(args) -> None:
         finding = by_id[row["plan_id"]]
         required_passes = ("visual_pass",) if value.get("delivery_mode") == "clean" else ("visual_pass", "subtitle_pass", "overlay_pass")
         if (finding.get("output_sha256") != row["output"]["sha256"]
-                or any(finding.get(key) is not True for key in required_passes) or not finding.get("reason")):
+                or any(finding.get(key) is not True for key in required_passes) or not finding.get("reason")
+                or (row.get("design_required") and not module("design_review_gate", "scripts/packaging/scripts/package_video.py").packaging_design.review_ok(row.get("design"), finding))):
             fail_round(job, value, "codex_final_review", [f"{row['plan_id']}: incomplete visual finding"])
         require_ref(row["output"], "packaged output")
         for frame in row["frames"]:
@@ -1630,7 +1655,7 @@ def compact_delivery(job: Path, value: dict) -> None:
     retained = {key: value[key] for key in (
         "schema", "review_mode", "work_order", "source_hashes", "asset_root", "output_root",
         "delivery_directory", "repair_delivery_policy", "delivery_layout", "records_policy",
-        "temporary_root", "repair_round", "max_repair_rounds", "continue_until_complete",
+        "temporary_root", "repair_round", "max_repair_rounds", "continue_until_complete", "packaging_design_policy",
         "continuation_authorization") if key in value}
     retained.update(phase="complete", compact_delivery=True)
     retained["delivery_mode"] = value.get("delivery_mode", "packaged")

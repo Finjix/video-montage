@@ -9,7 +9,7 @@ from renderer import text_sprite,vertical_blur,place
 
 
 def refine():
-    p=read_json(LAB/'parameters/bounce_up.json');item=p['frames'][4]
+    p=read_json(LAB.parents[1] / 'assets/packaging/animations/parameters/bounce_up.json');item=p['frames'][4]
     sprite=text_sprite(REFERENCE_TEXT);length,center,radius=1024,352,128
     source=np.zeros((length,730,3),np.float64);source[center:center+320]=sprite.rgb
     origin=round(sprite.y+item['dy']);crop_y=origin-center
@@ -40,7 +40,7 @@ def refine():
     if best[0]>p['calibration_scores'][4]:
         p['frames'][4]['kernels']=best[1].T.round(7).tolist();p['calibration_scores'][4]=best[0]
         p['calibration_entry_mean']=float(np.mean(p['calibration_scores']))
-        write_json(LAB/'parameters/bounce_up.json',p)
+        write_json(LAB.parents[1] / 'assets/packaging/animations/parameters/bounce_up.json',p)
 
 
 if __name__=='__main__':cv2.setNumThreads(2);refine()

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -116,7 +118,11 @@ class InstallationTests(unittest.TestCase):
         required = ("assets/dependencies/python/python.exe", "scripts/verify_runtime.py", "scripts/validate_skill.py",
                     "scripts/autonomous/scripts/autonomous_montage.py", "references/autonomous/workflow.md",
                     "assets/packaging/fonts/style.otf", "references/semantic/semantic-contract.md",
-                    "references/workflows/autonomous-workflow.md", "agents/openai.yaml")
+                    "references/workflows/autonomous-workflow.md", "agents/openai.yaml",
+                    "scripts/packaging/scripts/design_renderer.py", "scripts/packaging/scripts/reference_animation.py",
+                    "scripts/packaging/scripts/animation_shader.py", "references/packaging/design.md",
+                    "assets/packaging/design/catalog.json", "assets/packaging/design/previews/bounce_up.png",
+                    "assets/packaging/animations/parameters/static.json", "assets/packaging/animations/parameters/shout-light-00.npz")
         for name in (*excluded, *required):
             path = self.source / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -322,6 +328,47 @@ class DocumentationTests(unittest.TestCase):
             content = path.read_text(encoding="utf-8-sig")
             for link in links.findall(content):
                 self.assertTrue((path.parent / link).is_file(), f"Broken Markdown link in {path}: {link}")
+
+
+class InstalledPackagingTests(unittest.TestCase):
+    def test_production_effects_work_without_development_tools(self):
+        deployer = load_deployer()
+        with tempfile.TemporaryDirectory(prefix="installed-packaging-") as temporary:
+            stage = Path(temporary) / "skill"
+            for relative in ("scripts/packaging", "assets/packaging", "assets/dependencies/ffmpeg/bin"):
+                shutil.copytree(ROOT / relative, stage / relative,
+                                ignore=lambda directory, names: deployer.copy_filter(directory, names, ROOT))
+            self.assertFalse((stage / "tools").exists())
+            self.assertFalse((stage / "scripts/packaging/tests").exists())
+            # Run in a fresh interpreter so no module can resolve back to the repo.
+            script = '''
+import json, sys
+from pathlib import Path
+root=Path(sys.argv[1])
+sys.path.insert(0,str(root/'scripts/packaging/scripts'))
+import packaging_design as d, design_renderer as r, subtitle_fonts as f
+from reference_animation import Animation
+results=[]
+for effect in ('bounce_up','shout_wave','ice_drift'):
+    frame=Animation(effect,'冰雪世界').canonical_frame(10)
+    assert frame.shape == (3414,1920,3) and frame.max() > 0
+    results.append(effect)
+for font in f.FONTS:
+    image=r.text_sprite('来无尽冬日吧',f.FONTS[font]['path'],120,spans=[{'start':1,'end':5,'flower':'ice2'}])
+    assert image.getbbox() and image.mode == 'RGBA'
+assert d.TEMPLATES == ()
+for effect in d.ENTRANCES:
+    image=r.text_sprite('冰雪世界',f.FONTS['smiley']['path'],120)
+    event={'sprite':image,'entrance':{'effect':effect},'entrance_frames':18,'start_frame':0,
+           'base_x':300,'base_y':1400,'cx':720,'cy':1766}
+    assert r.paint_event(event,10)[0].mode == 'RGBA'
+assert d.ROOT == root and all(Path(s['path']).is_relative_to(root) for s in f.FONTS.values())
+print(json.dumps({'calibrated':results,'fonts':list(f.FONTS),'entrances':list(d.ENTRANCES)}))
+'''
+            process = subprocess.run([str(ROOT / "assets/dependencies/python/python.exe"), "-B", "-X", "utf8", "-c", script, str(stage)],
+                                     capture_output=True, text=True, encoding="utf-8", cwd=stage)
+            self.assertEqual(0, process.returncode, process.stderr[-3000:])
+            self.assertEqual(3, len(json.loads(process.stdout)["calibrated"]))
 
 
 if __name__ == "__main__":

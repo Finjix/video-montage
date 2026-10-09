@@ -20,6 +20,8 @@ Codex 在同一个任务中完成语义与画面判断，不委派独立代理�
 
 ## 阶段
 
+字幕审核后、`package` 前阅读 [AI 包装设计](../packaging/design.md)，结合实际镜头、素材文案和效果预览编写逐视频 `subtitle_design` （`graphic_layers` 省略或为空）。新初始化的任务要求每条包装输出有设计方案，AI只选择和搭配现成效果，不临时生成新效果或装饰素材；没有合适效果时静态呈现。主字体按视频选择，普通文字黄主白辅，实际游戏名完整花字，叙述保留静态阅读段。程序核对字幕哈希与游戏名来源，并增加动画过程取证；最终审核增加 `design_pass` 与具体 `design_reason`。所有包装与重烧均要求设计字段；纯净交付继续直接走无包装流程。
+
 整批选片先执行[多样化规则](batch-diversity.md)：Codex 从不同可用开场和内容路线提出完整候选，运行 `diversify-plan --options <候选计划 JSON> --plan <选定计划 JSON>`，再进入阶段 3 的 `plan-evidence`。优先分散开头，其次分散整条组合、中段与结尾；素材有限时均衡复用以满足请求数量，适用于三条及四五十条批次，不设固定复用上限。每次计划取证自动生成绑定计划哈希的整批重复报告，计划审核增加 `diversity_reason` 说明变化及必要复用；完成回执保留报告。多样性报告不批准质量，不豁免任何语义、切点或成片检查。
 
 1. `init --work-order <JSON>`，程序返回 `work/自动化混剪_xx/临时文件/` 的任务路径，然后 `prepare --job-dir <返回的任务路径>`。也可显式传入符合该结构的 `--job-dir`。工作单使用 `video-montage-autonomous-work-order/v260929`，包含 `requested_outputs`、`sources: [{"path": "原片绝对路径", "sha256": "可选校验值"}]`、`asset_root` ，可选 `output_root` 必须指向项目的 `work` 目录，省略时自动使用项目 `work`。`prepare` 对每条原片重新转写，记录原生帧率、源哈希、说明文字和图片哈希。

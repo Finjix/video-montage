@@ -44,45 +44,26 @@ class FontSelectionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "different fonts"):
             packaging.subtitle_style({"subtitle_font": "w8", "subtitle_font_path": subtitle_fonts.FONTS["smiley"]["path"]}, self.root)
 
-    def test_random_font_is_chosen_once_for_batch_and_frozen_in_snapshot(self):
-        source = self.root / "source.mp4"
-        source.write_bytes(b"clean video")
+    def test_per_output_font_is_explicit_and_frozen_in_snapshot(self):
+        source = self.root / "source.mp4"; source.write_bytes(b"clean video")
         subtitles = self.root / "subtitle.txt"
         subtitles.write_text("1\n00:00:00,000 --> 00:00:00,800\n无尽冬日\n", encoding="utf-8")
         config = self.root / "config.json"
         packaging.atomic(config, {"schema": packaging.SCHEMA, "outputs": [
-            {"plan_id": key, "input_path": str(source), "subtitle_txt": str(subtitles)} for key in ("P1", "P2")]})
-        for key in subtitle_fonts.FONTS:
-            with self.subTest(font=key), patch.object(subtitle_fonts.secrets, "choice", return_value=key) as choice, \
-                    patch.object(packaging, "video_spec", return_value={"frames": 60, "duration": 1.0, "width": 1440, "height": 2560}):
-                rows = packaging.prepared_rows(config)
-                choice.assert_called_once_with(("w8", "smiley", "fangtang"))
-                self.assertEqual([key, key], [r["subtitle_style"]["font_id"] for r in rows])
-                snapshots = [subtitles, subtitles]
-                snapshot = self.root / "frozen.json"
-                packaging.atomic(snapshot, packaging.relocated_config(config, rows, snapshots, snapshot))
-                choice.reset_mock()
-                reopened = packaging.prepared_rows(snapshot)
-                choice.assert_not_called()
-                self.assertEqual([key, key], [r["subtitle_style"]["font_id"] for r in reopened])
-
-    def test_reburn_keeps_each_font_when_original_external_font_is_missing(self):
-        subtitle = self.root / "subtitle.txt"
-        subtitle.write_text("1\n00:00:00,000 --> 00:00:00,800\n冰雪世界\n", encoding="utf-8")
-        for key, spec in subtitle_fonts.FONTS.items():
-            previous = self.root / f"previous-{key}.json"
-            packaging.atomic(previous, {"schema": "video-montage-packaging-delivery/v1",
-                "subtitle_style": {"font": {"path": "missing-external.otf", "sha256": spec["sha256"]}},
-                "results": [{"plan_id": "P1", "input": {"path": "clean.mp4", "sha256": "source"},
-                             "subtitle_snapshot": {"path": str(subtitle), "sha256": packaging.sha(subtitle)}}]})
-            output = self.root / key
-            with patch.object(packaging, "render", return_value={}), patch.object(subtitle_fonts.secrets, "choice") as choice:
-                packaging.reburn(previous, "P1", subtitle, output, output / "manifest.json")
-                config = packaging.read(output / "config/reburn_config.json")
-                self.assertEqual(key, config["subtitle_font"])
-                style = packaging.subtitle_style(config, output)
-                choice.assert_not_called()
-                self.assertEqual(spec["sha256"], style["font"]["sha256"])
+            {"plan_id": key, "input_path": str(source), "subtitle_txt": str(subtitles),
+             "subtitle_design": {"font": key, "subtitle_sha256": packaging.sha(subtitles), "game_names": ["无尽冬日"],
+                 "reason": "Test explicit per-video font", "cues": [{"index": 1, "text": "无尽冬日"}]}}
+            for key in subtitle_fonts.FONTS]})
+        with patch.object(subtitle_fonts.secrets, "choice") as choice, patch.object(packaging, "video_spec",
+                return_value={"frames": 60, "duration": 1.0, "width": 1440, "height": 2560}):
+            rows = packaging.prepared_rows(config)
+            self.assertEqual(list(subtitle_fonts.FONTS), [r["subtitle_style"]["font_id"] for r in rows])
+            snapshot = self.root / "frozen.json"
+            packaging.atomic(snapshot, packaging.relocated_config(config, rows, [subtitles]*3, snapshot))
+            self.assertNotIn("subtitle_font", packaging.read(snapshot))
+            reopened = packaging.prepared_rows(snapshot)
+            self.assertEqual(list(subtitle_fonts.FONTS), [r["subtitle_style"]["font_id"] for r in reopened])
+            choice.assert_not_called()
 
     def test_fallback_is_rejected_for_every_font(self):
         for spec in subtitle_fonts.FONTS.values():
@@ -139,15 +120,11 @@ class NewFontBurnTests(unittest.TestCase):
                     subtitles = directory / "subtitle.txt"
                     subtitles.write_text("1\n00:00:00,000 --> 00:00:00,250\n玩无尽冬日啊\n\n"
                                          "2\n00:00:00,300 --> 00:00:00,600\n冰雪世界ABCxyz\n", encoding="utf-8")
-                    config = directory / "config.json"
-                    packaging.atomic(config, {"schema": packaging.SCHEMA, "subtitle_font": key,
-                        "subtitle_flower": effect, "subtitle_flower_texts": ["无尽冬日", "冰雪世界ABCxyz"],
-                        "outputs": [{"plan_id": "P1", "input_path": str(self.source), "subtitle_txt": str(subtitles),
-                                     "subtitle_flower_seed": 4}]})
-                    row = packaging.prepared_rows(config)[0]
-                    style = row["subtitle_style"]
+                    cues = packaging.parse_srt(subtitles, 600)
+                    style = packaging.subtitle_style({"subtitle_font": key, "subtitle_flower": effect,
+                        "subtitle_flower_texts": ["无尽冬日", "冰雪世界ABCxyz"]}, directory)
                     ass = directory / "main.ass"
-                    occurrences = packaging.write_ass(ass, row["cues"], style)
+                    occurrences = packaging.write_ass(ass, cues, style)
                     track = packaging.flower_effects.prepare_track(packaging.FFMPEG, directory, ass, occurrences, style, fonts, 600)
                     (directory / "ordinary.ass").write_text(ass.read_text(encoding="utf-8-sig").replace("&H00000000", "&H00FFFFFF"), encoding="utf-8-sig")
                     packaging.run([str(packaging.FFMPEG), "-v", "error", "-y", "-f", "lavfi", "-i",
@@ -160,13 +137,25 @@ class NewFontBurnTests(unittest.TestCase):
                     flower[track["y"]:track["y"] + alpha.shape[0]] = alpha
                     distance = cv2.distanceTransform((~ordinary).astype(np.uint8), cv2.DIST_L2, cv2.DIST_MASK_PRECISE)
                     self.assertGreaterEqual(float(distance[flower].min()), 8)
-                    result = packaging.render_one(row, directory / "video")
+                    config = directory / "config.json"
+                    settings = []
+                    for i, cue in enumerate(cues, 1):
+                        word = "无尽冬日" if i == 1 else "冰雪世界ABCxyz"
+                        start = cue["text"].index(word)
+                        settings.append({"index": i, "text": cue["text"], "spans": [
+                            {"start": start, "end": start + len(word), "flower": effect}]})
+                    packaging.atomic(config, {"schema": packaging.SCHEMA, "outputs": [{"plan_id": "P1",
+                        "input_path": str(self.source), "subtitle_txt": str(subtitles),
+                        "subtitle_design": {"font": key, "subtitle_sha256": packaging.sha(subtitles), "game_names": ["无尽冬日"],
+                            "reason": "Test mixed fonts and explicit flower ranges", "cues": settings}}]})
+                    result = packaging.render_one(packaging.prepared_rows(config)[0], directory / "video")
                     self.assertEqual(30, result["output_frames"])
-                    self.assertEqual(["无尽冬日", "冰雪世界ABCxyz"], [c["text"] for c in result["flower_choices"]])
+                    self.assertEqual([effect, effect], [c["spans"][0]["flower"] for c in result["design"]["cues"]])
                     frame = directory / "decoded.png"
                     packaging.run([str(packaging.FFMPEG), "-v", "error", "-y", "-i", result["output_path"], "-frames:v", "1", str(frame)])
                     pixels = cv2.imread(str(frame))
-                    x, y, w, h = result["flower_choices"][0]["bounds"]
+                    x, y, right, bottom = result["design"]["events"][0]["bounds"]
+                    w, h = right-x, bottom-y
                     self.assertGreater(int(pixels[y:y+h, x:x+w].max()), 180)
                     sprite, bounds = packaging.flower_effects.dynamic_flowers.render_text("ABCxyz冰雪世界", style["emphasis"]["effects"][effect], style["font"]["path"])
                     self.assertEqual((0, 255), sprite.getchannel("A").getextrema())

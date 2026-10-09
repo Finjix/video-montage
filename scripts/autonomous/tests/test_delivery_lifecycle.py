@@ -91,7 +91,7 @@ class DeliveryLifecycleTests(unittest.TestCase):
         auto.write(review, {"schema": auto.REVIEW_SCHEMA, "stage": "final", "reviewer_role": "codex",
             "evidence_sha256": value["final_evidence"]["sha256"], "outputs": [{"plan_id": "P1",
                 "output_sha256": evidence["results"][0]["output"]["sha256"], "visual_pass": True,
-                "subtitle_pass": True, "overlay_pass": True, "reason": "Test fixture", **changes}]})
+                "subtitle_pass": True, "overlay_pass": True, "design_pass": True, "design_reason": "Test explicit static layout", "reason": "Test fixture", **changes}]})
         return review
 
     def approve_subtitle(self, job):
@@ -146,7 +146,9 @@ class DeliveryLifecycleTests(unittest.TestCase):
         config = job / "initial_config.json"
         auto.write(config, {"schema": packager.SCHEMA, "outputs": [{"plan_id": "P1",
             "input_path": clean_row["output"]["path"], "input_sha256": clean_row["output"]["sha256"],
-            "subtitle_txt": str(subtitle), "subtitle_sha256": auto.sha(subtitle)}]})
+            "subtitle_txt": str(subtitle), "subtitle_sha256": auto.sha(subtitle),
+            "subtitle_design": {"font": "w8", "subtitle_sha256": auto.sha(subtitle), "game_names": [],
+                "reason": "Test explicit static packaging", "cues": [{"index": 1, "text": "口播"}]}}]})
         auto.package(SimpleNamespace(job_dir=job, config=config))
         self.assertEqual(b"previous video", (delivery / "成片" / "P1.mp4").read_bytes())
         with patch.object(auto, "load_model"), patch.object(auto, "transcribe", return_value=asr):
@@ -178,6 +180,54 @@ class DeliveryLifecycleTests(unittest.TestCase):
         self.assertEqual("complete", auto.state(job)["phase"])
         self.assertEqual(1, auto.state(job)["repair_round"])
         self.assertEqual(50, packager.video_spec(delivery / "成片" / "P1.mp4")["frames"])
+
+    def test_enhanced_delivery_requires_design_review_and_preserves_subtitles_for_reburn(self):
+        job, delivery, pending, asr, packager = self.fixture()
+        subtitle = pending / "字幕" / "subtitle-P1.txt"
+        subtitle.write_text("1\n00:00:00,100 --> 00:00:00,800\n口播\n", encoding="utf-8")
+        snapshot = job / "evidence" / "draft.txt"
+        shutil.copyfile(subtitle, snapshot)
+        value = auto.state(job)
+        clean_row = auto.read(Path(value["clean_delivery"]["path"]))["results"][0]
+        draft = job / "reports" / "subtitle_draft.json"
+        auto.write(draft, {"results": [{"plan_id": "P1", "input_path": clean_row["output"]["path"],
+            "subtitle_txt_path": str(snapshot), "subtitle_txt_sha256": auto.sha(snapshot)}]})
+        value["subtitle_draft"] = auto.ref(draft)
+        value["packaging_design_policy"] = "codex/v1"
+        auto.save(job, value, "subtitle_drafted")
+        self.approve_subtitle(job)
+        config = job / "initial-config.json"
+        auto.write(config, {"schema": packager.SCHEMA, "outputs": [{"plan_id": "P1",
+            "input_path": clean_row["output"]["path"], "input_sha256": clean_row["output"]["sha256"],
+            "subtitle_txt": str(subtitle), "subtitle_sha256": auto.sha(subtitle),
+            "subtitle_design": {"subtitle_sha256": auto.sha(subtitle), "font": "smiley", "game_names": [],
+                "reason": "短叙述保留静态黄字，不加装饰卡片。", "cues": [{"index": 1, "text": "口播", "color": "yellow"}]},
+            "graphic_layers": []}]})
+        legacy_config = auto.read(config)
+        legacy_config["outputs"][0].pop("subtitle_design")
+        legacy_config["outputs"][0].pop("graphic_layers")
+        legacy_path = job / "legacy-config.json"
+        auto.write(legacy_path, legacy_config)
+        with self.assertRaisesRegex(ValueError, "Codex-authored"):
+            auto.package(SimpleNamespace(job_dir=job, config=legacy_path))
+        auto.package(SimpleNamespace(job_dir=job, config=config))
+        with patch.object(auto, "load_model"), patch.object(auto, "transcribe", return_value=asr):
+            auto.final_evidence(SimpleNamespace(job_dir=job))
+        with self.assertRaisesRegex(RuntimeError, "incomplete visual finding"):
+            auto.complete(SimpleNamespace(job_dir=job, review=self.final_review(job, design_pass=False)))
+        # Reuse the actual unchanged evidence after the deliberately rejected review.
+        value = auto.state(job)
+        auto.save(job, value, "final_evidenced")
+        auto.complete(SimpleNamespace(job_dir=job, review=self.final_review(job, design_pass=True, design_reason="文字清楚，没有装饰卡片，叙述稳定。")))
+        value = auto.state(job)
+        self.assertTrue(value["compact_delivery"])
+        manifest = auto.read(Path(value["reburn_inputs"]["packaging_delivery"]["path"]))
+        retained = auto.read(Path(manifest["config_snapshot_path"]))
+        self.assertEqual([], retained["outputs"][0]["graphic_layers"])
+        self.assertEqual("technical_pass_pending_review", packager.validate(Path(value["reburn_inputs"]["packaging_delivery"]["path"]), job / "reports" / "check.json")["decision"])
+        auto.reburn(SimpleNamespace(job_dir=job, plan_id="P1", subtitle_txt=delivery / "字幕" / "subtitle-P1.txt"))
+        self.approve_subtitle(job)
+        auto.package(SimpleNamespace(job_dir=job, config=Path(auto.state(job)["reburn_config"]["path"])))
 
     def test_publication_failure_rolls_back_previously_replaced_files(self):
         helper = auto.module("lifecycle_delivery_files", "scripts/packaging/scripts/delivery_files.py")

@@ -41,17 +41,37 @@ def video_roundtrip(packaging, reference: np.ndarray, directory: Path, style_id:
     subtitles = directory / "subtitle.txt"
     subtitles.write_text("1\n00:00:00,000 --> 00:00:00,900\n无尽冬日\n", encoding="utf-8")
     config = directory / "config.json"
-    packaging.atomic(config, {"schema": packaging.SCHEMA, "subtitle_flower": style_id, "subtitle_font": "w8",
-                              "outputs": [{"plan_id": "comparison", "input_path": str(source),
-                                           "subtitle_txt": str(subtitles), "subtitle_flower_seed": 0}]})
+    from PIL import ImageFont, Image
+    size = 173
+    packaging.atomic(config, {"schema": packaging.SCHEMA, "outputs": [{"plan_id": "comparison",
+        "input_path": str(source), "subtitle_txt": str(subtitles),
+        "subtitle_design": {"font": "w8", "subtitle_sha256": packaging.sha(subtitles), "game_names": ["无尽冬日"],
+            "game_flower": style_id, "reason": "Static reference comparison",
+            "cues": [{"index": 1, "text": "无尽冬日", "font_size": 9}]}}]})
     result = packaging.render_one(packaging.prepared_rows(config)[0], directory / "video")
-    x, y, width, height = result["flower_choices"][0]["bounds"]
+    x, y, right, bottom = result["design"]["events"][0]["bounds"]
+    width, height = right - x, bottom - y
     frame = directory / "decoded.png"
     packaging.run([str(packaging.FFMPEG), "-v", "error", "-y", "-i", result["output_path"],
                    "-vf", f"select=eq(n\\,20),format=rgb24,crop={width}:{height}:{x}:{y}",
                    "-frames:v", "1", str(frame)])
     decoded = cv2.imread(str(frame))
-    restored = cv2.resize(decoded, (reference.shape[1], reference.shape[0]), interpolation=cv2.INTER_AREA)
+    # Undo the exact production glyph transform, including Lanczos bearings and
+    # pixel centers, rather than stretching the tight alpha crop to the canvas.
+    dynamic = packaging.flower_effects.dynamic_flowers
+    spec = packaging.flower_effects.effect_styles()["styles"][style_id]
+    font_path = packaging.subtitle_fonts.FONTS["w8"]["path"]
+    sprite, face = dynamic.render_text("无尽冬日", spec, font_path)
+    box = ImageFont.truetype(font_path, size).getbbox("无尽冬日", anchor="ls")
+    ratio = (box[2]-box[0])/(face[2]-face[0])
+    enlarged = sprite.resize((round(sprite.width*ratio), round(sprite.height*ratio)), Image.Resampling.LANCZOS)
+    left, top, _, _ = enlarged.getbbox()
+    rx, ry = enlarged.width/sprite.width, enlarged.height/sprite.height
+    parameters = dynamic.parameters(spec)
+    gx, gy, _, _ = dynamic.text_extents("无尽冬日", parameters["shader"]["geometry"], font_path)
+    dx, dy = max(0, 18-gx), max(0, 18-gy)
+    restored = cv2.warpAffine(decoded, np.array([[1/rx, 0., (left+.5)/rx-.5-dx],
+        [0., 1/ry, (top+.5)/ry-.5-dy]]), (reference.shape[1], reference.shape[0]), flags=cv2.INTER_LINEAR)
     cv2.imwrite(str(directory / "video-roundtrip.png"), restored)
     return foreground_ssim(reference, restored), result["video_encoding"]
 

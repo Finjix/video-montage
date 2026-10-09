@@ -1,5 +1,7 @@
 # 成片包装
 
+字幕审核后按 [AI 包装设计](design.md)制定逐视频方案，明确主字体、黄白配色、整词游戏名花字与既有入场动画，只选择已有资源和文档参数，不临时创造效果、动画、花字或装饰素材；没有合适效果时静态呈现。所有 `render`、`package`、`reburn` 配置均要求每条输出有 `subtitle_design`，不再回退到固定黄字、每批随机字体或随机冰字；不读取 `subtitle_srt` 旧字段。
+
 最终成品输出前，在字幕、图层和音频混合完成后执行一次整片 **1.2 倍速**，再对加速后的成品取证、审核和交付。画面与完整混音同步加速，音频保持原音调，字幕及图层随画面同步；最终时长为原时长除以 1.2，保持 60 fps。保留未加速的纯净视频及其可编辑字幕、图层时间轴；重新烧录时仍从未加速输入合成，最后只加速一次，不能对上一版倍速成品再次加速。最终检查的字幕、图层和切点时间应换算到倍速后的时间轴，清单及输出哈希绑定实际倍速成品。
 
 新建的 v260929 无人值守任务按[自动混剪流程](../autonomous/workflow.md)执行：
@@ -27,42 +29,30 @@ assets\dependencies\python\python.exe scripts\packaging\scripts\package_video.py
 
 ## 包装配置
 
-配置文件为 UTF-8 JSON。相对素材路径以配置文件所在目录为基准。`outputs` 中每个 `plan_id` 对应一条成片；完整任务必须覆盖纯净交付清单的所有 `plan_id`。`input_sha256` 和素材 `sha256` 可用于提前拒绝被替换的文件；渲染记录总会写入实际哈希。字幕 TXT 可以在生成后编辑；若配置中填写了 `subtitle_sha256`，编辑后须同步更新该值。旧配置的 `subtitle_srt` 字段仍可读取，但新配置应使用 `subtitle_txt`。字幕字体默认在项目内的文悦新青年体 W8、得意黑（`SmileySans-Oblique.otf`）和方糖体（`WenYue-FangTangTi-J-2.otf`）中等概率随机选用一种，三份字体均位于 `assets/packaging/fonts/`。一次任务/批次只选一次，所有输出使用同一种字体；交付配置与清单会保存选中的字体，重新烧录不会重新随机。顶层 `subtitle_font` 可设为 `random`（默认）、`w8`、`smiley` 或 `fangtang`；`subtitle_font_path` 可指定任一内置字体的副本，必须与对应的 SHA-256 一致。两个字段同时指定时必须一致。
+配置文件为 UTF-8 JSON，素材相对路径以配置文件目录为基准。`outputs` 覆盖所有 `plan_id`，每条填写 `input_path`、`subtitle_txt`、已审核字幕哈希和 `subtitle_design`。主字体与花字范围只从逐输出设计中读取；旧顶层或逐输出字体/花字字段直接拒绝，须改写到 `subtitle_design`。设计覆盖全部字幕索引并绑定准确文字。完整配置合同见 [AI 包装设计](design.md)。
 
 ```json
 {
   "schema": "video-montage-packaging/v1",
-  "outputs": [
-    {
-      "plan_id": "demo-01",
-      "input_path": "D:/input.mp4",
-      "subtitle_txt": "../../字幕/subtitle-demo-01.txt",
-      "nameplate": {"path": "assets/nameplate.png"},
-      "text_pins": [
-        {"path": "assets/pin.png", "start_frame": 300, "end_frame_exclusive": 480}
-      ],
-      "disclaimer": {"path": "assets/disclaimer.png"},
-      "bgm": {"path": "assets/music.mp3", "gain_db": -18}
-    }
-  ]
+  "outputs": [{
+    "plan_id": "demo-01",
+    "input_path": "D:/input.mp4",
+    "subtitle_txt": "../../字幕/subtitle-demo-01.txt",
+    "subtitle_sha256": "审核后的字幕SHA-256",
+    "subtitle_design": {
+      "subtitle_sha256": "审核后的字幕SHA-256",
+      "font": "w8", "game_names": ["无尽冬日"], "game_flower": "ice2",
+      "reason": "厚实字形，黄字主叙述，完整游戏名冰字，静态便于阅读。",
+      "cues": [{"index": 1, "text": "来玩无尽冬日", "color": "yellow", "entrance": {"effect": "none"}}]
+    },
+    "nameplate": {"path": "assets/nameplate.png"},
+    "disclaimer": {"path": "assets/disclaimer.png"},
+    "bgm": {"path": "assets/music.mp3", "gain_db": -18}
+  }]
 }
 ```
 
-名牌省略区间时显示从第 0 帧到第 192 帧之前；短于 192 帧的视频显示到结尾。免责图覆盖全片。文字钉必须写明起止帧，结束帧不包含在显示区间中。图片作为独立透明图层处理，必须使用包含可见像素和透明区域的 9:16 PNG。BGM 循环到片尾，默认 `-18 dB`，原口播音量不自动减半。字幕使用本任务随机选中的字体、`#FFDE00` 黄字、黑色描边。样式按提供的 1920×3414 剪映参考视频标定为常规字号 8、缩放 164%、描边粗细 40、Y=-1300；字幕里每处“无尽冬日”单独使用字号 9、缩放 164%（对应 ASS 字号 230），默认在冰1、冰2中独立随机选用一种花字，整段显示期间样式固定。其他文字保持字号 8、缩放 164%（ASS 字号 204）的黄字黑描边。包装到 1440×2560 时按画布比例缩放，字幕中心距画面顶端约 1768 像素，水平居中。为保持接近的视觉字高，得意黑的 ASS 字号使用 0.83 倍补偿，方糖体使用 0.98 倍补偿；W8 保持原标定值。字幕每次只显示一行，显示宽度不超过 28 个半角字符单位；自动草稿把过长文字拆成依次出现的单行字幕，手工字幕中超宽的行须修改。字体文件缺失、变更或 FFmpeg 回退到其他字体时，渲染会失败。
-
-原来的青蓝斜纹、多层粉黄描边花字及固定字样图片方案已移除。三套可复用花字为火1（黄橙渐变、黑色内描边、红色外轮廓）、冰1（蓝白冰面、高光、蓝色轮廓）、冰2（白青渐变、细边、紫色光晕）。输入文案的字形、字距、斜体轮廓和字内空洞直接来自本任务选中的字体；三种字体均支持全部三套效果，渲染器按各字体的汉字字高和字面起点对齐渐变，并给斜体字边、英文下伸部分和外光留出足够空间。着色根据字体轮廓的带符号距离、相对字高和边缘法线生成，使用参考图标定的通用数值参数。运行时不读取参考图或固定字样 PNG，也不把“无尽冬日”作为特殊字形处理。参数与仅用于标定、验收的原图在 `assets/packaging/flowers/`；运行不依赖 `D:/` 的外部原图，也无需 SciPy。混排位置由实际 libass 字形掩膜测量，保持等比缩放，并在两侧添加留白；测试要求普通字幕黑描边与花字轮廓至少留出 8 个输出像素。
-
-顶层可选 `subtitle_flower`：`random_ice`（默认，仅冰1/冰2）、`ice1`、`ice2`、`fire1`。火1可以显式选择，默认随机池不包含它。每条输出可选 `subtitle_flower_seed`（0 到 2^64-1 的整数）；未指定时生成随机种子并保存至交付配置及结果清单，同时记录每处花字选择和位置。重新烧录沿用该种子，相同字幕与配置可复现选择。透明花字轨与普通字幕一起先合成，再统一执行最终 1.2 倍速，不按视频帧重新抽样。
-
-默认 `subtitle_flower_scope` 为 `keywords`，`subtitle_flower_texts` 为 `["无尽冬日"]`。要给其他文案添加同款花字，直接更改此列表；长度不限于四个字。多个关键词重叠时优先匹配长词；每处独立选择样式。将 `subtitle_flower_scope` 设为 `all` 可让整行字幕都使用花字，此时无需配置关键词。普通字幕模式、字号与随机冰字默认行为保持一致；只有配置的范围改用花字。过长的行仍需拆分，渲染器拒绝越出画面的花字。
-
-```json
-{
-  "subtitle_flower": "random_ice",
-  "subtitle_flower_scope": "keywords",
-  "subtitle_flower_texts": ["无尽冬日", "冰雪世界", "热血冒险"]
-}
-```
+名牌省略区间时显示前192帧，免责覆盖全片，图片须为含透明区域的9:16 PNG。文字钉仅按明确要求添加，并写明起止帧；装饰卡片不支持。BGM循环到片尾，口播不自动减半。字体为W8、得意黑、方糖体，花字为冰1、冰2、火1。所有选择由设计明确指定，配置与清单保存实际资源哈希；重烧要求原设计快照及哈希，字幕改字或条数改变须重新审查设计，不从旧清单推断字体/花字。
 
 独立生成可换字的透明 PNG：`assets/dependencies/python/python.exe tools/render_subtitle_flower.py --font w8 --text "冰雪世界" --style ice1 --scale 2 --output work/ice-text.png`。同一接口支持单字、较长文案、中英文混排和标点。
 
