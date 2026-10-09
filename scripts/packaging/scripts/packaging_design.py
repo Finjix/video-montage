@@ -16,12 +16,12 @@ COLORS = {"yellow": "#FFDE00", "white": "#FFFFFF"}
 FLOWERS = ("ice1", "ice2", "fire1")
 ENTRANCES = ("none", "fade", "bounce_up", "shout_wave", "ice_drift")
 TEMPLATES = ()
-FONT_SIZES = (8, 9, 10)
+FONT_SIZES = (8, 9)
 
 
 def font_size(value, label="font_size"):
     if type(value) is not int or value not in FONT_SIZES:
-        raise ValueError(f"{label} must be 8, 9 or 10")
+        raise ValueError(f"{label} must be 8 or 9")
     return value
 
 
@@ -44,7 +44,7 @@ def layout(value: dict | None) -> dict:
     if not isinstance(value, dict):
         raise ValueError("layout must be an object")
     if "size" in value:
-        raise ValueError("layout.size has been removed; use font_size 8, 9 or 10")
+        raise ValueError("layout.size has been removed; use font_size 8 or 9")
     return {"x": number(value.get("x", .5), "layout.x", .02, .98),
             "y": number(value.get("y", .69), "layout.y", .02, .98),
             "max_width": number(value.get("max_width", .9), "layout.max_width", .1, .96)}
@@ -83,6 +83,8 @@ def game_spans(text: str, names: list[str], flower: str) -> list[dict]:
 def cue_style(row: dict, cue: dict, names: list[str], default_flower: str, game_size=9) -> dict:
     if not isinstance(row, dict) or row.get("text") != cue["text"]:
         raise ValueError("subtitle design text must match the reviewed cue exactly")
+    if cue["text"].splitlines() != [cue["text"]]:
+        raise ValueError("subtitles must stay on one line; split into sequential captions")
     color = row.get("color", "yellow")
     size = font_size(row.get("font_size", 8))
     if color not in COLORS:
@@ -112,17 +114,15 @@ def cue_style(row: dict, cue: dict, names: list[str], default_flower: str, game_
             game["font_size"] = max(game_size, size)
             spans.append(game)
             chosen_size = game["font_size"]
-        if chosen_size not in (9, 10):
-            raise ValueError("game names must use font_size 9 or 10")
+        if chosen_size != 9:
+            raise ValueError("game names must use font_size 9")
         for span in spans:
             if "font_size" in span and max(span["start"], game["start"]) < min(span["end"], game["end"]):
                 if span["font_size"] != chosen_size:
-                    raise ValueError("a complete game name must use one font_size, 9 or 10")
+                    raise ValueError("a complete game name must use one font_size, 9")
     breaks = row.get("line_breaks", [])
-    if not isinstance(breaks, list) or len(breaks) > 1 or any(type(n) is not int or not 0 < n < len(cue["text"]) for n in breaks):
-        raise ValueError("line_breaks allows one character boundary for a two-line subtitle")
-    if any(s.get("flower") and s["start"] < n < s["end"] for n in breaks for s in spans):
-        raise ValueError("line_breaks must preserve complete game/flower text")
+    if not isinstance(breaks, list) or breaks:
+        raise ValueError("line_breaks is unsupported: subtitles must stay on one line")
     return {**copy.deepcopy(row), "color": color, "font_size": size, "spans": spans, "line_breaks": breaks, "layout": layout(row.get("layout")),
             "entrance": entrance(row.get("entrance"), cue["end_ms"] - cue["start_ms"])}
 
@@ -154,7 +154,7 @@ def prepare(value: dict, cues: list[dict], subtitle_sha256: str, layers: list[di
         raise ValueError("subtitle_design.cues must cover every reviewed cue in order, using 1-based indices")
     game_size = font_size(value.get("game_font_size", 9), "game_font_size")
     if game_size == 8:
-        raise ValueError("game_font_size must be 9 or 10")
+        raise ValueError("game_font_size must be 9")
     styles = [cue_style(row, cue, names, game_flower, game_size) for row, cue in zip(requested, cues)]
     # A split game name cannot satisfy the all-occurrences guarantee.
     for name in names:

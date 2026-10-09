@@ -274,8 +274,11 @@ def subtitle_style(config: dict, base: Path) -> dict:
     emphasis = {**SUBTITLE_EMPHASIS, "selection": mode, "scope": scope, "texts": texts,
                 "effects": flower_effects.effect_styles()["styles"]}
     ass = dict(SUBTITLE_ASS)
-    ass["font_size"] = round(ass["font_size"] * spec["size_scale"])
-    emphasis["ass_font_size"] = round(emphasis["ass_font_size"] * spec["size_scale"])
+    # Historical ASS measurements use libass metrics, distinct from the current
+    # reference-calibrated PIL design. Preserve legacy layout/read compatibility.
+    ass_scale = {"w8": 1.0, "smiley": .83, "fangtang": .98}[font_id]
+    ass["font_size"] = round(ass["font_size"] * ass_scale)
+    emphasis["ass_font_size"] = round(emphasis["ass_font_size"] * ass_scale)
     return {"font": font, "font_id": font_id, "font_label": spec["label"],
             "font_family": spec["family"], "font_postscript": spec["postscript"],
             "capcut_reference": dict(SUBTITLE_REFERENCE), "ass": ass,

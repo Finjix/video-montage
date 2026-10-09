@@ -111,6 +111,25 @@ def coalesce_segments(segments: list[dict]) -> list[dict]:
     return result
 
 
+def segment_output_frames(segment: dict, fps: int = 60) -> int:
+    """Use the same native-frame rounding for planning and actual rendering."""
+    duration = float(Fraction((segment["source_out_frame_exclusive"] - segment["source_in_frame"])
+                              * segment["source_fps_den"], segment["source_fps_num"]))
+    return round(duration / float(segment.get("speed", 1.0)) * fps)
+
+
+def planned_timeline(segments: list[dict], fps: int = 60) -> list[dict]:
+    result = []
+    cursor = 0
+    for segment in coalesce_segments(segments):
+        count = segment_output_frames(segment, fps)
+        result.append({**segment, "output_in_frame": cursor,
+                       "output_out_frame_exclusive": cursor + count,
+                       "expected_output_frames": count})
+        cursor += count
+    return result
+
+
 def render(plan_path: Path, output: Path, evidence: Path, width: int, height: int, fps: int, encoder: str, *, overwrite: bool = False) -> dict:
     plan = load_json(plan_path)
     errors = validate_plan_value(plan)
@@ -147,16 +166,16 @@ def render(plan_path: Path, output: Path, evidence: Path, width: int, height: in
             raise ValueError(f"source fps mismatch for {source}: declared={source_fps}, probed={probed_fps}")
         frame_count = end - start
         nominal_duration = float(Fraction(frame_count * fps_den, fps_num)) / speed
-        segment_output_frames = round(nominal_duration * fps)
-        output_duration = segment_output_frames / fps
-        expected_frames += segment_output_frames
+        output_frame_count = segment_output_frames(segment, fps)
+        output_duration = output_frame_count / fps
+        expected_frames += output_frame_count
         audio_start = float(Fraction(start * fps_den, fps_num))
         audio_end = float(Fraction(end * fps_den, fps_num))
         command.extend(["-i", str(source)])
         filters.append(
             f"[{index}:v]select='between(n\\,{start}\\,{end - 1})',"
             f"setpts=N*{fps_den}/({fps_num}*TB)/{speed:.12f},"
-            f"fps={fps},trim=end_frame={segment_output_frames},setpts=N/({fps}*TB),"
+            f"fps={fps},trim=end_frame={output_frame_count},setpts=N/({fps}*TB),"
             f"scale={width}:{height}:flags=lanczos,setsar=1,format=yuv420p[v{index}]"
         )
         audio = (
@@ -191,7 +210,7 @@ def render(plan_path: Path, output: Path, evidence: Path, width: int, height: in
                 "audio_end_seconds_derived_from_frame": audio_end,
                 "speed": speed,
                 "audio_gain_db": audio_gain_db,
-                "expected_output_frames": segment_output_frames,
+                "expected_output_frames": output_frame_count,
                 "nominal_duration_seconds": nominal_duration,
                 "output_duration_seconds": output_duration,
             }

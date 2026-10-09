@@ -42,7 +42,7 @@ def video_roundtrip(packaging, reference: np.ndarray, directory: Path, style_id:
     subtitles.write_text("1\n00:00:00,000 --> 00:00:00,900\n无尽冬日\n", encoding="utf-8")
     config = directory / "config.json"
     from PIL import ImageFont, Image
-    size = 173
+    size = packaging.subtitle_fonts.pixels("w8", 9)
     packaging.atomic(config, {"schema": packaging.SCHEMA, "outputs": [{"plan_id": "comparison",
         "input_path": str(source), "subtitle_txt": str(subtitles),
         "subtitle_design": {"font": "w8", "subtitle_sha256": packaging.sha(subtitles), "game_names": ["无尽冬日"],

@@ -48,7 +48,9 @@ def outlined_mask(mask: Image.Image, radius: float) -> Image.Image:
 
 
 def text_sprite(text: str, font_path: str, size: int, color="yellow", spans=None, max_width=None, line_breaks=None) -> Image.Image:
-    """Fixed-size glyphs; wrap between characters, keeping flower spans intact."""
+    """Fixed-size, single-line glyphs; resegment long cues before rendering."""
+    if line_breaks or text.splitlines() != [text]:
+        raise ValueError("subtitles must stay on one line; split reviewed cue into sequential captions")
     chars = [{"color": color, "flower": None, "pixels": size} for _ in text]
     for span in spans or []:
         for i in range(span["start"], span["end"]):
@@ -92,20 +94,9 @@ def text_sprite(text: str, font_path: str, size: int, color="yellow", spans=None
         return line, used
 
     complete = line_parts(units)
-    if complete[1] <= limit and not line_breaks:
-        lines = [complete]
-    else:
-        candidates = []
-        for cut in range(1, len(units)):
-            if line_breaks and units[cut][2] != line_breaks[0]:
-                continue
-            first, second = line_parts(units[:cut]), line_parts(units[cut:])
-            if max(first[1], second[1]) <= limit:
-                candidates.append((abs(first[1] - second[1]), first, second))
-        if not candidates:
-            raise ValueError("subtitle cannot fit in two lines at font_size 8/9/10; split reviewed cue or revise layout")
-        _, first, second = min(candidates, key=lambda item: item[0])
-        lines = [first, second]
+    if complete[1] > limit:
+        raise ValueError("subtitle cannot fit on one line at font_size 8/9; split reviewed cue into sequential captions")
+    lines = [complete]
     metrics = []
     for line, width in lines:
         boxes = [fonts[style["pixels"]].getbbox(content, anchor="ls") for content, style, _ in line]
@@ -145,7 +136,7 @@ def fit_sprite(sprite: Image.Image, layout: dict, *, expansion=1.0) -> Image.Ima
     horizontal = 2 * min(layout["x"], 1 - layout["x"]) * WIDTH - 24
     vertical = 2 * min(layout["y"], 1 - layout["y"]) * HEIGHT - 24
     if sprite.width > limit or sprite.width * expansion > horizontal or sprite.height * expansion > vertical:
-        raise ValueError("font_size 8/9/10 cannot fit this layout/motion; revise layout or split subtitle")
+        raise ValueError("font_size 8/9 cannot fit this layout/motion; revise layout or split subtitle")
     return sprite
 
 

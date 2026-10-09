@@ -48,10 +48,10 @@ class DesignTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "split"):
             self.prepare(cues=broken)
 
-    def test_only_editor_sizes_8_9_10_and_complete_game_size_are_allowed(self):
-        for invalid in (7, 11, 8.5, True, "9"):
+    def test_only_two_sizes_and_complete_game_size_are_allowed(self):
+        for invalid in (7, 10, 11, 8.5, True, "9"):
             value = fixture(self.cues); value["cues"][1]["font_size"] = invalid
-            with self.assertRaisesRegex(ValueError, "8, 9 or 10"):
+            with self.assertRaisesRegex(ValueError, "8 or 9"):
                 self.prepare(value)
             value = fixture(self.cues); value["cues"][1]["spans"] = [{"start": 0, "end": 2, "font_size": invalid}]
             with self.assertRaises(ValueError):
@@ -60,10 +60,22 @@ class DesignTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "removed"):
             self.prepare(value)
         value = fixture(self.cues); value["cues"][0]["spans"] = [{"start": 0, "end": 4, "flower": "ice2", "font_size": 8}]
-        with self.assertRaisesRegex(ValueError, "9 or 10"):
+        with self.assertRaisesRegex(ValueError, "font_size 9"):
             self.prepare(value)
         value = fixture(self.cues); value["game_font_size"] = 10
-        self.assertEqual([10, 10], [s["font_size"] for s in self.prepare(value)["cues"][0]["spans"]])
+        with self.assertRaisesRegex(ValueError, "8 or 9"):
+            self.prepare(value)
+
+    def test_reference_glyph_height_and_emphasis_ratio_across_fonts(self):
+        for key, spec in subtitle_fonts.FONTS.items():
+            heights = []
+            for size in (8, 9):
+                font = ImageFont.truetype(spec["path"], subtitle_fonts.pixels(key, size))
+                box = font.getbbox("我才玩一个月这个游戏", anchor="ls")
+                heights.append((box[3] - box[1]) * 1080 / 1440)
+            self.assertTrue(73 <= heights[0] <= 77, (key, heights))
+            self.assertTrue(1.10 <= heights[1] / heights[0] <= 1.16, (key, heights))
+        self.assertEqual(.69, design.layout(None)["y"])
 
     def test_outline_covers_every_glyph_edge_in_three_fonts(self):
         # Independent 3px neighborhood must be opaque around even W8's sharp corners.
@@ -92,10 +104,10 @@ class DesignTests(unittest.TestCase):
                                                  spans=[{"start": 0, "end": 4, "flower": flower}])
                 self.assertIsNotNone(image.getbbox())
 
-    def test_all_three_fixed_sizes_preserve_font_and_span_metrics(self):
+    def test_both_fixed_sizes_preserve_font_and_span_metrics(self):
         for key in subtitle_fonts.FONTS:
             heights = []
-            for size in (8, 9, 10):
+            for size in (8, 9):
                 cue = {"start_ms": 0, "end_ms": 1000, "text": "真带劲"}
                 value = fixture([cue], font=key); value["game_names"] = []
                 value["cues"][0]["font_size"] = size
@@ -107,24 +119,41 @@ class DesignTests(unittest.TestCase):
                 self.assertEqual({"color": "#000000", "editor_width": 40, "radius_pixels": 12.3,
                                   "flower_outline": "existing_effect"}, track["record"]["ordinary_outline"])
                 heights.append(event["settled_size"][1])
-            self.assertTrue(heights[0] < heights[1] < heights[2])
+            self.assertTrue(heights[0] < heights[1])
 
-    def test_long_sentence_wraps_without_changing_selected_size(self):
-        cue = {"start_ms": 0, "end_ms": 2000, "text": "我也是刷着广告才入坑的"}
+    def test_long_sentence_must_be_resegmented_for_single_line_display(self):
+        cue = {"start_ms": 0, "end_ms": 2000, "text": "我也是刷着广告才入坑的现在一直在玩"}
         prepared = self.prepare(cues=[cue], value=fixture([cue], font="w8"))
-        track = renderer.prepare_track(self.root, [cue], prepared, subtitle_fonts.FONTS["w8"]["path"], 120)
-        event = track["record"]["events"][0]
-        self.assertEqual(8, event["editor_font_size"])
-        self.assertEqual(153, event["font_size"])
-        self.assertGreater(event["settled_size"][1], 200)
+        with self.assertRaisesRegex(ValueError, "one line"):
+            renderer.prepare_track(self.root, [cue], prepared, subtitle_fonts.FONTS["w8"]["path"], 120)
+        split = [{"start_ms": 0, "end_ms": 1200, "text": "我也是刷着广告才入坑的"},
+                 {"start_ms": 1200, "end_ms": 2000, "text": "现在一直在玩"}]
+        track = renderer.prepare_track(self.root, split, self.prepare(cues=split, value=fixture(split, font="w8")),
+                                       subtitle_fonts.FONTS["w8"]["path"], 120)
+        for event in track["record"]["events"]:
+            self.assertEqual(8, event["editor_font_size"])
+            self.assertEqual(108, event["font_size"])
+            self.assertLess(event["settled_size"][1], 150)
         with self.assertRaisesRegex(ValueError, "font_size"):
             renderer.fit_sprite(Image.new("RGBA", (2000, 100)), {"x": .5, "y": .69, "max_width": .9})
         value = fixture([cue], font="w8"); value["cues"][0]["line_breaks"] = [7]
-        track = renderer.prepare_track(self.root, [cue], self.prepare(value, cues=[cue]), subtitle_fonts.FONTS["w8"]["path"], 120)
-        self.assertEqual([7], track["record"]["cues"][0]["line_breaks"])
-        value = fixture(self.cues); value["cues"][0]["line_breaks"] = [2]
-        with self.assertRaisesRegex(ValueError, "complete"):
-            self.prepare(value)
+        with self.assertRaisesRegex(ValueError, "one line"):
+            self.prepare(value, cues=[cue])
+
+    def test_explicit_multiline_and_overlong_mixed_flower_text_are_rejected(self):
+        for text in ("来玩\n无尽冬日", "来玩\r\n无尽冬日", "来玩\u2028无尽冬日", "来玩\n", "来玩\r"):
+            cue = {"start_ms": 0, "end_ms": 2000, "text": text}
+            with self.assertRaisesRegex(ValueError, "one line"):
+                self.prepare(cues=[cue])
+            with self.assertRaisesRegex(ValueError, "one line"):
+                renderer.text_sprite(text, subtitle_fonts.FONTS["w8"]["path"], 108)
+        for key in subtitle_fonts.FONTS:
+            for size in (8, 9):
+                text = "现在来玩无尽冬日体验冰雪世界的生存建设"
+                with self.assertRaisesRegex(ValueError, "one line"):
+                    renderer.text_sprite(text, subtitle_fonts.FONTS[key]["path"], subtitle_fonts.pixels(key, size),
+                                         spans=[{"start": 4, "end": 8, "flower": "ice2", "pixels": subtitle_fonts.pixels(key, 9)}],
+                                         max_width=1440 * .92)
 
     def test_stale_binding_incomplete_cues_and_long_entrance_are_rejected(self):
         cases = [fixture(self.cues, "stale"), fixture(self.cues), fixture(self.cues)]

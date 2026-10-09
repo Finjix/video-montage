@@ -14,17 +14,18 @@ receipts under `work/<delivery-name>/临时文件/`. Use the job_dir returned by
 Keep records there throughout the job, alongside necessary render/edit files and
 reusable packaging config; do not create a root-level `.runtime` for new jobs.
 
-For a batch, read [batch diversity](../autonomous/batch-diversity.md).
-Build coherent whole-edit alternatives across usable hooks, narrative routes,
-middle segments and endings, then run `diversify-plan` before `plan-evidence`.
-Minimize opening reuse first, then whole-sequence and source/combination reuse.
-When sources are limited, balance necessary reuse to fill the requested count,
-including batches of 40–50; there are no hard reuse quotas. Never invent capacity,
-shuffle dependent speech, or treat renamed IDs, cut jitter or new packaging as
-new footage. Inspect the hash-bound diversity report and explain remaining reuse
-in the plan review's `diversity_reason`. After rejecting a candidate, rebuild the
-whole batch from the remaining usable alternatives instead of copying one safe
-opening into every output. All normal quality gates still apply.
+Read [semantic-first planning](../autonomous/semantic-planning.md). New jobs and
+full-edit repairs bind `semantic-continuity/v1`. Analyze complete source turns,
+scene context, identities and propositions before composing an edit; require
+grounded adjacent relations and an earned close. Select at natural speed for a
+21.6–36 second clean input and enforce 18–30 seconds after the final 1.2x speed-up.
+Require at least four real visual shots and only the declared protagonist in
+every selected frame; other characters' offscreen dialogue is allowed. Camera
+changes inside a source count when proved by native frames; splitting one
+continuous shot does not. Inspect full-interval frame evidence and submit
+per-transition, per-shot and whole-edit reviews. There is no diversification
+stage or diversity-reason requirement for new plans; coherent material may be
+reused. Historical jobs and subtitle-only reburns retain their original contract.
 
 For requested packaging, after subtitle review read [AI packaging design](../packaging/design.md).
 Choose a main font for each video, write a hash-bound subtitle design without decorative cards, inspect catalog previews, then package. New jobs require these explicit

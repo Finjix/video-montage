@@ -29,14 +29,18 @@ class AutonomousContractTests(unittest.TestCase):
               "words": [{"word": "开局", "start": .1, "end": .6}]}]},
             {"text": "点燃熔炉", "segments": [{"start": 0., "end": 1.4,
               "words": [{"word": "点燃熔炉", "start": 0., "end": 1.4}]}]}]
-        with patch.object(auto, "run"), patch.object(auto, "transcribe", side_effect=observations):
+        def encode(command):
+            Path(command[-1]).write_bytes(b"mock decoded shot audio")
+        with patch.object(auto, "run", side_effect=encode), patch.object(auto, "transcribe", side_effect=observations):
             result = auto.rendered_shot_asr(None, output, rendered, planned, {}, self.root / "shots")
         self.assertEqual(auto.ref(output), result["output"])
         self.assertEqual(1., result["segments"][1]["words"][0]["start"])
         self.assertEqual(2.4, result["segments"][1]["words"][0]["end"])
         self.assertEqual("开局 点燃熔炉", result["text"])
+        self.assertEqual(auto.ref(self.root / "shots/shot_001.wav"), result["shot_observations"][0]["audio"])
+        self.assertEqual(observations[0], result["shot_observations"][0]["asr"])
         truncated = {"text": "燃熔炉", "segments": []}
-        with patch.object(auto, "run"), patch.object(auto, "transcribe", side_effect=[observations[0], truncated]):
+        with patch.object(auto, "run", side_effect=encode), patch.object(auto, "transcribe", side_effect=[observations[0], truncated]):
             with self.assertRaisesRegex(ValueError, "rendered speech differs"):
                 auto.rendered_shot_asr(None, output, rendered, planned, {}, self.root / "shots")
 

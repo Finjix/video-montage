@@ -470,8 +470,8 @@ class PackagingContractTests(unittest.TestCase):
         right, bottom = max(x for x, _ in yellow), max(y for _, y in yellow)
         self.assertLessEqual(abs((left + right) / 2 - 720), 5)
         self.assertLessEqual(abs((top + bottom) / 2 - 1768), 5)
-        self.assertTrue(630 <= right - left + 1 <= 650)
-        self.assertTrue(130 <= bottom - top + 1 <= 145)
+        self.assertTrue(440 <= right - left + 1 <= 465, (left, right))
+        self.assertTrue(90 <= bottom - top + 1 <= 105, (top, bottom))
 
     def test_render_keeps_subtitle_as_named_txt(self):
         output = self.root / "rendered"

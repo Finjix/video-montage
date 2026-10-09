@@ -31,6 +31,18 @@ from one route do not substitute for the other route's contract.
 
 ## Shared editing and delivery rules
 
+For new autonomous edits and full-edit repairs, read
+[semantic-first planning](references/autonomous/semantic-planning.md). Restore
+complete source-context analysis, grounded adjacent relations and whole-edit
+narrative review. Require a 21.6–36 second natural-speed clean input, an 18–30
+second final delivery, at least four real visual shots, and one declared visible
+protagonist per output. No other character may appear even alongside the lead;
+offscreen dialogue is allowed. Inspect every selected native frame and final
+encoded frame. Do not split one continuous shot to inflate counts or shuffle
+dependent speech for diversity. New plans bind `semantic-continuity/v1` and need
+per-transition, per-shot and whole-edit findings; the diversity selector is removed.
+Historical completions and subtitle-only reburns keep their original contract.
+
 Before delivering any finished video, apply a single whole-video 1.2x speed-up
 after editing and any requested packaging, and before final evidence, review and
 completion. Speed up picture and all mixed audio together, preserve audio pitch,
@@ -66,19 +78,20 @@ reburn commands. Subtitles burn into the picture only. Each new packaging task
 uses a Codex-authored design for each video: choose its main font from WenYue
 W8, Smiley Sans (得意黑) or FangTang (方糖体), keep ordinary text primarily yellow
 with white support, and use complete flower text for every actual game name.
-Only editor font sizes 8, 9 and 10 are allowed: ordinary text defaults to 8;
-game names and special emphasis use 9 or 10. Ordinary yellow/white text uses
+Only two reference-calibrated font sizes, 8 and 9, are allowed: ordinary text defaults to 8;
+game names and special emphasis use 9. Ordinary yellow/white text uses
 the calibrated CapCut black outline 40 (12.3px at 1440 width, text scale 164%),
 independent of font and size. Flower outlines/glows retain the existing effect
 without an additional ordinary stroke. Never use layout.size or shrink
-long text; wrap up to two lines or revise the reviewed subtitle segmentation.
+long text. Subtitles must stay on one line; split long speech into sequential,
+semantically complete reviewed cues with speech-aligned timing. Do not use line_breaks.
 After subtitle review, read [AI packaging design](references/packaging/design.md),
 inspect the effect catalog and relevant previews, then write `subtitle_design`
 with `graphic_layers` omitted or empty. Select only existing installed library
 resources. Codex judges suitability, emphasis and effect density; it must not
 create temporary effects, animations, shaders, flower styles or decorative assets.
 If none fits, use static subtitles. Only choose documented controls such as
-verified text, main font, yellow/white color, size 8/9/10, layout and duration;
+verified text, main font, yellow/white color, size 8/9, layout and duration;
 do not invent effect parameters or change calibrated implementations.
 Use the existing ice1/ice2/fire1 flowers
 and bounce_up/shout_wave/ice_drift entrances, or static/short fade; keep ordinary

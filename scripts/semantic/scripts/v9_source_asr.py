@@ -88,8 +88,9 @@ def build_model(model_name: str, model_root: Path, device: str, cpu_compute: str
         return WhisperModel(model_name, device="cpu", compute_type=cpu_compute, download_root=str(model_root), local_files_only=True), "cpu", cpu_compute
 
 
-def transcribe(model, source_path: str, language: str) -> tuple[dict, object]:
-    segments, info = model.transcribe(source_path, language=language, beam_size=5, temperature=0.0, word_timestamps=True, condition_on_previous_text=False, vad_filter=True)
+def transcribe(model, source_path: str, language: str, initial_prompt: str | None = None) -> tuple[dict, object]:
+    segments, info = model.transcribe(source_path, language=language, beam_size=5, temperature=0.0, word_timestamps=True, condition_on_previous_text=False, vad_filter=True,
+                                      initial_prompt=initial_prompt)
     rows = []
     for segment in segments:
         rows.append({"start": round(segment.start, 3), "end": round(segment.end, 3), "text": segment.text, "words": [{"start": round(word.start, 3), "end": round(word.end, 3), "word": word.word} for word in (segment.words or [])]})

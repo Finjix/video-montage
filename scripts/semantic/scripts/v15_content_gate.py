@@ -227,6 +227,122 @@ def _validate_transition_evidence(
     return result
 
 
+def audit_semantic_sequence(
+    plan_id: str,
+    segments: list[dict[str, Any]],
+    transitions: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    """Shared editorial baseline, without legacy listening/cast receipt formats.
+
+    These checks validate grounded annotations. Codex must still review the whole
+    spoken edit: labels and matching keywords do not prove a coherent narrative.
+    """
+    scope = f"plan:{plan_id}"
+    result: list[dict[str, str]] = []
+    if not segments:
+        return [failure("EMPTY_PLAN", scope, "no complete spoken units")]
+    if not isinstance(transitions, list) or len(transitions) != len(segments) - 1:
+        return [failure("TRANSITION_SCOPE_MISMATCH", scope, "one transition per adjacent spoken unit")]
+    if any(not isinstance(transition, dict) for transition in transitions):
+        return [failure("CONTENT_RELATION_EVIDENCE_REQUIRED", scope, "transitions must be objects")]
+    allowed = {
+        "hook_response", "question_answer", "answer", "explanation", "problem_solution",
+        "claim_support", "cause_effect", "condition_result", "progression", "proof",
+        "benefit", "payoff", "contrast", "counterpoint", "escalation", "punchline",
+        "speaker_experience", "story_resolution",
+    }
+    connectors = {
+        "但是": {"contrast", "counterpoint"}, "不过": {"contrast", "counterpoint"},
+        "但": {"contrast", "counterpoint"},
+        "所以": {"cause_effect", "condition_result", "problem_solution", "payoff"},
+        "这下": {"cause_effect", "condition_result", "payoff"},
+        "然后": {"progression", "escalation"}, "接着": {"progression", "escalation"},
+        "随后": {"progression", "escalation"},
+    }
+    claims: set[str] = set()
+    prior_stage: int | None = None
+    prior_texts: set[str] = set()
+    contract = default_contract()
+    contract["redundancy_groups"] = [["易如反掌", "轻轻松松", "小意思", "so easy"]]
+    contract["result_functions"] = [*contract["result_functions"], "hook"]
+    for index, segment in enumerate(segments):
+        segment_scope = f"{scope}:segment:{index + 1}"
+        text = normalize_text(segment.get("text"))
+        purpose = segment.get("purpose_contract")
+        if not text or text in prior_texts:
+            result.append(failure("REPEATED_OR_EMPTY_SPOKEN_UNIT", segment_scope, text))
+        prior_texts.add(text)
+        if not isinstance(purpose, dict):
+            result.append(failure("SEGMENT_PURPOSE_CONTRACT_REQUIRED", segment_scope, "missing purpose_contract"))
+            continue
+        new_claims = purpose.get("new_claim_ids")
+        if (not normalize_text(purpose.get("function")) or purpose.get("non_redundant") is not True
+                or not isinstance(new_claims, list) or not new_claims
+                or any(not isinstance(claim, str) or not claim.strip() for claim in new_claims)):
+            result.append(failure("SEGMENT_PURPOSE_CONTRACT_INCOMPLETE", segment_scope, "function, new claims and non_redundant required"))
+        else:
+            if claims.intersection(new_claims) or len(new_claims) != len(set(new_claims)):
+                result.append(failure("REPEATED_CLAIM", segment_scope, str(new_claims)))
+            claims.update(new_claims)
+        stage = purpose.get("narrative_stage")
+        if type(stage) is not int or stage < 0:
+            result.append(failure("NARRATIVE_STAGE_REQUIRED", segment_scope, str(stage)))
+        else:
+            if prior_stage is not None and stage < prior_stage:
+                bridge = transitions[0].get("content_evidence", {}) if index == 1 else {}
+                quote = normalize_text(bridge.get("how_why_quote")) if isinstance(bridge, dict) else ""
+                hook_return = (index == 1 and segments[0].get("purpose_contract", {}).get("function") == "hook"
+                               and transitions[0].get("relation") == "hook_response"
+                               and bool(quote) and quote in text
+                               and any(term in quote for term in ("怎么", "如何", "为什么", "因为", "原因")))
+                if not hook_return:
+                    result.append(failure("NARRATIVE_STAGE_REGRESSION", segment_scope, f"{prior_stage}->{stage}"))
+            prior_stage = stage
+        for connector, relations in connectors.items():
+            if text.startswith(connector):
+                relation = transitions[index - 1].get("relation") if index else None
+                if relation not in relations:
+                    result.append(failure("DEPENDENT_CONNECTOR_WITHOUT_ANTECEDENT", segment_scope, connector))
+                break
+        if text.startswith("因为") and index == 0 and not any(term in text for term in ("所以", "因此")):
+            result.append(failure("DEPENDENT_CONNECTOR_WITHOUT_ANTECEDENT", segment_scope, "因为"))
+        if text.startswith("只要") and not any(term in text for term in ("就", "便", "即可", "才能")):
+            if index >= len(transitions) or transitions[index].get("relation") != "condition_result":
+                result.append(failure("CONDITION_WITHOUT_RESULT", segment_scope, "只要"))
+        if segment.get("scenario_bound") is True and index:
+            evidence = transitions[index - 1].get("content_evidence", {})
+            if not isinstance(evidence, dict) or not normalize_text(evidence.get("scenario_continuity")):
+                result.append(failure("SCENARIO_CONTINUITY_REQUIRED", segment_scope, "scene-dependent performance needs its context"))
+    for index, transition in enumerate(transitions):
+        transition_scope = f"{scope}:transition:{index + 1}"
+        if not isinstance(transition, dict):
+            result.append(failure("CONTENT_RELATION_EVIDENCE_REQUIRED", transition_scope, "transition must be an object"))
+            continue
+        if transition.get("relation") not in allowed or not normalize_text(transition.get("information_gain")):
+            result.append(failure("NON_SPECIFIC_TRANSITION_RELATION", transition_scope, str(transition.get("relation"))))
+        result.extend(_validate_transition_evidence(plan_id, index, segments[index], segments[index + 1], transition))
+    last = segments[-1]
+    purpose = last.get("purpose_contract") or {}
+    closing = normalize_text(purpose.get("closing_quote")) if isinstance(purpose, dict) else ""
+    if (not isinstance(purpose, dict) or purpose.get("function") not in set(contract["allowed_closing_functions"] + ["result", "consequence", "cta", "gift_benefit"])
+            or purpose.get("closing_payoff") is not True or not closing or closing not in normalize_text(last.get("text"))):
+        result.append(failure("CLOSING_PAYOFF_REQUIRED", scope, "complete earned closing quote required"))
+    if float(last.get("duration", 0)) < contract["min_closing_segment_seconds"]:
+        result.append(failure("CLOSING_SEGMENT_TOO_SHORT", scope, str(last.get("duration"))))
+    if _matches_any(last.get("text"), contract["forbidden_numeric_endings"]):
+        result.append(failure("NUMERIC_ACCOUNT_NOT_A_CLOSE", scope, str(last.get("text"))))
+    if _matches_any(last.get("text"), contract["forbidden_method_endings"]):
+        result.append(failure("METHOD_BEAT_NOT_A_CLOSE", scope, str(last.get("text"))))
+    for group in contract["redundancy_groups"]:
+        used = [index for index, segment in enumerate(segments) if _contains_any(str(segment.get("text", "")), group)]
+        if len(used) > 1:
+            result.append(failure("SEMANTIC_EQUIVALENCE_REPETITION", scope, str(used)))
+    # Retain the original grounded mechanism/result, subject and benefit rules.
+    if all(isinstance(transition, dict) for transition in transitions):
+        result.extend(_audit_reusable_semantic_sequence(plan_id, segments, transitions, contract))
+    return result
+
+
 def audit_plan(
     plan_id: str,
     segments: list[dict[str, Any]],
