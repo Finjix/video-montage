@@ -183,6 +183,15 @@ class DeliveryLifecycleTests(unittest.TestCase):
 
     def test_enhanced_delivery_requires_design_review_and_preserves_subtitles_for_reburn(self):
         job, delivery, pending, asr, packager = self.fixture()
+        proof = job / 'evidence/shot_001.wav'
+        proof.write_bytes(b'bound shot audio retained for reburn')
+        initial = auto.state(job)
+        qc_path = Path(initial['clean_qc']['path'])
+        qc = auto.read(qc_path)
+        qc['results'][0]['timing_asr'] = {**asr, 'shot_observations': [{'audio': auto.ref(proof)}]}
+        auto.write(qc_path, qc)
+        initial['clean_qc'] = auto.ref(qc_path)
+        auto.save(job, initial, 'clean_validated')
         subtitle = pending / "字幕" / "subtitle-P1.txt"
         subtitle.write_text("1\n00:00:00,100 --> 00:00:00,800\n口播\n", encoding="utf-8")
         snapshot = job / "evidence" / "draft.txt"
@@ -221,11 +230,19 @@ class DeliveryLifecycleTests(unittest.TestCase):
         auto.complete(SimpleNamespace(job_dir=job, review=self.final_review(job, design_pass=True, design_reason="文字清楚，没有装饰卡片，叙述稳定。")))
         value = auto.state(job)
         self.assertTrue(value["compact_delivery"])
+        self.assertTrue(proof.is_file())
         manifest = auto.read(Path(value["reburn_inputs"]["packaging_delivery"]["path"]))
         retained = auto.read(Path(manifest["config_snapshot_path"]))
         self.assertEqual([], retained["outputs"][0]["graphic_layers"])
         self.assertEqual("technical_pass_pending_review", packager.validate(Path(value["reburn_inputs"]["packaging_delivery"]["path"]), job / "reports" / "check.json")["decision"])
         auto.reburn(SimpleNamespace(job_dir=job, plan_id="P1", subtitle_txt=delivery / "字幕" / "subtitle-P1.txt"))
+        edits = job / 'config/batch_subtitles'; edits.mkdir(parents=True)
+        with self.assertRaises(FileNotFoundError):
+            auto.reburn(SimpleNamespace(job_dir=job, subtitle_dir=edits, plan_id=None, subtitle_txt=None))
+        self.assertEqual('subtitle_drafted', auto.state(job)['phase'])
+        shutil.copyfile(delivery / '字幕/subtitle-P1.txt', edits / 'subtitle-P1.txt')
+        auto.reburn(SimpleNamespace(job_dir=job, subtitle_dir=edits, plan_id=None, subtitle_txt=None))
+        self.assertEqual('subtitle_drafted', auto.state(job)['phase'])
         self.approve_subtitle(job)
         auto.package(SimpleNamespace(job_dir=job, config=Path(auto.state(job)["reburn_config"]["path"])))
 

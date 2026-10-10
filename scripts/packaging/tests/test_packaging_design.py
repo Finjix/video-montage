@@ -28,6 +28,29 @@ def fixture(cues, digest="subtitle", font="smiley"):
 
 
 class DesignTests(unittest.TestCase):
+    def test_white_requires_yellow_in_same_ordinary_cue(self):
+        cue = {"text": "三分钟一局巨爽", "start_ms": 0, "end_ms": 1000}
+        row = {"text": cue["text"], "color": "white"}
+        with self.assertRaisesRegex(ValueError, "standalone white"):
+            design.cue_style(row, cue, [], "ice2")
+        row['spans'] = [{"start": 0, "end": 3, "color": "yellow"}]
+        self.assertEqual('white', design.cue_style(row, cue, [], 'ice2')['color'])
+        row['spans'] = [{"start": 0, "end": len(cue['text']), "color": "white"}]
+        row['color'] = 'yellow'
+        with self.assertRaisesRegex(ValueError, "standalone white"):
+            design.cue_style(row, cue, [], 'ice2')
+        game_cue = {'text':'玩无尽冬日吧','start_ms':0,'end_ms':1000}
+        with self.assertRaisesRegex(ValueError, 'standalone white'):
+            design.cue_style({'text':game_cue['text'],'color':'white'},game_cue,['无尽冬日'],'ice2')
+
+    def test_animation_batch_variety_and_concentration(self):
+        def d(*effects): return {'cues':[{'entrance':{'effect':e}} for e in effects]}
+        with self.assertRaisesRegex(ValueError, 'must vary'):
+            design.batch_effects([d('bounce_up'),d('bounce_up'),d('bounce_up')])
+        with self.assertRaisesRegex(ValueError, '70 percent'):
+            design.batch_effects([d(*(['bounce_up']*8)),d('ice_drift'),d('shout_wave')])
+        self.assertEqual(3, design.batch_effects([d('bounce_up'),d('ice_drift'),d('shout_wave')])['required_animation_types'])
+
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.addCleanup(self.directory.cleanup)
@@ -301,8 +324,9 @@ class RealBurnTests(unittest.TestCase):
             outputs = []
             for i, font in enumerate(("smiley", "fangtang")):
                 presentation = fixture(cues, pack.sha(subtitle), font)
-                presentation["cues"][0]["entrance"] = {"effect": "bounce_up", "duration_ms": 200}
+                presentation["cues"][0]["entrance"] = {"effect": ("bounce_up", "ice_drift")[i], "duration_ms": 200}
                 presentation["cues"][1]["color"] = "white"
+                presentation["cues"][1]["spans"] = [{"start": 0, "end": 1, "color": "yellow"}]
                 outputs.append({"plan_id": f"P{i}", "input_path": str(source), "subtitle_txt": str(subtitle),
                                 "subtitle_design": presentation, "graphic_layers": []})
             pack.atomic(config, {"schema": pack.SCHEMA, "outputs": outputs})

@@ -393,7 +393,57 @@ def timed_lines(lines: list[str], start_ms: int, end_ms: int) -> list[tuple[int,
     return result
 
 
-def draft_one(input_path: Path, plan_id: str, output_dir: Path, *, overwrite: bool = False) -> dict:
+def verified_caption_rows(asr: dict) -> list[dict]:
+    """Balance Chinese shot captions without replaying recognition or tiny tails."""
+    protected = ('无尽冬日', '无尽动日', '无尽冬至', '幸存者', '熔炉', '发展建设',
+                 '三分钟', '中年人', '解压神器', '庇护所', '冰雪末日', '沉浸感',
+                 '明星玩家', '吴岳', '吴樾', '升级', '温度', '砍树', '打猎', '挖矿',
+                 '资源', '厨房', '三十', '快乐', '聚爽', '聚解压', '然后', '不断',
+                 '获取', '建造', '建设', '收集', '收留', '几个', '更多', '现在玩',
+                 '三分钟一局', '现在玩无尽冬日', '更是快乐')
+    observations = asr.get('shot_observations')
+    if not observations:
+        observations = [{'output_in_frame': 0, 'asr': asr}]
+    rows = []
+    for shot in observations:
+        offset = shot['output_in_frame'] / 60
+        letters, times = [], []
+        for segment in shot['asr']['segments']:
+            words = segment.get('words') or [{'word': segment['text'], 'start': segment['start'], 'end': segment['end']}]
+            for word in words:
+                chars = re.findall(r'[0-9A-Za-z\u4e00-\u9fff]', word['word'])
+                for index, char in enumerate(chars):
+                    letters.append(char)
+                    start = word['start'] + (word['end'] - word['start']) * index / len(chars)
+                    end = word['start'] + (word['end'] - word['start']) * (index + 1) / len(chars)
+                    times.append((start + offset, end + offset))
+        text = ''.join(letters)
+        forbidden = set()
+        for word in protected:
+            for match in re.finditer(re.escape(word), text):
+                forbidden.update(range(match.start() + 1, match.end()))
+        for match in re.finditer(r'[0-9A-Za-z]+', text):
+            if len(match[0]) <= 10:forbidden.update(range(match.start() + 1, match.end()))
+        cursor = 0
+        while cursor < len(text):
+            remaining = len(text) - cursor
+            parts = (remaining + 9) // 10
+            if parts == 1:end = len(text)
+            else:
+                choices = []
+                while not choices and parts <= remaining:
+                    ideal = cursor + round(remaining / parts)
+                    choices = [end for end in range(max(cursor + 1, len(text) - (parts - 1) * 10), min(cursor + 10, len(text) - 1) + 1) if end not in forbidden]
+                    if not choices:parts += 1
+                if not choices:raise ValueError('cannot fit protected caption phrase')
+                end = min(choices, key=lambda candidate: (abs(candidate - ideal), candidate))
+            rows.append({'start': times[cursor][0], 'end': times[end - 1][1], 'text': text[cursor:end]})
+            cursor = end
+    return rows
+
+
+def draft_one(input_path: Path, plan_id: str, output_dir: Path, *, overwrite: bool = False,
+              verified_asr: dict | None = None) -> dict:
     if not PLAN_ID.fullmatch(plan_id):
         raise ValueError(f"unsafe plan ID: {plan_id}")
     video_spec(input_path)
@@ -405,15 +455,21 @@ def draft_one(input_path: Path, plan_id: str, output_dir: Path, *, overwrite: bo
     module = importlib.util.module_from_spec(spec)
     assert spec.loader
     spec.loader.exec_module(module)
-    model, device, _ = module.build_model("large-v3-turbo", MODEL_ROOT, "auto", "int8", "float16")
-    try:
-        asr, _ = module.transcribe(model, str(input_path), "zh")
-    except Exception as error:
-        if device != "cuda" or not any(token in str(error).lower() for token in ("cuda", "out of memory", "memoryerror")):
-            raise
-        del model
-        model, device, _ = module.build_model("large-v3-turbo", MODEL_ROOT, "cpu", "int8", "float16")
-        asr, _ = module.transcribe(model, str(input_path), "zh")
+    if verified_asr is not None:
+        if (verified_asr.get("timing_basis") != "verified_rendered_shot_asr"
+                or verified_asr.get("output") != {"path": str(input_path.resolve()), "sha256": sha(input_path)}):
+            raise ValueError("subtitle timing ASR must bind the actual clean input")
+        asr, device = verified_asr, "verified_rendered_shot_asr"
+    else:
+        model, device, _ = module.build_model("large-v3-turbo", MODEL_ROOT, "auto", "int8", "float16")
+        try:
+            asr, _ = module.transcribe(model, str(input_path), "zh")
+        except Exception as error:
+            if device != "cuda" or not any(token in str(error).lower() for token in ("cuda", "out of memory", "memoryerror")):
+                raise
+            del model
+            model, device, _ = module.build_model("large-v3-turbo", MODEL_ROOT, "cpu", "int8", "float16")
+            asr, _ = module.transcribe(model, str(input_path), "zh")
     rows = []
     for segment in asr["segments"]:
         words = segment.get("words") or [{"start": segment["start"], "end": segment["end"], "word": segment["text"]}]
@@ -435,6 +491,8 @@ def draft_one(input_path: Path, plan_id: str, output_dir: Path, *, overwrite: bo
                 current = []
         if current:
             rows.append({"start": float(current[0]["start"]), "end": float(current[-1]["end"]), "text": "".join(item["word"] for item in current)})
+    if verified_asr is not None:
+        rows = verified_caption_rows(verified_asr)
     if not rows:
         raise RuntimeError("Whisper produced no subtitle cues")
     duration_ms = round(video_spec(input_path)["duration"] * 1000)
@@ -447,6 +505,8 @@ def draft_one(input_path: Path, plan_id: str, output_dir: Path, *, overwrite: bo
             continue
         chunks = single_line_chunks(row["text"])
         for chunk_start, chunk_end, chunk in timed_lines(chunks, start, end):
+            if not re.search(r"[0-9A-Za-z\u4e00-\u9fff]", chunk):
+                continue
             blocks.append(f"{len(blocks) + 1}\n{format_timestamp(chunk_start)} --> {format_timestamp(chunk_end)}\n{chunk}")
         previous_end = end
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -634,6 +694,7 @@ def prepared_rows(config_path: Path, expected_inputs: dict[str, str] | None = No
         rows.append(prepared)
     if expected_inputs is not None and set(expected_inputs) != {row["plan_id"] for row in rows}:
         raise ValueError("packaging configuration must cover the complete delivery")
+    packaging_design.batch_effects([row["subtitle_design"] for row in rows])
     return rows
 
 
@@ -714,7 +775,7 @@ def render_one(row: dict, output_dir: Path) -> dict:
 
 def render(config_path: Path, output_dir: Path, manifest_path: Path, delivery_manifest: Path | None = None,
            controller_validation: Path | None = None, autonomous_clean: Path | None = None,
-           autonomous_clean_qc: Path | None = None, *, overwrite: bool = False) -> dict:
+            autonomous_clean_qc: Path | None = None, *, overwrite: bool = False, resume: bool = False) -> dict:
     if (OUTPUT_NAME.fullmatch(output_dir.name) and manifest_path.resolve().is_relative_to(output_dir.resolve())
             and not manifest_path.resolve().is_relative_to(runtime_directory(output_dir))):
         raise ValueError("packaging records inside the delivery must be in 临时文件")
@@ -754,6 +815,43 @@ def render(config_path: Path, output_dir: Path, manifest_path: Path, delivery_ma
     copies = [(config_path, config_snapshot)] + [
         (Path(row["subtitles"]["path"]), snapshot) for row, snapshot in zip(rows, snapshots)
     ]
+    # Publication can finish before Windows releases a temporary file held by a
+    # concurrent preview. Recover only an exact, fully hash-bound publication.
+    if resume and overwrite and manifest_path.is_file():
+        previous = read(manifest_path)
+        relocated_rows = json.loads(json.dumps(rows))
+        for row in relocated_rows:
+            if OUTPUT_NAME.fullmatch(output_dir.name):
+                row["input"]["path"] = str((delivery_category(output_dir, "clean") / f"{row['plan_id']}.mp4").resolve())
+        expected_config = relocated_config(config_path, relocated_rows, snapshots, config_snapshot)
+        source_manifest = delivery_manifest or autonomous_clean
+        source_validation = controller_validation or autonomous_clean_qc
+        mode = "complete_montage" if delivery_manifest else "complete_autonomous" if autonomous_clean else "standalone_test"
+        valid = (previous.get("schema") == "video-montage-packaging-delivery/v1"
+                 and previous.get("mode") == mode and previous.get("output_count") == len(rows)
+                 and config_snapshot.is_file() and read(config_snapshot) == expected_config
+                 and previous.get("config_snapshot_path") == str(config_snapshot.resolve())
+                 and previous.get("config_snapshot_sha256") == sha(config_snapshot)
+                 and previous.get("clean_delivery_sha256") == (sha(source_manifest) if source_manifest else None)
+                 and previous.get("controller_validation_sha256") == (sha(source_validation) if source_validation else None))
+        prior_rows = previous.get("results", [])
+        valid = valid and [r.get("plan_id") for r in prior_rows] == [r["plan_id"] for r in rows]
+        if valid:
+            for row, old, snapshot in zip(relocated_rows, prior_rows, snapshots):
+                output = delivery_category(output_dir, "video") / f"{row['plan_id']}.mp4"
+                valid = (old.get("input") == row["input"]
+                         and old.get("output_path") == str(output.resolve()) and output.is_file()
+                         and old.get("output_sha256") == sha(output)
+                         and snapshot.is_file() and sha(snapshot) == row["subtitles"]["sha256"]
+                         and Path(row["input"]["path"]).is_file() and sha(Path(row["input"]["path"])) == row["input"]["sha256"]
+                         and old.get("design", {}).get("cues") == row["subtitle_design"]["cues"]
+                         and all(Path(r["path"]).is_file() and sha(Path(r["path"])) == r["sha256"]
+                                 for r in old.get("design", {}).get("resources", [])))
+                if not valid:
+                    break
+        if valid:
+            invalidate_delivery_receipts(output_dir)
+            return previous
     reserved = {}
     for path, label in [(manifest_path, "manifest"), *[(target, "snapshot") for _, target in copies],
                         *[(delivery_category(output_dir, "video") / f"{row['plan_id']}{suffix}", "render")
@@ -771,7 +869,7 @@ def render(config_path: Path, output_dir: Path, manifest_path: Path, delivery_ma
             raise FileExistsError(f"refusing overwrite: {target}")
     temporary_root = runtime_directory(output_dir) if OUTPUT_NAME.fullmatch(output_dir.name) else output_dir
     temporary_root.mkdir(parents=True, exist_ok=True)
-    with TemporaryDirectory(prefix="encode-batch-", dir=temporary_root) as directory:
+    with TemporaryDirectory(prefix="encode-batch-", dir=temporary_root, ignore_cleanup_errors=True) as directory:
         staging = Path(directory)
         (staging / "videos").mkdir()
         # No delivered file is touched until every encoder has succeeded.

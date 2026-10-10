@@ -13,6 +13,22 @@ LIMITS = {"candidate_uses": 6, "exact_text_uses": 6, "opening_uses": 3,
           "opening_visual_family_uses": 3, "opening_second_pair_uses": 2,
           "closing_uses": 4, "semantic_route_uses": 2,
           "same_position_overlap": .4, "trigram_similarity": .88}
+REASONABLE_REUSE_POLICY = "explicit-user-reasonable-reuse/v1"
+REASONABLE_LIMITS = {**LIMITS, "candidate_uses": 16, "exact_text_uses": 16,
+    "opening_uses": 7, "opening_visual_family_uses": 7, "opening_second_pair_uses": 5,
+    "closing_uses": 10, "semantic_route_uses": 4, "same_position_overlap": .6,
+    "middle_route_uses": 3}
+
+
+def reuse_limits(source_index: dict) -> dict:
+    authorization = source_index.get("batch_reuse_authorization")
+    if authorization is None:
+        return LIMITS.copy()
+    if (not isinstance(authorization, dict) or authorization.get("policy") != REASONABLE_REUSE_POLICY
+            or authorization.get("authorized_by") != "user" or not isinstance(authorization.get("instruction"), str)
+            or not authorization["instruction"].strip()):
+        raise ValueError("explicit user instruction required for reasonable batch reuse")
+    return REASONABLE_LIMITS.copy()
 
 
 def text(value: str) -> str:
@@ -58,11 +74,15 @@ def similarity(left: str, right: str) -> float:
 
 
 def audit(plan: dict, source_index: dict) -> dict:
+    limits_used = reuse_limits(source_index)
     failures = []
     def fail(code, scope, detail):
         failures.append({"code": code, "scope": scope, "detail": detail})
     if plan.get("batch_review_policy") != POLICY:
         fail("BATCH_REVIEW_POLICY_REQUIRED", "plan", POLICY)
+    authorization = source_index.get("batch_reuse_authorization")
+    if plan.get("batch_reuse_authorization") != authorization:
+        fail("BATCH_REUSE_AUTHORIZATION_MISMATCH", "plan", "bind the source-index user authorization")
     rows = plan.get("outputs", [])
     sources = {row["source"]["sha256"]: row for row in source_index.get("sources", [])}
     inventory = plan.get("batch_analysis", {}).get("sources", [])
@@ -144,16 +164,18 @@ def audit(plan: dict, source_index: dict) -> dict:
             for left, right, other, other_pid in spans[i + 1:]:
                 if family != other and max(start, left) < min(end, right):
                     fail("RENAMED_OVERLAPPING_VISUAL_FAMILY", f"{pid}|{other_pid}", source)
-    limits = {"candidate": (6, "CANDIDATE_REUSE_EXCEEDED"), "exact_text": (6, "EXACT_TEXT_REUSE_EXCEEDED"),
-              "opening": (3, "OPENING_REUSE_EXCEEDED"), "family": (3, "OPENING_VISUAL_FAMILY_REUSE_EXCEEDED"),
-              "pair": (2, "OPENING_SECOND_VISUAL_PAIR_REUSE_EXCEEDED"), "closing": (4, "CLOSING_REUSE_EXCEEDED"),
-              "route": (2, "DUPLICATE_SEMANTIC_ROUTE"), "ordered": (1, "DUPLICATE_ORDERED_PLAN_SEQUENCE"),
+    limits = {"candidate": (limits_used["candidate_uses"], "CANDIDATE_REUSE_EXCEEDED"), "exact_text": (limits_used["exact_text_uses"], "EXACT_TEXT_REUSE_EXCEEDED"),
+              "opening": (limits_used["opening_uses"], "OPENING_REUSE_EXCEEDED"), "family": (limits_used["opening_visual_family_uses"], "OPENING_VISUAL_FAMILY_REUSE_EXCEEDED"),
+              "pair": (limits_used["opening_second_pair_uses"], "OPENING_SECOND_VISUAL_PAIR_REUSE_EXCEEDED"), "closing": (limits_used["closing_uses"], "CLOSING_REUSE_EXCEEDED"),
+              "route": (limits_used["semantic_route_uses"], "DUPLICATE_SEMANTIC_ROUTE"), "ordered": (1, "DUPLICATE_ORDERED_PLAN_SEQUENCE"),
               "spoken": (1, "DUPLICATE_COMPLETE_SPOKEN_CONTENT")}
     for name, (limit, code) in limits.items():
         for identity, count in uses[name].items():
             if count > limit:
                 fail(code, identity, f"{count}>{limit}")
     comparisons = []
+    middle_counts = Counter(row["middle_signature"] for row in plans if row["middle_signature"])
+    middle_spoken_counts = Counter(row["middle_spoken_signature"] for row in plans if row["middle_spoken_signature"])
     for i, left in enumerate(plans):
         for right in plans[i + 1:]:
             pair = f"{left['plan_id']}|{right['plan_id']}"
@@ -165,18 +187,18 @@ def audit(plan: dict, source_index: dict) -> dict:
                 or left["middle_spoken_signature"] == right["middle_spoken_signature"]))
             comparisons.append({"plans": pair, "same_position_overlap": round(overlap, 6),
                                 "trigram_similarity": round(trigram, 6), "same_middle_route": same_middle})
-            if overlap > LIMITS["same_position_overlap"]:
-                fail("SAME_POSITION_ROUTE_OVERLAP_EXCEEDED", pair, f"{overlap:.6f}>0.4")
-            if trigram > LIMITS["trigram_similarity"]:
-                fail("PAIRWISE_TEXT_SIMILARITY_EXCEEDED", pair, f"{trigram:.6f}>0.88")
-            if same_middle:
+            if overlap > limits_used["same_position_overlap"]:
+                fail("SAME_POSITION_ROUTE_OVERLAP_EXCEEDED", pair, f"{overlap:.6f}>{limits_used['same_position_overlap']}")
+            if trigram > limits_used["trigram_similarity"]:
+                fail("PAIRWISE_TEXT_SIMILARITY_EXCEEDED", pair, f"{trigram:.6f}>{limits_used['trigram_similarity']}")
+            if same_middle and max(middle_counts[left["middle_signature"]], middle_spoken_counts[left["middle_spoken_signature"]]) > limits_used.get("middle_route_uses", 1):
                 fail("HEAD_OR_TAIL_ONLY_VARIANT", pair, "identical middle propositions")
-    required_families = math.ceil(len(rows) / 3)
+    required_families = math.ceil(len(rows) / limits_used["opening_visual_family_uses"])
     if len(uses["family"]) < required_families or "unreviewed" in uses["family"]:
         fail("OPENING_VISUAL_CAPACITY_SHORTAGE", "batch", f"need {required_families} reviewed families")
     if len(uses["ordered"]) != len(rows) or len(uses["spoken"]) != len(rows):
         fail("UNIQUE_PLAN_CAPACITY_SHORTAGE", "batch", "duplicate plans cannot satisfy requested count")
-    return {"schema": POLICY, "limits": LIMITS.copy(), "decision": "reject" if failures else "pass",
+    return {"schema": POLICY, "limits": limits_used, "batch_reuse_authorization": authorization, "decision": "reject" if failures else "pass",
             "failures": failures, "metrics": {"output_count": len(rows), "unique_ordered_routes": len(uses["ordered"]),
                 "unique_spoken_routes": len(uses["spoken"]), "required_opening_families": required_families,
                 "usage": {name: dict(counts) for name, counts in uses.items()}},

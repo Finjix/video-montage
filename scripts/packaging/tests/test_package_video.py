@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import copy
 import json
 import subprocess
 import tempfile
@@ -122,6 +123,31 @@ class PackagingContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "SHA-256 mismatch"):
             self.prepare()
 
+    def test_resume_reuses_only_unchanged_committed_video(self):
+        output = self.root / "自动化混剪_20261010_120000"
+        manifest = packaging.delivery_category(output, "manifests") / "packaging_manifest.json"
+
+        def encode(row, root):
+            target = packaging.delivery_category(root, "video") / "P1.mp4"
+            target.write_bytes(b"committed packaged video")
+            return {"plan_id": row["plan_id"], "input": row["input"],
+                    "input_frames": 60, "output_path": str(target), "output_sha256": packaging.sha(target),
+                    "subtitles": row["subtitles"], "design": copy.deepcopy(row["subtitle_design"])}
+
+        with patch.object(packaging, "video_spec", return_value=self.spec), \
+             patch.object(packaging, "render_one", side_effect=encode) as encoder:
+            committed = packaging.render(self.config, output, manifest)
+            encoder.reset_mock()
+            recovered = packaging.render(self.config, output, manifest, overwrite=True, resume=True)
+            self.assertEqual(committed, recovered)
+            encoder.assert_not_called()
+            target = output / "成片" / "P1.mp4"
+            target.write_bytes(b"changed after publication")
+            repaired = packaging.render(self.config, output, manifest, overwrite=True, resume=True)
+            encoder.assert_called_once()
+            self.assertEqual(packaging.sha(target), repaired["results"][0]["output_sha256"])
+            self.assertEqual(b"clean video", (output / "混剪（无包装）" / "P1.mp4").read_bytes())
+
     def test_case_insensitive_plan_ids_cannot_share_output_files(self):
         packaging.atomic(self.config, {"schema": packaging.SCHEMA,
             "outputs": [self.row, {**self.row, "plan_id": "p1"}]})
@@ -133,8 +159,12 @@ class PackagingContractTests(unittest.TestCase):
         packaging.ensure_delivery_layout(output)
         manifest = output / "临时文件" / "manifests" / "packaging_manifest.json"
         manifest.write_bytes(b"previous manifest")
+        first = copy.deepcopy(self.row)
+        second = copy.deepcopy(self.row); second['plan_id'] = 'P2'
+        first['subtitle_design']['cues'][0]['entrance'] = {'effect':'bounce_up','duration_ms':100}
+        second['subtitle_design']['cues'][0]['entrance'] = {'effect':'ice_drift','duration_ms':100}
         packaging.atomic(self.config, {"schema": packaging.SCHEMA,
-            "outputs": [self.row, {**self.row, "plan_id": "P2"}]})
+            "outputs": [first, second]})
         for pid in ("P1", "P2"):
             (output / "成片" / f"{pid}.mp4").write_bytes(f"previous {pid}".encode())
         def encode(row, directory):
@@ -400,6 +430,41 @@ class PackagingContractTests(unittest.TestCase):
         lines = packaging.timed_lines(["A", "B", "C"], 3, 63)
         self.assertEqual([(3, 23), (23, 43), (43, 63)], [(start, end) for start, end, _ in lines])
         self.assertTrue(all(packaging.ass_time(start) != packaging.ass_time(end) for start, end, _ in lines))
+
+    def test_verified_shot_asr_draft_is_hash_bound_to_input(self):
+        asr = {'timing_basis': 'verified_rendered_shot_asr',
+               'output': {'path': str(self.video.resolve()), 'sha256': packaging.sha(self.video)},
+               'segments': [{'start': .1, 'end': .8, 'text': '完整台词',
+                             'words': [{'start': .1, 'end': .8, 'word': '完整台词'}]}]}
+        with patch.object(packaging, 'video_spec', return_value=self.spec):
+            result = packaging.draft_one(self.video, 'P1', self.root / 'draft', verified_asr=asr)
+            self.assertEqual(result['asr_device'], 'verified_rendered_shot_asr')
+            self.assertEqual(packaging.parse_srt(Path(result['subtitle_txt_path']), 1000)[0]['text'], '完整台词')
+            self.video.write_bytes(b'changed clean input')
+            with self.assertRaisesRegex(ValueError, 'bind the actual clean input'):
+                packaging.draft_one(self.video, 'P2', self.root / 'draft', verified_asr=asr)
+
+    def test_draft_does_not_emit_punctuation_only_cue(self):
+        text = '建设城镇,那些玩法,这儿全都有。'
+        asr = {'timing_basis': 'verified_rendered_shot_asr',
+               'output': {'path': str(self.video.resolve()), 'sha256': packaging.sha(self.video)},
+               'segments': [{'start': .1, 'end': .9, 'text': text,
+                             'words': [{'start': .1, 'end': .9, 'word': text}]}]}
+        with patch.object(packaging, 'video_spec', return_value=self.spec):
+            result = packaging.draft_one(self.video, 'P1', self.root / 'draft', verified_asr=asr)
+        cues = packaging.parse_srt(Path(result['subtitle_txt_path']), 1000)
+        self.assertTrue(cues)
+        self.assertTrue(all(any(char.isalnum() for char in cue['text']) for cue in cues))
+
+    def test_verified_caption_rows_balance_tails_and_keep_game_name(self):
+        text = '玩无尽冬日就得让幸存者给你疯狂的砍树'
+        rows = packaging.verified_caption_rows({'shot_observations': [
+            {'output_in_frame': 120, 'asr': {'segments': [{'start': .1, 'end': 3.8, 'text': text,
+              'words': [{'start': .1, 'end': 3.8, 'word': text}]}]}}]})
+        self.assertEqual(''.join(row['text'] for row in rows), text)
+        self.assertTrue(all(3 <= len(row['text']) <= 10 for row in rows))
+        self.assertEqual(sum('无尽冬日' in row['text'] for row in rows), 1)
+        self.assertTrue(all(row['start'] >= 2.1 and row['end'] <= 5.8 for row in rows))
 
     def test_long_draft_text_is_split_into_timed_single_lines(self):
         chunks = packaging.single_line_chunks("中" * 29)

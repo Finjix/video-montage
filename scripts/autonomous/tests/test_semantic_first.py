@@ -350,6 +350,18 @@ class SemanticFirstTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "mismatch|changed"):
             auto.require_editing_approval(auto.state(self.root))
 
+    def test_plan_review_retry_after_missing_review_keeps_evidence_gates(self):
+        review_path, value, _ = self.approval_fixture()
+        value['phase'] = 'repair_required'
+        auto.write(self.root / 'autonomous_state.json', value)
+        auto.approve_plan(SimpleNamespace(job_dir=self.root, review=review_path))
+        self.assertEqual(auto.state(self.root)['phase'], 'plan_approved')
+        value['phase'] = 'repair_required'
+        Path(value['plan_evidence']['path']).write_text('{}', encoding='utf-8')
+        auto.write(self.root / 'autonomous_state.json', value)
+        with self.assertRaisesRegex(ValueError, 'changed or missing'):
+            auto.approve_plan(SimpleNamespace(job_dir=self.root, review=review_path))
+
     def test_legacy_approval_cannot_authorize_new_policy(self):
         review_path, _, review = self.approval_fixture()
         review.pop("planning_policy")

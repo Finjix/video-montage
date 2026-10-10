@@ -132,11 +132,39 @@ def cue_style(row: dict, cue: dict, names: list[str], default_flower: str, game_
                       if i not in game_characters and not cue["text"][i].isspace()}
     if len(ordinary_sizes) > 1:
         raise ValueError("only game names may use a different font_size within a cue; ordinary emphasis must display separately at one uniform size")
+    colors = [color] * len(cue["text"])
+    flower_characters = set()
+    for span in spans:
+        if "color" in span:
+            colors[span["start"]:span["end"]] = [span["color"]] * (span["end"] - span["start"])
+        if span.get("flower"):
+            flower_characters.update(range(span["start"], span["end"]))
+    ordinary_colors = {c for i, c in enumerate(colors)
+                       if i not in flower_characters and normalized(cue["text"][i])}
+    if "white" in ordinary_colors and "yellow" not in ordinary_colors:
+        raise ValueError("white subtitles require yellow emphasis in the same cue; standalone white is forbidden")
     breaks = row.get("line_breaks", [])
     if not isinstance(breaks, list) or breaks:
         raise ValueError("line_breaks is unsupported: subtitles must stay on one line")
     return {**copy.deepcopy(row), "color": color, "font_size": size, "spans": spans, "line_breaks": breaks, "layout": layout(row.get("layout")),
             "entrance": entrance(row.get("entrance"), cue["end_ms"] - cue["start_ms"])}
+
+
+def batch_effects(designs: list[dict]) -> dict:
+    """Validate whole-batch animation variety, preserving quiet reading cues."""
+    counts = {}
+    for design in designs:
+        for cue in design["cues"]:
+            effect = cue.get("entrance", {}).get("effect", "none")
+            if effect != "none":
+                counts[effect] = counts.get(effect, 0) + 1
+    required = min(3, len(designs)) if len(designs) > 1 else 0
+    if len(counts) < required:
+        raise ValueError("batch packaging must vary existing subtitle animations; a single repeated effect cannot satisfy the batch")
+    total = sum(counts.values())
+    if len(designs) > 1 and total >= 6 and max(counts.values(), default=0) > total * .7:
+        raise ValueError("one subtitle animation dominates more than 70 percent of the batch")
+    return {"animation_counts": counts, "required_animation_types": required}
 
 
 def prepare(value: dict, cues: list[dict], subtitle_sha256: str, layers: list[dict], base: Path, frames: int) -> dict:

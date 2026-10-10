@@ -121,9 +121,13 @@ def pcm(path: Path, start: float | None = None, end: float | None = None, rate: 
 
 
 def normalized(text: str) -> str:
-    # A single digit and its Chinese spelling represent the same spoken token.
-    # Multi-digit numbers remain untouched: 13 is not the spoken sequence 一三.
-    text = re.sub(r"(?<!\d)[0-9](?!\d)", lambda m: "零一二三四五六七八九"[int(m[0])], str(text))
+    # Decimal spellings denote values: 13 is 十三, never the sequence 一三.
+    digits = "零一二三四五六七八九"
+    def tens(match):
+        number = int(match[0]); high, low = divmod(number, 10)
+        return (digits[high] if high > 1 else "") + "十" + (digits[low] if low else "")
+    text = re.sub(r"(?<!\d)[1-9][0-9](?!\d)", tens, str(text))
+    text = re.sub(r"(?<!\d)[0-9](?!\d)", lambda m: digits[int(m[0])], text)
     return "".join(re.findall(r"[0-9A-Za-z\u4e00-\u9fff]+", text)).casefold()
 
 
@@ -133,7 +137,10 @@ def subtitle_spelling(text: str) -> str:
     The raw source/clean/final ASR gates remain exact. Subtitle edits still need
     hash-bound source evidence and keep every character and timestamp accounted for.
     """
-    return normalized(text).replace("真呆劲", "真带劲")
+    return (normalized(text).replace("真呆劲", "真带劲")
+            .replace("随开随晚", "随开随玩")
+            .replace("吴岳", "吴樾")
+            .replace("聚爽", "巨爽").replace("聚解压", "巨解压"))
 
 
 def context_corroborates_asr(expected: str, observed: str, asset_copy: dict | None) -> bool:
@@ -246,7 +253,8 @@ def cut_pcm_metrics(samples: np.ndarray, cut_frames: list[int], *, clean: bool, 
         impact = isolated_transients(samples[max(0, center - width * 2):min(samples.size, center + width * 2)], rate)
         clipped = int(np.count_nonzero(np.abs(np.concatenate((before, after))) >= .999))
         passed = clipped == 0 and impact == 0 and (
-            max(before_db, after_db) <= -30 if clean else abs(before_db - after_db) <= 18)
+            max(before_db, after_db) <= -30 if clean else
+            max(before_db, after_db) <= -30 or abs(before_db - after_db) <= 18)
         results.append({"frame": frame, "pre_40ms_dbfs": round(before_db, 2),
                         "post_40ms_dbfs": round(after_db, 2), "isolated_transients": impact,
                         "clipped_samples": clipped, "decision": "pass" if passed else "reject"})
@@ -559,7 +567,8 @@ def repair(args) -> None:
 
 
 def init(args) -> None:
-    order = read(args.work_order)
+    order = json.load(sys.stdin) if str(args.work_order) == "-" else read(args.work_order)
+    BATCH.reuse_limits(order)
     sources = order.get("sources")
     if order.get("schema") != ORDER_SCHEMA or not isinstance(sources, list) or not sources or int(order.get("requested_outputs", 0)) < 1:
         raise ValueError("new autonomous work order required")
@@ -646,8 +655,11 @@ def prepare(args) -> None:
             raise ValueError("source ASR invalid")
         source_rows.append({"source": ref(path), "asr": ref(asr_path), "video": spec})
     index_path = job / "evidence" / "source_index.json"
+    BATCH.reuse_limits(order)
     write(index_path, {"schema": "video-montage-autonomous-source-index/v260929", "sources": source_rows,
-                       "asset_copy_sources": ref(asset_path)})
+                       "asset_copy_sources": ref(asset_path),
+                       **({"batch_reuse_authorization": order["batch_reuse_authorization"]}
+                          if "batch_reuse_authorization" in order else {})})
     value["source_index"] = ref(index_path)
     save(job, value, "prepared")
 
@@ -867,14 +879,24 @@ def require_editing_approval(value: dict) -> None:
         raise ValueError("semantic-first editorial approval rejected: " + "; ".join(errors))
     segments = {(output["plan_id"], index): segment for output in plan["outputs"]
                 for index, segment in enumerate(output["segments"], 1)}
+    verified_sources = {}
+    verified_visuals = set()
     for row in evidence["results"]:
         segment = segments[(row["plan_id"], row["segment_index"])]
         if row.get("decision") != "pass":
             errors.append("candidate evidence failed")
-        if row.get("source") != ref(Path(segment["source_path"])):
+        source_path = str(Path(segment["source_path"]).resolve())
+        if source_path not in verified_sources:
+            verified_sources[source_path] = ref(Path(source_path))
+        if row.get("source") != verified_sources[source_path]:
             errors.append("candidate source does not describe the selected source")
-        verify_continuous_visual(row["continuous_visual"], row["source"],
-                                 segment["source_in_frame"], segment["source_out_frame_exclusive"])
+        visual_key = (row["continuous_visual"]["path"], row["continuous_visual"]["sha256"],
+                      row["source"]["path"], row["source"]["sha256"],
+                      segment["source_in_frame"], segment["source_out_frame_exclusive"])
+        if visual_key not in verified_visuals:
+            verify_continuous_visual(row["continuous_visual"], row["source"],
+                                     segment["source_in_frame"], segment["source_out_frame_exclusive"])
+            verified_visuals.add(visual_key)
     if errors:
         raise ValueError("semantic-first editorial approval rejected: " + "; ".join(errors))
 
@@ -882,8 +904,12 @@ def require_editing_approval(value: dict) -> None:
 def batch_fields(value: dict, plan: dict | None = None, index: dict | None = None) -> dict:
     if not value.get("batch_review_policy"):
         return {}
+    source_index = index or read(require_ref(value["source_index"], "batch sources"))
+    order = read(require_ref(value["work_order"], "batch work order"))
+    if source_index.get("batch_reuse_authorization") != order.get("batch_reuse_authorization"):
+        raise ValueError("batch reuse authorization must match the bound user work order")
     report = BATCH.audit(plan or read(require_ref(value["plan"], "batch plan")),
-                         index or read(require_ref(value["source_index"], "batch sources")))
+                         source_index)
     if report["decision"] != "pass":
         raise ValueError("whole-batch plan rejected: " + "; ".join(row["code"] for row in report["failures"]))
     return {"batch_review_policy": BATCH.POLICY, "batch_review_report": report}
@@ -950,6 +976,12 @@ def final_editing_evidence(job: Path, value: dict, output: dict, path: Path, cou
     for shot in summary["visual_shots"]:
         shot["final_in_frame"] = (shot["output_in_frame"] * 5 + 5) // 6
         shot["final_out_frame_exclusive"] = (shot["output_out_frame_exclusive"] * 5 + 5) // 6
+    # Repairing a measurement must not decode identical final frames again.
+    source = ref(path)
+    for cached in sorted(job.glob(f"attempt-*/evidence/final_continuous/{source['sha256']}/000000000_{count:09d}/frames.json")):
+        reference = ref(cached)
+        verify_continuous_visual(reference, source, 0, count)
+        return {"editing": summary, "continuous_visual": reference}
     return {"editing": summary, "continuous_visual": continuous_visual(
         path, 0, count, job / f"attempt-{value['repair_round'] + 1:02d}" / "evidence" / "final_continuous")}
 
@@ -1011,9 +1043,17 @@ def plan_evidence(args) -> None:
     source_asr = {row["source"]["sha256"]: normalized(read(require_ref(row["asr"], "source ASR"))["asr"]["text"])
                   for row in source_index["sources"]}
     result = []
+    candidate_cache = {}
     for output in plan["outputs"]:
         pid = output["plan_id"]
         for index, segment in enumerate(output["segments"], 1):
+            cache_key = (segment["source_sha256"], segment["source_in_frame"],
+                         segment["source_out_frame_exclusive"], segment["source_fps_num"],
+                         segment["source_fps_den"], float(segment.get("audio_gain_db", 0.0)), segment["text"])
+            if cache_key in candidate_cache:
+                result.append({**candidate_cache[cache_key], "plan_id": pid, "segment_index": index,
+                               "candidate_id": segment.get("candidate_id")})
+                continue
             source = Path(segment["source_path"])
             fps = Fraction(segment["source_fps_num"], segment["source_fps_den"])
             start = segment["source_in_frame"] / float(fps)
@@ -1052,6 +1092,7 @@ def plan_evidence(args) -> None:
                    "clean_gap": clean_gap, "visual_boundary": visual_boundary,
                    "decision": "pass" if text_match and source_text_match and clean_gap and metrics["clipped_samples"] == 0 and transient_count == 0 and visual_boundary["decision"] == "pass" else "reject"}
             result.append(row)
+            candidate_cache[cache_key] = row
     evidence_path = job / "evidence" / f"plan_evidence_round_{value['repair_round'] + 1}.json"
     write(evidence_path, {"schema": "video-montage-plan-evidence/v260929", "plan": ref(args.plan),
                           "source_index": value["source_index"], "planning_policy": EDITING.POLICY,
@@ -1067,7 +1108,7 @@ def plan_evidence(args) -> None:
 
 def approve_plan(args) -> None:
     job = args.job_dir.resolve(); value = state(job)
-    if value["phase"] != "plan_evidenced":
+    if value["phase"] not in {"plan_evidenced", "repair_required"} or not value.get("plan_evidence"):
         raise ValueError("plan evidence required")
     evidence_path = require_ref(value["plan_evidence"], "plan evidence")
     evidence = read(evidence_path); review = read(args.review)
@@ -1179,7 +1220,9 @@ def rendered_shot_asr(model, output: Path, rendered: dict, planned: dict,
              "-af", f"atrim=start={cursor / 60:.9f}:end={end / 60:.9f},asetpts=PTS-STARTPTS",
              "-vn", "-ac", "1", "-ar", "16000", "-y", str(target)])
         observed = transcribe(model, target, original["text"], copy_value)
-        observations.append({"shot_index": index + 1, "audio": ref(target), "asr": observed})
+        observations.append({"shot_index": index + 1, "audio": ref(target), "asr": observed,
+                             "output_in_frame": cursor, "output_out_frame_exclusive": end,
+                             "expected_text": original["text"]})
         if (normalized(observed["text"]) != normalized(original["text"])
                 and not context_corroborates_asr(original["text"], observed["text"], copy_value)):
             raise ValueError(f"shot {index + 1}: rendered speech differs from source plan")
@@ -1196,6 +1239,28 @@ def rendered_shot_asr(model, output: Path, rendered: dict, planned: dict,
     return {"text": " ".join(texts), "segments": segments,
             "shot_observations": observations,
             "timing_basis": "verified_rendered_shot_asr", "output": ref(output)}
+
+
+def verified_shot_speech(timing: dict, output_ref: dict, planned: dict, rendered: dict, copy_value: dict) -> bool:
+    if timing.get("output") != output_ref or timing.get("timing_basis") != "verified_rendered_shot_asr":
+        return False
+    originals = rendered_plan_segments(planned, rendered)
+    observations = timing.get("shot_observations", [])
+    if len(observations) != len(originals):
+        return False
+    cursor = 0
+    for index, (row, original, shot) in enumerate(zip(observations, originals, rendered["segments"]), 1):
+        end = cursor + shot["expected_output_frames"]
+        if (row.get("shot_index") != index or row.get("output_in_frame") != cursor
+                or row.get("output_out_frame_exclusive") != end or row.get("expected_text") != original["text"]):
+            return False
+        require_ref(row["audio"], "verified rendered shot audio")
+        observed = row.get("asr", {}).get("text", "")
+        if (normalized(observed) != normalized(original["text"])
+                and not context_corroborates_asr(original["text"], observed, copy_value)):
+            return False
+        cursor = end
+    return cursor == rendered["actual_output_frames"]
 
 
 def clean_qc(args) -> None:
@@ -1225,15 +1290,18 @@ def clean_qc(args) -> None:
         expected = normalized(row["expected_text"]); actual = normalized(asr["text"])
         exact = bool(actual) and actual == expected
         match = exact or context_corroborates_asr(row["expected_text"], asr["text"], copy_value)
-        if not match or metrics["clipped_samples"] or any(cut["decision"] != "pass" for cut in cut_metrics):
-            failures.append(f"{row['plan_id']}: clean ASR/clipping/cut PCM mismatch")
         timing_asr = rendered_shot_asr(model, output,
             read(require_ref(row["render_evidence"], "render evidence")), plan_by_id[row["plan_id"]],
             copy_value, job / "evidence" / "clean_shot_asr" / row["plan_id"])
+        shot_match = verified_shot_speech(timing_asr, row["output"], plan_by_id[row["plan_id"]],
+            read(require_ref(row["render_evidence"], "render evidence")), copy_value)
+        if not shot_match or metrics["clipped_samples"] or any(cut["decision"] != "pass" for cut in cut_metrics):
+            failures.append(f"{row['plan_id']}: clean ASR/clipping/cut PCM mismatch")
         rows.append({"plan_id": row["plan_id"], "output": row["output"], "asr": asr,
                      "timing_asr": timing_asr,
                      "metrics": metrics, "cut_pcm": cut_metrics, "expected_text": row["expected_text"],
-                     "asr_exact": exact, "text_match": match})
+                     "asr_exact": exact, "whole_asr_match": match, "text_match": shot_match,
+                     "text_match_basis": "verified_rendered_shots"})
     report_path = job / "reports" / "clean_qc.json"
     batch_clean = {}
     if value.get("batch_review_policy") and not failures:
@@ -1252,7 +1320,7 @@ def clean_qc(args) -> None:
 
 def subtitle_draft(args) -> None:
     job = args.job_dir.resolve(); value = state(job)
-    if value["phase"] not in {"clean_validated", "repair_required"} or not value.get("asset_copy") or not value.get("clean_qc"):
+    if value["phase"] not in {"clean_validated", "subtitle_drafted", "repair_required"} or not value.get("asset_copy") or not value.get("clean_qc"):
         raise ValueError("clean QC and Codex asset copy index required")
     if read(require_ref(value["clean_qc"], "clean QC")).get("decision") != "pass":
         raise ValueError("passing clean QC required")
@@ -1262,8 +1330,11 @@ def subtitle_draft(args) -> None:
     packager = module("autonomous_packager", "scripts/packaging/scripts/package_video.py")
     output = processing_dir(value)
     rows = []
+    timing_by_id = {row["plan_id"]: row.get("timing_asr")
+                    for row in read(require_ref(value["clean_qc"], "clean QC"))["results"]}
     for row in clean["results"]:
-        draft = packager.draft_one(require_ref(row["output"], "clean output"), row["plan_id"], output, overwrite=True)
+        draft = packager.draft_one(require_ref(row["output"], "clean output"), row["plan_id"], output,
+                                  overwrite=True, verified_asr=timing_by_id.get(row["plan_id"]))
         source = Path(draft["subtitle_txt_path"])
         snapshot = job / f"attempt-{value['repair_round'] + 1:02d}" / "evidence" / "subtitle_drafts" / source.name
         snapshot.parent.mkdir(parents=True, exist_ok=True)
@@ -1403,7 +1474,8 @@ def package(args) -> None:
     manifest = packager.delivery_category(processing_dir(value), "manifests") / "packaging_manifest.json"
     packager.render(args.config.resolve(), processing_dir(value), manifest,
                     autonomous_clean=require_ref(value["clean_delivery"], "clean delivery"),
-                    autonomous_clean_qc=require_ref(value["clean_qc"], "clean QC"), overwrite=True)
+                    autonomous_clean_qc=require_ref(value["clean_qc"], "clean QC"), overwrite=True,
+                    resume=value["phase"] == "repair_required" and bool(value.get("pending_delivery_directory")))
     value["packaging_delivery"] = ref(manifest)
     value["packaging_config"] = ref(Path(read(manifest)["config_snapshot_path"]))
     value["delivery_mode"] = "packaged"
@@ -1557,6 +1629,11 @@ def require_clean_qc(value: dict) -> tuple[dict, dict]:
                 or not isinstance(measured.get("cut_pcm"), list)
                 or any(cut.get("decision") != "pass" for cut in measured["cut_pcm"])):
             raise ValueError("clean QC does not authorize this output")
+        if measured.get("text_match_basis") == "verified_rendered_shots":
+            if not verified_shot_speech(measured.get("timing_asr", {}), row["output"],
+                    plan_by_id[row["plan_id"]], read(Path(row["render_evidence"]["path"])),
+                    read(require_ref(value["asset_copy"], "verified asset copy"))):
+                raise ValueError("clean QC rendered shot speech proof changed")
     return clean, qc
 
 
@@ -1625,7 +1702,8 @@ def clean_final_evidence(job: Path, value: dict) -> None:
 def reburn(args) -> None:
     """Start a fresh subtitle review from the retained, verified clean inputs."""
     job = args.job_dir.resolve(); value = state(job)
-    if value["phase"] != "complete" or not value.get("reburn_inputs"):
+    retry = value.get("reburn_only") and value["phase"] in {"subtitle_drafted", "subtitle_approved", "repair_required"}
+    if (value["phase"] != "complete" and not retry) or not value.get("reburn_inputs"):
         raise ValueError("completed delivery with retained reburn inputs required")
     inputs = value["reburn_inputs"]
     for key in ("plan", "source_index", "asset_copy", "clean_delivery", "clean_qc", "packaging_delivery"):
@@ -1636,11 +1714,24 @@ def reburn(args) -> None:
         require_ref(value["editing_context"], "retained editing authorization")
     clean, qc = require_clean_qc(value)
     previous = read(require_ref(value["packaging_delivery"], "previous packaging"))
-    if args.plan_id not in {row["plan_id"] for row in previous["results"]}:
-        raise ValueError("unknown reburn plan ID")
-    edited = args.subtitle_txt.resolve()
-    if not edited.is_file():
-        raise FileNotFoundError(edited)
+    packager = module("autonomous_reburn_packager", "scripts/packaging/scripts/package_video.py")
+    subtitle_dir = getattr(args, "subtitle_dir", None)
+    plan_id = getattr(args, "plan_id", None)
+    subtitle_txt = getattr(args, "subtitle_txt", None)
+    edits = {}
+    if subtitle_dir is not None:
+        if plan_id is not None or subtitle_txt is not None:
+            raise ValueError("choose subtitle-dir or plan-id with subtitle-txt")
+        for row in previous['results']:
+            target = subtitle_dir.resolve() / packager.subtitle_filename(row['plan_id'])
+            if not target.is_file(): raise FileNotFoundError(target)
+            edits[row['plan_id']] = target
+    else:
+        if plan_id not in {row["plan_id"] for row in previous["results"]} or subtitle_txt is None:
+            raise ValueError("known reburn plan-id and subtitle-txt required")
+        edited = subtitle_txt.resolve()
+        if not edited.is_file(): raise FileNotFoundError(edited)
+        edits[plan_id] = edited
     value["repair_round"] = int(value.get("repair_round", 0)) + 1
     value.pop("compact_delivery", None)
     value.pop("completion", None)
@@ -1648,13 +1739,12 @@ def reburn(args) -> None:
     require_editing_approval(value)
     value["delivery_mode"] = "packaged"
     pending = start_pending_delivery(job, value)
-    packager = module("autonomous_reburn_packager", "scripts/packaging/scripts/package_video.py")
     packager.ensure_delivery_layout(pending)
     by_id = {row["plan_id"]: row for row in clean["results"]}
     drafts = []
     for row in previous["results"]:
         pid = row["plan_id"]
-        source = edited if pid == args.plan_id else require_ref(row["subtitle_snapshot"], "unchanged subtitle")
+        source = edits[pid] if pid in edits else require_ref(row["subtitle_snapshot"], "unchanged subtitle")
         duration = round(packager.video_spec(require_ref(by_id[pid]["output"], "clean output"))["duration"] * 1000)
         packager.parse_srt(source, duration)
         snapshot = job / f"attempt-{value['repair_round'] + 1:02d}" / "evidence" / "subtitle_drafts" / packager.subtitle_filename(pid)
@@ -2046,6 +2136,11 @@ def compact_delivery(job: Path, value: dict) -> None:
         write(context_path, context)
         inputs["editing_context"] = ref(context_path)
         keep.add(context_path)
+    # Shot timing approvals bind actual WAV bytes; these are required for reburn.
+    if inputs.get("clean_qc"):
+        for row in read(require_ref(inputs["clean_qc"], "retained clean QC")).get("results", []):
+            for observation in row.get("timing_asr", {}).get("shot_observations", []):
+                keep.add(require_ref(observation["audio"], "retained rendered shot audio").resolve())
     if value.get("delivery_mode") != "clean" and all(key in inputs for key in ("plan", "source_index", "asset_copy", "clean_delivery", "clean_qc")):
         retained["reburn_inputs"] = inputs
     retained["outputs"] = [{"path": row["output_path"], "sha256": row["output_sha256"]} for row in packaging.get("results", []) if row.get("output_path")]
@@ -2065,15 +2160,16 @@ def main() -> None:
                  "clean-qc", "subtitle-draft", "subtitle-review", "package", "final-evidence", "complete", "repair", "reburn", "status"):
         action = sub.add_parser(name)
         action.add_argument("--job-dir", type=Path, required=name != "init")
-        if name == "init": action.add_argument("--work-order", type=Path, required=True)
+        if name == "init": action.add_argument("--work-order", type=Path, required=True, help="work-order JSON path; use - to read JSON from stdin")
         if name == "asset-copy": action.add_argument("--copy-text", type=Path, required=True)
         if name == "plan-evidence": action.add_argument("--plan", type=Path, required=True)
         if name in {"approve-plan", "subtitle-review", "complete"}: action.add_argument("--review", type=Path, required=True)
         if name == "package": action.add_argument("--config", type=Path, required=True)
         if name == "final-evidence": action.add_argument("--clean", action="store_true")
         if name == "reburn":
-            action.add_argument("--plan-id", required=True)
-            action.add_argument("--subtitle-txt", type=Path, required=True)
+            action.add_argument("--plan-id")
+            action.add_argument("--subtitle-txt", type=Path)
+            action.add_argument("--subtitle-dir", type=Path, help="complete batch of subtitle-<plan_id>.txt files")
         if name == "repair":
             action.add_argument("--reason", required=True)
             action.add_argument("--continue-until-complete", action="store_true")

@@ -29,7 +29,7 @@
       ],
       "controls": {
         "duration_ms": "0 for none; otherwise >=50 and <= half display interval",
-        "layout": "x/y normalized center; max_width; font_size 8/9/10, no arbitrary scaling"
+        "layout": "x/y normalized center; max_width; font_size 8/9, no arbitrary scaling"
       }
     },
     "bounce_up": {
@@ -52,7 +52,7 @@
       ],
       "controls": {
         "duration_ms": "0 for none; otherwise >=50 and <= half display interval",
-        "layout": "x/y normalized center; max_width; font_size 8/9/10, no arbitrary scaling"
+        "layout": "x/y normalized center; max_width; font_size 8/9, no arbitrary scaling"
       },
       "precision": "w8 + full ice2: calibrated shader/motion; other fonts or mixed runs: generic motion with selected glyphs"
     },
@@ -76,7 +76,7 @@
       ],
       "controls": {
         "duration_ms": "0 for none; otherwise >=50 and <= half display interval",
-        "layout": "x/y normalized center; max_width; font_size 8/9/10, no arbitrary scaling"
+        "layout": "x/y normalized center; max_width; font_size 8/9, no arbitrary scaling"
       },
       "precision": "w8 + full ice2: calibrated shader/motion; other fonts or mixed runs: generic motion with selected glyphs"
     },
@@ -100,7 +100,7 @@
       ],
       "controls": {
         "duration_ms": "0 for none; otherwise >=50 and <= half display interval",
-        "layout": "x/y normalized center; max_width; font_size 8/9/10, no arbitrary scaling"
+        "layout": "x/y normalized center; max_width; font_size 8/9, no arbitrary scaling"
       },
       "precision": "w8 + full ice2: calibrated shader/motion; other fonts or mixed runs: generic motion with selected glyphs"
     }
@@ -111,20 +111,18 @@
     "fire1": "黄橙渐变与红边，适合热烈情绪和强卖点"
   },
   "graphics": {},
-  "guidance": "普通字幕黄主白辅，主字体按视频选择，完整游戏名使用既有冰/火花字；叙述以静态为主，按内容选择三种既有入场动画或轻淡入。不添加装饰卡片或新增复刻文字效果。 AI只选择和搭配现成效果，不临时创造效果、动画、花字、着色器或装饰素材。只用文档参数；无合适效果时使用静态字幕。",
+  "guidance": "普通字幕黄色为主；白色仅与同句黄色重点字词搭配，禁止纯白普通字幕。按内容搭配向上弹入、呐喊声波、冰雪飘动，整批禁止单一效果；叙述多数静态。不新增效果。",
   "font_sizes": {
     "allowed": [
       8,
-      9,
-      10
+      9
     ],
     "ordinary_default": 8,
     "game_allowed": [
-      9,
-      10
+      9
     ],
     "game_default": 9,
-    "long_text": "wrap at fixed size up to two lines; otherwise revise reviewed cues"
+    "long_text": "split into reviewed sequential single-line cues at fixed size"
   },
   "effect_policy": "existing_library_only"
 }

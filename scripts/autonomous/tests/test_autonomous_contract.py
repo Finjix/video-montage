@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import tempfile
 import unittest
@@ -19,6 +20,42 @@ SPEC.loader.exec_module(auto)
 
 
 class AutonomousContractTests(unittest.TestCase):
+    def test_init_stdin_keeps_work_root_free_of_loose_files(self):
+        source = self.root / 'source.mp4'; source.write_bytes(b'source fixture')
+        assets = self.root / 'assets'; assets.mkdir()
+        parent = self.root / 'work'
+        job = parent / '自动化混剪_20261010_120000' / '临时文件'
+        order = {'schema': auto.ORDER_SCHEMA, 'requested_outputs': 1,
+                 'sources': [{'path': str(source)}], 'asset_root': str(assets),
+                 'output_root': str(parent)}
+        with patch.object(auto.sys, 'stdin', io.StringIO(json.dumps(order))), patch('builtins.print'):
+            auto.init(SimpleNamespace(work_order=Path('-'), job_dir=job))
+        self.assertEqual(auto.state(job)['phase'], 'initialized')
+        self.assertEqual(auto.read(job / 'work_order.json')['sources'], order['sources'])
+        self.assertEqual(list(parent.iterdir()), [job.parent])
+        with patch.object(auto.sys, 'stdin', io.StringIO(json.dumps(order))):
+            with self.assertRaises(FileExistsError):
+                auto.init(SimpleNamespace(work_order=Path('-'), job_dir=job))
+
+    def test_rendered_shot_proof_requires_complete_bound_audio_and_speech(self):
+        audio = self.root / 'shot.wav'; audio.write_bytes(b'actual encoded shot audio')
+        planned = {'segments': [{'text': '三十个幸存者'}]}
+        rendered = {'segments': [{'expected_output_frames': 60}], 'actual_output_frames': 60}
+        output = {'path': 'clean.mp4', 'sha256': 'clean-hash'}
+        timing = {'output': output, 'timing_basis': 'verified_rendered_shot_asr', 'shot_observations': [
+            {'shot_index': 1, 'audio': auto.ref(audio), 'output_in_frame': 0, 'output_out_frame_exclusive': 60,
+             'expected_text': '三十个幸存者', 'asr': {'text': '30个幸存者'}}]}
+        self.assertTrue(auto.verified_shot_speech(timing, output, planned, rendered, {}))
+        timing['shot_observations'][0]['asr']['text'] = '三个幸存者'
+        self.assertFalse(auto.verified_shot_speech(timing, output, planned, rendered, {}))
+        timing['shot_observations'][0]['asr']['text'] = '30个幸存者'
+        timing['shot_observations'][0]['output_out_frame_exclusive'] = 59
+        self.assertFalse(auto.verified_shot_speech(timing, output, planned, rendered, {}))
+        timing['shot_observations'][0]['output_out_frame_exclusive'] = 60
+        audio.write_bytes(b'changed audio')
+        with self.assertRaisesRegex(ValueError, 'changed or missing'):
+            auto.verified_shot_speech(timing, output, planned, rendered, {})
+
     def test_rendered_shot_asr_anchors_words_and_rejects_missing_speech(self):
         output = self.root / "clean.mp4"
         output.write_bytes(b"hash-bound clean video")
@@ -76,6 +113,14 @@ class AutonomousContractTests(unittest.TestCase):
         self.assertEqual("reject", auto.packaged_mix_evidence(mixed[:-1], voice, music, -20)["decision"])
 
     def test_reviewed_subtitle_spelling_keeps_other_speech_exact(self):
+        self.assertEqual(auto.normalized('我收了30个幸存者'), auto.normalized('我收了三十个幸存者'))
+        self.assertEqual(auto.normalized('13个'), auto.normalized('十三个'))
+        self.assertNotEqual(auto.normalized('13个'), auto.normalized('一三个'))
+        self.assertNotEqual(auto.normalized('30个'), auto.normalized('300个'))
+        self.assertEqual(auto.subtitle_spelling('随开随晚吴岳聚爽聚解压'),
+                         auto.subtitle_spelling('随开随玩吴樾巨爽巨解压'))
+        self.assertNotEqual(auto.normalized('随开随晚吴岳'), auto.normalized('随开随玩吴樾'))
+        self.assertNotEqual(auto.subtitle_spelling('随开随晚'), auto.subtitle_spelling('随开随玩免费领钱'))
         self.assertEqual(auto.subtitle_spelling("做的是真呆劲"), auto.subtitle_spelling("做的是真带劲"))
         self.assertNotEqual(auto.subtitle_spelling("做的是真带劲"), auto.subtitle_spelling("做的是真没劲"))
         self.assertNotEqual(auto.subtitle_spelling("做的是真带劲"), auto.subtitle_spelling("做的是真带劲谢谢观看"))
@@ -302,6 +347,10 @@ class AutonomousContractTests(unittest.TestCase):
         samples[16000:] = .1
         self.assertEqual("reject", auto.cut_pcm_metrics(samples, [60], clean=False)[0]["decision"])
         samples[:] = .001
+        self.assertEqual("pass", auto.cut_pcm_metrics(samples, [60], clean=False)[0]["decision"])
+        # A quiet speech onset is not an abrupt loud music change.
+        samples[:16000] = .0001
+        samples[16000:] = .025
         self.assertEqual("pass", auto.cut_pcm_metrics(samples, [60], clean=False)[0]["decision"])
 
     def test_bgm_masking_margin_and_stale_hash_are_rejected(self):

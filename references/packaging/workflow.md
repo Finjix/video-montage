@@ -54,11 +54,11 @@ assets\dependencies\python\python.exe scripts\packaging\scripts\package_video.py
 
 名牌省略区间时显示前192帧，免责覆盖全片，图片须为含透明区域的9:16 PNG。文字钉仅按明确要求添加，并写明起止帧；装饰卡片不支持。BGM循环到片尾，口播不自动减半。字体为W8、得意黑、方糖体，花字为冰1、冰2、火1。所有选择由设计明确指定，配置与清单保存实际资源哈希；重烧要求原设计快照及哈希，字幕改字或条数改变须重新审查设计，不从旧清单推断字体/花字。
 
-独立生成可换字的透明 PNG：`assets/dependencies/python/python.exe tools/render_subtitle_flower.py --font w8 --text "冰雪世界" --style ice1 --scale 2 --output work/ice-text.png`。同一接口支持单字、较长文案、中英文混排和标点。
+独立生成可换字的透明 PNG：`assets/dependencies/python/python.exe tools/render_subtitle_flower.py --font w8 --text "冰雪世界" --style ice1 --scale 2 --output work/自动化混剪_YYYYMMDD_HHMMSS/临时文件/evidence/ice-text.png`。同一接口支持单字、较长文案、中英文混排和标点。
 
 默认冰1/冰2继续采用 H.264 `yuv420p`、CRF 18。显式使用火1且字幕中确有该花字时，使用 RGB 合成后转为 H.264 `yuv444p`、CRF 8，保留细红边的颜色精度；否则 4:2:0 色度采样会明显降低该风格的 RGB SSIM。火1的编码体积较大，且部分硬件播放器不支持 H.264 4:4:4；默认随机冰字不受影响。交付清单记录实际 `video_encoding`。
 
-运行 `assets/dependencies/python/python.exe tools/compare_subtitle_flower.py --output-dir work/flower-comparison`，对三套花字进行检查；也可用 `--style ice1 --reference <原图路径>` 单独指定参考图。工具调用生产中的字体渲染、着色和 FFmpeg RGB overlay，在参考尺寸及黑背景下计算前景并集（向外扩 2 像素）的 RGB SSIM；另外调用完整包装流程，以 1440×2560、60 fps 的 H.264 实际烧录输出测量，再截取花字区域并等比还原到参考尺寸。两项阈值均为 0.95，任一风格任一项未通过即返回失败。对照 PNG 三列依次为原图、字体生成、实际视频还原；JSON 记录分数、编码配置、效果参数及字体渲染器哈希。95% 是对所提供三张参考图的可测验收，并非没有参考图的新文案逐字百分比。不同背景仍需检查混排、透明边缘和遮挡。回归测试还检查换字确实产生新字形，并禁止渲染器打开任何固定字样图片。
+运行 `assets/dependencies/python/python.exe tools/compare_subtitle_flower.py --output-dir work/自动化混剪_YYYYMMDD_HHMMSS/临时文件/evidence/flower-comparison`，对三套花字进行检查；也可用 `--style ice1 --reference <原图路径>` 单独指定参考图。工具调用生产中的字体渲染、着色和 FFmpeg RGB overlay，在参考尺寸及黑背景下计算前景并集（向外扩 2 像素）的 RGB SSIM；另外调用完整包装流程，以 1440×2560、60 fps 的 H.264 实际烧录输出测量，再截取花字区域并等比还原到参考尺寸。两项阈值均为 0.95，任一风格任一项未通过即返回失败。对照 PNG 三列依次为原图、字体生成、实际视频还原；JSON 记录分数、编码配置、效果参数及字体渲染器哈希。95% 是对所提供三张参考图的可测验收，并非没有参考图的新文案逐字百分比。不同背景仍需检查混排、透明边缘和遮挡。回归测试还检查换字确实产生新字形，并禁止渲染器打开任何固定字样图片。
 
 开发时可用 `tools/build_subtitle_flowers.py --fire1 <火1原图> --ice1 <冰1原图> --ice2 <冰2原图> --optimizer-path <本地SciPy目录> --refit-geometry` 重新标定数值参数。SciPy 仅用于此标定工具，不加入便携运行依赖；生产字体渲染不需要它。标定结果还须通过上面的实际视频验收，不能用标定分数代替最终烧录分数。
 
@@ -128,8 +128,8 @@ assets\dependencies\python\python.exe scripts\executor\scripts\three_suite_ff.py
 新字体可单独预览，例如：
 
 ```powershell
-assets/dependencies/python/python.exe tools/render_subtitle_flower.py --font smiley --text "冰雪世界" --style ice1 --output work/smiley-ice.png
-assets/dependencies/python/python.exe tools/render_subtitle_flower.py --font fangtang --text "全新挑战" --style fire1 --output work/fangtang-fire.png
+assets/dependencies/python/python.exe tools/render_subtitle_flower.py --font smiley --text "冰雪世界" --style ice1 --output work/自动化混剪_YYYYMMDD_HHMMSS/临时文件/evidence/smiley-ice.png
+assets/dependencies/python/python.exe tools/render_subtitle_flower.py --font fangtang --text "全新挑战" --style fire1 --output work/自动化混剪_YYYYMMDD_HHMMSS/临时文件/evidence/fangtang-fire.png
 ```
 
 参考图的 95% SSIM 回归验收固定使用 W8，以免更换字体本身的字形差异影响比较。新字体另以实际烧录、透明轮廓、任意文案、混排间距、实际字高/中心位置以及字体选择/重新烧录一致性测试验收。

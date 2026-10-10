@@ -52,6 +52,13 @@ decoded clean videos for duplicate picture sequences before packaging. Codex
 must review the hash-bound batch report and actual encoded opening families;
 single-video approval or different fonts/BGM cannot authorize duplicate content.
 This is an acceptance gate after semantic planning, not a diversification selector.
+When the user explicitly permits additional reuse to meet the requested count,
+record their instruction in the work order as `batch_reuse_authorization` with
+`policy: explicit-user-reasonable-reuse/v1`, `authorized_by: user` and `instruction`.
+Use the documented reasonable-reuse caps in the batch contract. Preserve coherent
+speech, real shots, protagonist restrictions and full quality review. Never repeat
+whole finished edits or use packaging changes to conceal substantial duplication.
+Without explicit user authorization, retain the original stricter caps.
 
 Before delivering any finished video, apply a single whole-video 1.2x speed-up
 after editing and any requested packaging, and before final evidence, review and
@@ -88,6 +95,10 @@ reburn commands. Subtitles burn into the picture only. Each new packaging task
 uses a Codex-authored design for each video: choose its main font from WenYue
 W8, Smiley Sans (得意黑) or FangTang (方糖体), keep ordinary text primarily yellow
 with white support, and use complete flower text for every actual game name.
+Never use an ordinary all-white cue. Yellow remains the main color; when a cue
+needs selective emphasis, make the emphasized words yellow and the rest white
+within the same cue. Ordinary narration can remain entirely yellow. Existing
+game-name flowers keep their calibrated palette.
 Only two reference-calibrated font sizes, 8 and 9, are allowed: ordinary text defaults to 8;
 game names use 9 and are the only allowed mixed-size text within a caption.
 Other emphasis may use 9 only as a separately displayed, uniformly sized caption;
@@ -108,7 +119,13 @@ do not invent effect parameters or change calibrated implementations.
 Use the existing ice1/ice2/fire1 flowers
 and bounce_up/shout_wave/ice_drift entrances, or static (none); fade is not allowed; keep ordinary
 narration readable and mostly static. Do not add decorative cards or the removed
-reference-derived text templates. Review actual final motion and composition,
+reference-derived text templates. Packaging must vary effects across the batch:
+use all three existing animations in batches of three or more outputs, at least
+two in a two-output batch, and avoid one effect exceeding 70 percent of animated
+cues. Choose by speech meaning and available space, not blind cycling. Match
+ice_drift to icy/game-name atmosphere, shout_wave to emotional emphasis, and
+bounce_up to short positive hooks. Check the full batch distribution before burn-in.
+Do not require animation on every cue; preserve stable reading time. Review actual final motion and composition,
 providing `design_pass` and a concrete `design_reason`. Old configurations without design
 fields are rejected; every packaging and reburn configuration requires an explicit design.
 Without packaging, use `clean-qc`, `final-evidence --clean` and `complete` with
@@ -128,6 +145,18 @@ New deliveries use `work/自动化混剪_YYYYMMDD_HHMMSS` in Beijing time. Refus
 All subdirectories inside `临时文件/` use English names. Generate logs, evidence,
 reviews and reports during processing and QC, then remove them after successful
 completion. Preserve only files necessary for subsequent editing, reburn and repair.
+The project `work/` root contains batch delivery directories only, never loose
+files or temporary utility directories. This applies to Codex-created helper
+scripts, request/work-order JSON, preview images, contact sheets, scans, logs and
+diagnostics as well as files created by the production commands. Store disposable
+helpers in `<job_dir>/scripts/`, input configuration in `<job_dir>/config/`, and
+other temporary material in the appropriate English subdirectory of `<job_dir>`.
+Before init returns a job directory, pass an in-memory work order through
+`init --work-order -` on stdin; init saves its snapshot inside that batch.
+After init, use its returned `job_dir` for every temporary output and resolve
+helper paths from explicit project/job roots, not the helper's parent directory.
+On completion, remove disposable helpers with the other process records. Check
+that this task created no loose files or utility directories directly in `work/`.
 A compact completed autonomous job regenerates evidence from sources on repair;
 never reuse deleted evidence or claim old approvals remain valid. Legacy jobs retain
 their existing hash-bound paths until their workflow supports compact delivery.

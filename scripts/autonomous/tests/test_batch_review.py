@@ -73,6 +73,49 @@ class BatchPlanTests(unittest.TestCase):
         plan, index = self.make_batch()
         self.assertEqual(batch.audit(plan, index)["decision"], "pass")
 
+    def authorize_reuse(self, plan, index):
+        authorization = {"policy": batch.REASONABLE_REUSE_POLICY, "authorized_by": "user",
+                         "instruction": "Allow reasonable reuse to meet the count, avoid extensive duplicates."}
+        index["batch_reuse_authorization"] = authorization
+        plan["batch_reuse_authorization"] = copy.deepcopy(authorization)
+
+    def test_reasonable_reuse_requires_bound_user_authorization(self):
+        plan, index = self.make_batch()
+        self.authorize_reuse(plan, index)
+        report = batch.audit(plan, index)
+        self.assertEqual(report["limits"]["opening_uses"], 7)
+        plan["batch_reuse_authorization"]["instruction"] = "different"
+        self.assertIn("BATCH_REUSE_AUTHORIZATION_MISMATCH", self.codes(plan, index))
+        index["batch_reuse_authorization"]["authorized_by"] = "codex"
+        with self.assertRaises(ValueError):
+            batch.audit(plan, index)
+
+    def test_reasonable_reuse_never_allows_whole_plan_clones(self):
+        plan, index = self.make_batch()
+        self.authorize_reuse(plan, index)
+        plan["outputs"][1] = dict(copy.deepcopy(plan["outputs"][0]), plan_id="clone")
+        self.assertIn("DUPLICATE_COMPLETE_SPOKEN_CONTENT", self.codes(plan, index))
+
+    def test_source_index_cannot_add_reuse_authorization_to_work_order(self):
+        plan, index = self.make_batch()
+        self.authorize_reuse(plan, index)
+        with tempfile.TemporaryDirectory() as directory:
+            order = Path(directory) / "order.json"
+            auto.write(order, {"requested_outputs": 2})
+            value = {"batch_review_policy": batch.POLICY, "work_order": auto.ref(order)}
+            with self.assertRaisesRegex(ValueError, "bound user work order"):
+                auto.batch_fields(value, plan, index)
+
+    def test_reasonable_reuse_allows_three_middle_routes_but_not_mass_variants(self):
+        plan, index = self.make_batch(4)
+        for row in plan["outputs"]:
+            for i in (1, 2):
+                row["segments"][i]["semantic_cluster_id"] = plan["outputs"][0]["segments"][i]["semantic_cluster_id"]
+        self.authorize_reuse(plan, index)
+        self.assertIn("HEAD_OR_TAIL_ONLY_VARIANT", self.codes(plan, index))
+        plan["outputs"].pop()
+        self.assertNotIn("HEAD_OR_TAIL_ONLY_VARIANT", self.codes(plan, index))
+
     def test_three_routes_copied_to_forty_cannot_pass(self):
         plan, index = self.make_batch(3)
         originals = copy.deepcopy(plan["outputs"])
