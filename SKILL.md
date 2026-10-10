@@ -43,6 +43,16 @@ dependent speech for diversity. New plans bind `semantic-continuity/v1` and need
 per-transition, per-shot and whole-edit findings; the diversity selector is removed.
 Historical completions and subtitle-only reburns keep their original contract.
 
+For new jobs and full-edit repairs also read [whole-batch review](references/autonomous/batch-review.md).
+Bind `semantic-batch-review/v1`. Exhaust the source-turn inventory, prove enough
+coherent unique routes for the requested count, and enforce source-content,
+exact-text, opening visual family, first-two-shot, closing and narrative reuse
+limits. Never cycle a few prior plans to fill a batch. Check the actual complete
+decoded clean videos for duplicate picture sequences before packaging. Codex
+must review the hash-bound batch report and actual encoded opening families;
+single-video approval or different fonts/BGM cannot authorize duplicate content.
+This is an acceptance gate after semantic planning, not a diversification selector.
+
 Before delivering any finished video, apply a single whole-video 1.2x speed-up
 after editing and any requested packaging, and before final evidence, review and
 completion. Speed up picture and all mixed audio together, preserve audio pitch,

@@ -24,6 +24,8 @@ Codex 在同一个任务中完成语义与画面判断，不委派独立代理�
 
 组片前阅读[语义优先规则](semantic-planning.md)。新任务及完整剪辑返修绑定 `semantic-continuity/v1`：完整话轮与语境分析在先，相邻真实关系及整条叙事审核在后；不再执行批次多样化选片。底片 21.6–36 秒，最终倍速成品严格 18–30 秒，至少四个实际视觉镜头，每条画面只允许其指定主角，允许其他角色的画外对白。同一连续镜头不能拆段凑数。候选与最终输出取证覆盖完整区间，计划审核提交逐转场、逐镜及逐成片判断。历史完成任务和单纯字幕重烧保留原契约。
 
+还须执行[整批审核](batch-review.md)：新任务和完整返修固定 `semantic-batch-review/v1`，完整候选库存、语义分类和实际视觉类别纳入计划；`plan-evidence` 先拒绝组合重复、片头/前两镜集中复用、相同中段变体和容量不足。计划与最终审核提交绑定自动报告的整批判断及逐条片头类别结论。`clean-qc` 完整解码底片并拒绝相同画面序列；文件名、字幕字体、BGM、增益和切点轻微变化均不能充当内容差异。
+
 1. `init --work-order <JSON>`，程序返回 `work/自动化混剪_xx/临时文件/` 的任务路径，然后 `prepare --job-dir <返回的任务路径>`。也可显式传入符合该结构的 `--job-dir`。工作单使用 `video-montage-autonomous-work-order/v260929`，包含 `requested_outputs`、`sources: [{"path": "原片绝对路径", "sha256": "可选校验值"}]`、`asset_root` ，可选 `output_root` 必须指向项目的 `work` 目录，省略时自动使用项目 `work`。`prepare` 对每条原片重新转写，记录原生帧率、源哈希、说明文字和图片哈希。
 2. Codex 查看素材图片并提交 `video-montage-codex-asset-copy/v260929`：`reviewer_role: "codex"`、`sources_sha256` 指向 `asset_copy_sources.json`，`assets` 对每个素材哈希给出可见文字。说明文件必须逐字保留；看不清的图片填空，不能猜测。
 3. Codex 依据原片转写与画面提交 `video-montage-autonomous-plan/v260929`，顶层声明 `planning_policy: "semantic-continuity/v1"`，`outputs` 逐成片增加 `protagonist_id`、完整 `visual_shots`；逐片段增加目的与叙事阶段，逐相邻话轮增加有实际台词引用的 `transitions`。完整接口和审核字段见[语义优先规则](semantic-planning.md)。依次运行 `plan-evidence --plan <JSON>`、`approve-plan --review <JSON>`。后者的 `video-montage-codex-review/v260929` 需声明 `stage: "plan"`、`reviewer_role: "codex"`、`evidence_sha256`、`plan_sha256`，并逐片段给出 `semantic_pass`、`visual_pass`、`entry_visual_pass`、`exit_visual_pass`、具体 `reason` 和 `boundary_reason`。机器另查完整转写、首尾 40 毫秒低能量、削波、孤立突发声和逐帧证据；比较片段首尾各 13 帧，并扫描首尾半秒内是否藏有原片转场。Codex 必须看首尾连续 30 帧及相邻片段交界，比较人物位置、景别和画面尺寸；成片后逐帧复查每个拼接点，避免短时间内连续跳镜。不合格片段不可批准。

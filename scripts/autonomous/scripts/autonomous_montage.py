@@ -49,6 +49,7 @@ def module(name: str, relative: str):
 
 SOURCE_TIMING = module("autonomous_source_timing", "scripts/semantic/scripts/source_timing.py")
 EDITING = module("autonomous_editing_policy", "scripts/autonomous/scripts/planning_policy.py")
+BATCH = module("autonomous_batch_review", "scripts/autonomous/scripts/batch_review.py")
 
 
 def read(path: Path) -> dict:
@@ -478,6 +479,13 @@ def state(job: Path) -> dict:
     policy = order.get("planning_policy")
     if policy and (policy != EDITING.POLICY or value.get("planning_policy") != policy):
         raise ValueError("work-order planning policy changed or missing in state")
+    if order.get("batch_review_policy") != value.get("batch_review_policy"):
+        raise ValueError("work-order batch review policy changed or missing in state")
+    if value.get("batch_review_policy") not in {None, BATCH.POLICY}:
+        raise ValueError("unknown batch review policy")
+    if not value.get("batch_review_policy") and value.get("plan"):
+        if read(require_ref(value["plan"], "plan policy")).get("batch_review_policy"):
+            raise ValueError("whole-batch plan cannot lose its job review policy")
     return value
 
 
@@ -519,6 +527,11 @@ def repair(args) -> None:
     value.pop("pending_delivery_directory", None)
     value.pop("reburn_only", None)
     value["planning_policy"] = EDITING.POLICY
+    order = read(require_ref(value["work_order"], "work order"))
+    upgraded_order = job / "config" / "full_repair_work_order.json"
+    write(upgraded_order, {**order, "planning_policy": EDITING.POLICY, "batch_review_policy": BATCH.POLICY})
+    value["work_order"] = ref(upgraded_order)
+    value["batch_review_policy"] = BATCH.POLICY
     for key in ("plan", "plan_evidence", "plan_review", "editing_context", "batch_diversity", "diversity_selection",
                 "clean_delivery", "clean_qc", "subtitle_draft", "subtitle_review", "packaging_delivery", "packaging_config"):
         value.pop(key, None)
@@ -587,7 +600,7 @@ def init(args) -> None:
     job.mkdir(parents=True)
     packager.ensure_delivery_layout(output)
     order_snapshot = job / "work_order.json"
-    write(order_snapshot, {**order, "planning_policy": EDITING.POLICY})
+    write(order_snapshot, {**order, "planning_policy": EDITING.POLICY, "batch_review_policy": BATCH.POLICY})
     save(job, {"schema": STATE_SCHEMA, "review_mode": "codex_asr_pcm", "work_order": ref(order_snapshot),
                "source_hashes": {str(Path(row["path"]).resolve()): sha(Path(row["path"])) for row in sources},
                "asset_root": str(asset), "output_root": str(output), "delivery_directory": str(output),
@@ -595,6 +608,7 @@ def init(args) -> None:
                "temporary_root": str(output / "临时文件"), "repair_round": 0,
                "packaging_design_policy": "codex/v1",
                "planning_policy": EDITING.POLICY,
+               "batch_review_policy": BATCH.POLICY,
                "max_repair_rounds": MAX_ROUNDS, "continue_until_complete": True}, "initialized")
     print(json.dumps({"job_dir": str(job), "delivery_directory": str(output)}, ensure_ascii=False))
 
@@ -660,7 +674,8 @@ def asset_copy(args) -> None:
     save(job, value, "copy_indexed")
 
 
-def check_plan(plan: dict, source_index: dict, count: int, policy: str | None = None) -> list[str]:
+def check_plan(plan: dict, source_index: dict, count: int, policy: str | None = None,
+               batch_policy: str | None = None) -> list[str]:
     errors = []
     if plan.get("schema") != PLAN_SCHEMA or len(plan.get("outputs", [])) != count:
         return ["plan schema or complete output scope"]
@@ -710,6 +725,14 @@ def check_plan(plan: dict, source_index: dict, count: int, policy: str | None = 
                     errors.extend(f"{output['plan_id']}:{error}" for error in EDITING.audit_output(output))
                 except (KeyError, TypeError, ValueError, ZeroDivisionError) as error:
                     errors.append(f"{output['plan_id']}: invalid editorial annotations: {error}")
+    if batch_policy or plan.get("batch_review_policy"):
+        if batch_policy not in {None, BATCH.POLICY}:
+            errors.append("unknown batch review policy")
+        try:
+            report = BATCH.audit(plan, source_index)
+            errors.extend(f"{row['code']}:{row['scope']}:{row['detail']}" for row in report["failures"])
+        except (KeyError, TypeError, ValueError, ZeroDivisionError) as exc:
+            errors.append(f"BATCH_REVIEW_INPUT_INVALID:{exc}")
     return errors
 
 
@@ -815,7 +838,8 @@ def require_editing_approval(value: dict) -> None:
     plan_path = require_ref(value["plan"], "semantic-first plan")
     plan = read(plan_path)
     errors = check_plan(plan, read(require_ref(value["source_index"], "source index")),
-                        int(read(require_ref(value["work_order"], "work order"))["requested_outputs"]), EDITING.POLICY)
+                        int(read(require_ref(value["work_order"], "work order"))["requested_outputs"]), EDITING.POLICY,
+                        value.get("batch_review_policy"))
     if errors:
         raise ValueError("semantic-first plan rejected: " + "; ".join(errors))
     if value.get("reburn_only"):
@@ -824,6 +848,10 @@ def require_editing_approval(value: dict) -> None:
                 or context.get("plan") != value["plan"] or context.get("clean_delivery") != value["clean_delivery"]
                 or context.get("outputs") != [EDITING.summary(output) for output in plan["outputs"]]):
             raise ValueError("retained clean editing authorization changed")
+        if value.get("batch_review_policy") and (
+                context.get("batch_review_policy") != BATCH.POLICY
+                or context.get("batch_report_digest") != BATCH.digest(batch_fields(value)["batch_review_report"])):
+            raise ValueError("retained whole-batch editing authorization changed")
         return
     evidence_path = require_ref(value["plan_evidence"], "semantic-first plan evidence")
     evidence = read(evidence_path)
@@ -835,6 +863,7 @@ def require_editing_approval(value: dict) -> None:
             or review.get("evidence_sha256") != sha(evidence_path) or review.get("plan_sha256") != sha(plan_path)):
         raise ValueError("semantic-first editorial approval binding invalid")
     errors = EDITING.plan_review_errors(plan, evidence, review)
+    errors.extend(batch_review_errors(value, evidence, review))
     if errors:
         raise ValueError("semantic-first editorial approval rejected: " + "; ".join(errors))
     segments = {(output["plan_id"], index): segment for output in plan["outputs"]
@@ -849,6 +878,68 @@ def require_editing_approval(value: dict) -> None:
                                  segment["source_in_frame"], segment["source_out_frame_exclusive"])
     if errors:
         raise ValueError("semantic-first editorial approval rejected: " + "; ".join(errors))
+
+
+def batch_fields(value: dict, plan: dict | None = None, index: dict | None = None) -> dict:
+    if not value.get("batch_review_policy"):
+        return {}
+    report = BATCH.audit(plan or read(require_ref(value["plan"], "batch plan")),
+                         index or read(require_ref(value["source_index"], "batch sources")))
+    if report["decision"] != "pass":
+        raise ValueError("whole-batch plan rejected: " + "; ".join(row["code"] for row in report["failures"]))
+    return {"batch_review_policy": BATCH.POLICY, "batch_review_report": report}
+
+
+def batch_review_errors(value: dict, evidence: dict, review: dict) -> list[str]:
+    fields = batch_fields(value)
+    if not fields:
+        return []
+    if any(evidence.get(key) != item for key, item in fields.items()):
+        return ["WHOLE_BATCH_EVIDENCE_CHANGED"]
+    return BATCH.review_errors(fields["batch_review_report"], review)
+
+
+def clean_batch_evidence(job: Path, value: dict, clean: dict) -> dict:
+    rows = []
+    for item in clean["results"]:
+        path = require_ref(item["output"], "batch clean output")
+        count = read(require_ref(item["render_evidence"], "batch render evidence"))["actual_output_frames"]
+        payload = run([str(FFMPEG), "-v", "error", "-nostdin", "-i", str(path), "-an",
+                       "-vf", "scale=240:-2:flags=area,format=yuv420p", "-fps_mode", "passthrough",
+                       "-f", "framemd5", "-"])
+        fingerprint = BATCH.frame_digest(payload, count)
+        proof = job / "manifests" / "batch_frames" / f"{item['plan_id']}.framemd5"
+        proof.parent.mkdir(parents=True, exist_ok=True)
+        proof.write_text(payload, encoding="utf-8")
+        rows.append({"plan_id": item["plan_id"], "output": item["output"], "frames": count,
+                     "decoded_visual_digest": fingerprint, "proof": ref(proof)})
+    failures = BATCH.clean_errors(rows)
+    return {"schema": BATCH.POLICY, "clean_delivery": value["clean_delivery"],
+            "plan_sha256": value["plan"]["sha256"], "generator": ref(FFMPEG), "width": 240,
+            "results": rows, "decision": "reject" if failures else "pass", "failures": failures}
+
+
+def require_clean_batch(value: dict, clean: dict, qc: dict) -> None:
+    if not value.get("batch_review_policy"):
+        return
+    report = qc.get("batch_clean", {})
+    expected = {row["plan_id"]: row for row in clean["results"]}
+    rows = report.get("results", [])
+    if (qc.get("batch_review_policy") != BATCH.POLICY or report.get("schema") != BATCH.POLICY
+            or report.get("clean_delivery") != value["clean_delivery"]
+            or report.get("plan_sha256") != value["plan"]["sha256"] or report.get("width") != 240
+            or report.get("generator") != ref(FFMPEG) or report.get("decision") != "pass"
+            or len(rows) != len(expected) or {row.get("plan_id") for row in rows} != set(expected)):
+        raise ValueError("hash-bound whole-batch clean QC required")
+    for row in rows:
+        current = expected[row["plan_id"]]
+        if (row.get("output") != current["output"]
+                or row.get("frames") != read(require_ref(current["render_evidence"], "batch timeline"))["actual_output_frames"]
+                or BATCH.frame_digest(require_ref(row["proof"], "decoded clean-frame fingerprints").read_text(encoding="utf-8"), row["frames"])
+                   != row.get("decoded_visual_digest")):
+            raise ValueError("whole-batch clean fingerprint binding changed")
+    if BATCH.clean_errors(rows) or report.get("failures"):
+        raise ValueError("duplicate rendered clean videos cannot be delivered")
 
 
 def final_editing_evidence(job: Path, value: dict, output: dict, path: Path, count: int) -> dict:
@@ -913,7 +1004,7 @@ def plan_evidence(args) -> None:
     for key in ("plan_review", "final_review", "completion", "clean_delivery", "clean_qc", "subtitle_review",
                 "packaging_delivery", "final_evidence", "editing_context", "batch_diversity", "diversity_selection"):
         value.pop(key, None)
-    errors = check_plan(plan, source_index, int(order["requested_outputs"]), EDITING.POLICY)
+    errors = check_plan(plan, source_index, int(order["requested_outputs"]), EDITING.POLICY, value.get("batch_review_policy"))
     if errors:
         fail_round(job, value, "plan", errors)
     model = load_model()
@@ -966,6 +1057,7 @@ def plan_evidence(args) -> None:
     write(evidence_path, {"schema": "video-montage-plan-evidence/v260929", "plan": ref(args.plan),
                           "source_index": value["source_index"], "planning_policy": EDITING.POLICY,
                           "outputs": [EDITING.summary(output) for output in plan["outputs"]],
+                          **batch_fields(value, plan, source_index),
                           "results": result})
     value["plan"] = ref(args.plan); value["plan_evidence"] = ref(evidence_path)
     failures = [f"{row['plan_id']}:{row['segment_index']}:ASR/PCM/visual boundary inconclusive" for row in result if row["decision"] != "pass"]
@@ -993,10 +1085,12 @@ def approve_plan(args) -> None:
             raise ValueError("semantic-first review required; legacy approval cannot authorize this edit")
         plan = read(require_ref(value["plan"], "plan"))
         policy_errors = check_plan(plan, read(require_ref(value["source_index"], "source index")),
-                                  int(read(require_ref(value["work_order"], "work order"))["requested_outputs"]), EDITING.POLICY)
+                                  int(read(require_ref(value["work_order"], "work order"))["requested_outputs"]), EDITING.POLICY,
+                                  value.get("batch_review_policy"))
         if policy_errors:
             fail_round(job, value, "codex_whole_edit_review", policy_errors)
         policy_errors += EDITING.plan_review_errors(plan, evidence, review)
+        policy_errors += batch_review_errors(value, evidence, review)
         if policy_errors:
             fail_round(job, value, "codex_whole_edit_review", policy_errors)
     findings = review.get("segments", [])
@@ -1142,9 +1236,14 @@ def clean_qc(args) -> None:
                      "metrics": metrics, "cut_pcm": cut_metrics, "expected_text": row["expected_text"],
                      "asr_exact": exact, "text_match": match})
     report_path = job / "reports" / "clean_qc.json"
+    batch_clean = {}
+    if value.get("batch_review_policy") and not failures:
+        batch_clean = clean_batch_evidence(job, value, clean)
+        failures.extend(batch_clean["failures"])
     write(report_path, {"schema": "video-montage-autonomous-clean-qc/v260929",
                         "clean_delivery": ref(clean_path), "results": rows,
                         **({"planning_policy": EDITING.POLICY, "plan_sha256": value["plan"]["sha256"]} if semantic_first(value) else {}),
+                        **({"batch_review_policy": BATCH.POLICY, "batch_clean": batch_clean} if batch_clean else {}),
                         "decision": "pass" if not failures else "reject", "failures": failures})
     value["clean_qc"] = ref(report_path)
     if failures:
@@ -1158,6 +1257,8 @@ def subtitle_draft(args) -> None:
         raise ValueError("clean QC and Codex asset copy index required")
     if read(require_ref(value["clean_qc"], "clean QC")).get("decision") != "pass":
         raise ValueError("passing clean QC required")
+    if value.get("batch_review_policy"):
+        require_clean_qc(value)
     clean = read(require_ref(value["clean_delivery"], "clean delivery"))
     packager = module("autonomous_packager", "scripts/packaging/scripts/package_video.py")
     output = processing_dir(value)
@@ -1418,6 +1519,7 @@ def final_evidence(args) -> None:
     write(report, {"schema": "video-montage-autonomous-final-evidence/v260929", "manifest": ref(manifest_path),
                    "subtitle_review": value["subtitle_review"], "results": rows,
                    **({"planning_policy": EDITING.POLICY, "plan": value["plan"]} if semantic_first(value) else {}),
+                   **batch_fields(value),
                    "decision": "pass" if not failures else "reject", "failures": failures})
     value["final_evidence"] = ref(report)
     if failures:
@@ -1441,6 +1543,7 @@ def require_clean_qc(value: dict) -> tuple[dict, dict]:
                 or clean.get("plan_sha256") != value["plan"]["sha256"] or qc.get("plan_sha256") != value["plan"]["sha256"]):
             raise ValueError("semantic-first clean QC binding invalid")
         plan_by_id = {row["plan_id"]: row for row in read(require_ref(value["plan"], "plan"))["outputs"]}
+    require_clean_batch(value, clean, qc)
     for row in clean["results"]:
         measured = by_id[row["plan_id"]]
         require_ref(row["output"], "clean output")
@@ -1511,6 +1614,7 @@ def clean_final_evidence(job: Path, value: dict) -> None:
                  "clean_delivery": value["clean_delivery"], "clean_qc": value["clean_qc"],
                  "final_clean_delivery": value["final_clean_delivery"],
                  **({"planning_policy": EDITING.POLICY, "plan": value["plan"]} if semantic_first(value) else {}),
+                 **batch_fields(value),
                  "results": rows, "decision": "reject" if failures else "pass", "failures": failures})
     value["final_evidence"] = ref(path)
     value["delivery_mode"] = "clean"
@@ -1623,6 +1727,10 @@ def publish_delivery(job: Path, value: dict) -> list[dict]:
     copies.append((clean_path, clean_target))
     qc = relocate(qc)
     qc["clean_delivery"] = clean_ref
+    if qc.get("batch_clean"):
+        qc["batch_clean"]["clean_delivery"] = clean_ref
+        for measured in qc["batch_clean"]["results"]:
+            measured["output"] = next(row["output"] for row in published_clean["results"] if row["plan_id"] == measured["plan_id"])
     for measured in qc["results"]:
         clean_row = next(row for row in published_clean["results"] if row["plan_id"] == measured["plan_id"])
         measured["output"] = clean_row["output"]
@@ -1707,7 +1815,7 @@ def audit_provenance(value: dict) -> None:
         require_clean_qc(value)
         errors = check_plan(read(require_ref(value["plan"], "reburn plan")), index,
                             int(read(require_ref(value["work_order"], "work order"))["requested_outputs"]),
-                            EDITING.POLICY if semantic_first(value) else None)
+                            EDITING.POLICY if semantic_first(value) else None, value.get("batch_review_policy"))
         if errors:
             raise ValueError(f"reburn source plan rejected: {errors}")
     else:
@@ -1741,6 +1849,9 @@ def complete(args) -> None:
         raise ValueError("Codex final visual review binding invalid")
     if evidence.get("decision", "pass") != "pass":
         raise ValueError("passing final evidence required")
+    batch_errors = batch_review_errors(value, evidence, review)
+    if batch_errors:
+        fail_round(job, value, "codex_final_batch_review", batch_errors)
     if semantic_first(value):
         if (evidence.get("planning_policy") != EDITING.POLICY or evidence.get("plan") != value["plan"]
                 or review.get("planning_policy") != EDITING.POLICY):
@@ -1828,6 +1939,7 @@ def complete(args) -> None:
     receipt = job / "video_montage_autonomous_completion.json"
     write(receipt, {"schema": "video-montage-autonomous-completion/v260929", "decision": "pass",
                     **({"planning_policy": EDITING.POLICY} if semantic_first(value) else {}),
+                    **({"batch_review_policy": BATCH.POLICY} if value.get("batch_review_policy") else {}),
                     "repair_round_count": value.get("repair_round", 0),
                     "continuation_authorization": value.get("continuation_authorization"),
                     "review_mode": "codex_asr_pcm", "forced_alignment_claimed": False,
@@ -1887,7 +1999,7 @@ def compact_delivery(job: Path, value: dict) -> None:
         "schema", "review_mode", "work_order", "source_hashes", "asset_root", "output_root",
         "delivery_directory", "repair_delivery_policy", "delivery_layout", "records_policy",
         "temporary_root", "repair_round", "max_repair_rounds", "continue_until_complete", "packaging_design_policy",
-        "continuation_authorization", "planning_policy") if key in value}
+        "continuation_authorization", "planning_policy", "batch_review_policy") if key in value}
     retained.update(phase="complete", compact_delivery=True)
     retained["delivery_mode"] = value.get("delivery_mode", "packaged")
     inputs = {}
@@ -1929,6 +2041,9 @@ def compact_delivery(job: Path, value: dict) -> None:
         context = {"planning_policy": EDITING.POLICY, "decision": "pass", "basis": "validated_clean_input",
                    "plan": inputs["plan"], "clean_delivery": inputs["clean_delivery"],
                    "outputs": [EDITING.summary(output) for output in read(Path(inputs["plan"]["path"]))["outputs"]]}
+        if value.get("batch_review_policy"):
+            context.update(batch_review_policy=BATCH.POLICY,
+                           batch_report_digest=BATCH.digest(batch_fields(value)["batch_review_report"]))
         write(context_path, context)
         inputs["editing_context"] = ref(context_path)
         keep.add(context_path)

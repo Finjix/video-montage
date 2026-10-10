@@ -27,6 +27,15 @@ per-transition, per-shot and whole-edit reviews. There is no diversification
 stage or diversity-reason requirement for new plans; coherent material may be
 reused. Historical jobs and subtitle-only reburns retain their original contract.
 
+Read [whole-batch review](../autonomous/batch-review.md). New jobs and full repairs
+also bind `semantic-batch-review/v1`: analyze an exhausted complete-turn inventory,
+prove enough coherent unique plans, review actual opening/second-shot families,
+and enforce the original FF batch reuse limits. Reject exact route clones and
+head/tail-only variants before rendering. Clean QC compares complete decoded
+base-picture sequences; packaging variations never count as new content. Require
+fresh hash-bound batch findings at plan approval and final completion. Completed
+historical jobs and subtitle-only reburns preserve their pinned version.
+
 For requested packaging, after subtitle review read [AI packaging design](../packaging/design.md).
 Choose a main font for each video, write a hash-bound subtitle design without decorative cards, inspect catalog previews, then package. New jobs require these explicit
 decisions; final review also requires `design_pass` and a concrete `design_reason`.
