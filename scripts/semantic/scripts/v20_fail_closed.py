@@ -322,8 +322,9 @@ def audit_request_value(request: dict, registry: dict) -> list[dict]:
     plans = request.get("plans", []) if isinstance(request.get("plans"), list) else []
     requested_outputs = int(work_order.get("requested_outputs", 0) or 0)
     plan_ids = [str(plan.get("plan_id") or "") for plan in plans if isinstance(plan, dict)]
-    if requested_outputs <= 0 or len(plans) != requested_outputs or len(set(plan_ids)) != requested_outputs or any(not plan_id for plan_id in plan_ids):
-        failures.append(failure("V20_COMPLETE_BATCH_SCOPE_REQUIRED", "request", f"plans={len(plans)} requested={requested_outputs} unique={len(set(plan_ids))}"))
+    unique_ids = {plan_id.casefold() for plan_id in plan_ids}
+    if requested_outputs <= 0 or len(plans) != requested_outputs or len(unique_ids) != requested_outputs or any(not plan_id for plan_id in plan_ids):
+        failures.append(failure("V20_COMPLETE_BATCH_SCOPE_REQUIRED", "request", f"plans={len(plans)} requested={requested_outputs} unique={len(unique_ids)}"))
     referenced_ids = {
         str(segment.get("candidate_id") or "")
         for plan in plans if isinstance(plan, dict)

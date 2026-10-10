@@ -160,7 +160,9 @@ def render(plan_path: Path, output: Path, evidence: Path, width: int, height: in
         speed = float(segment.get("speed", 1.0))
         info = probe(ffprobe, source)
         video = next(item for item in info["streams"] if item["codec_type"] == "video")
-        require_constant_frame_rate(ffprobe, source, video)
+        decoded_frames = require_constant_frame_rate(ffprobe, source, video)
+        if end > decoded_frames:
+            raise ValueError(f"source range beyond decoded video frames: {end}>{decoded_frames}: {source}")
         probed_fps = Fraction(video["avg_frame_rate"])
         if probed_fps != source_fps:
             raise ValueError(f"source fps mismatch for {source}: declared={source_fps}, probed={probed_fps}")

@@ -66,6 +66,11 @@ def require_authorized_premasters(items: list[dict], release: dict) -> None:
     outputs = release.get("outputs")
     if not isinstance(outputs, list) or len(outputs) != len(items):
         raise RuntimeError("complete semantic delivery outputs required")
+    premaster_ids = [str(item.get("plan_id") or "") for item in items]
+    output_ids = [str(row.get("plan_id") or "") for row in outputs if isinstance(row, dict)]
+    if (len({pid.casefold() for pid in premaster_ids}) != len(items)
+            or len({pid.casefold() for pid in output_ids}) != len(items)):
+        raise RuntimeError("duplicate premaster or semantic delivery plan IDs (case insensitive)")
     by_id = {str(row.get("plan_id")): row for row in outputs if isinstance(row, dict)}
     if len(by_id) != len(items):
         raise RuntimeError("duplicate semantic delivery plan IDs")

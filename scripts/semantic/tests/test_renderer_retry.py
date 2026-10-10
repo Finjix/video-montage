@@ -34,7 +34,7 @@ class RendererRetryTests(unittest.TestCase):
                 return subprocess.CompletedProcess(command, 1, "", "encode failed")
             with patch.object(renderer, "runtime_binary", return_value=root / "ffmpeg.exe"), \
                  patch.object(renderer, "probe", return_value=info), \
-                 patch.object(renderer, "require_constant_frame_rate"), \
+                 patch.object(renderer, "require_constant_frame_rate", return_value=2), \
                  patch.object(renderer.subprocess, "run", side_effect=fail):
                 with self.assertRaisesRegex(RuntimeError, "encode failed"):
                     renderer.render(plan, output, root / "evidence.json", 1440, 2560, 60, "libx264")

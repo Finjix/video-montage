@@ -442,6 +442,9 @@ def validate_and_lock(request_path: Path, output_dir: Path) -> tuple[bool, dict,
         gate.fail("BATCH_BINDING_MISMATCH", "work_order", "batch_id")
     requested_count = int(work_order.get("requested_outputs", -1))
     plans = request.get("plans", []) if isinstance(request.get("plans"), list) else []
+    plan_ids = [str(plan.get("plan_id") or "").casefold() for plan in plans if isinstance(plan, dict)]
+    if len(set(plan_ids)) != len(plan_ids):
+        gate.fail("DUPLICATE_PLAN_ID", "batch", "plan IDs must be unique ignoring case")
     if requested_count < 1 or len(plans) != requested_count:
         gate.fail("PLAN_COUNT_MISMATCH", "batch", f"requested={requested_count} supplied={len(plans)}")
     if inventory.get("schema") != "semantic-candidate-inventory/v260928" or inventory.get("batch_id") != request.get("batch_id"):

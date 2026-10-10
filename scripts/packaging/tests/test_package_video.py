@@ -588,6 +588,17 @@ class PackagingContractTests(unittest.TestCase):
         with patch.object(packaging, "video_spec", return_value=self.spec), patch.object(packaging, "run"), patch.object(packaging, "pcm_stats", return_value={"clipped_samples": 0}):
             self.assertEqual("pass", packaging.validate(manifest, self.root / "report.json", review, authority)["decision"])
             original_review = review.read_bytes()
+            original_manifest = manifest.read_bytes()
+            repeated = packaging.read(manifest)
+            repeated["results"].append(repeated["results"][0])
+            repeated["output_count"] = 2
+            packaging.atomic(manifest, repeated)
+            rebound = packaging.read(review)
+            rebound["manifest_sha256"] = packaging.sha(manifest)
+            packaging.atomic(review, rebound)
+            self.assertIn("result_scope", packaging.validate(manifest, self.root / "report.json", review, authority)["failures"])
+            manifest.write_bytes(original_manifest)
+            review.write_bytes(original_review)
             duplicate = packaging.read(review)
             duplicate["results"].insert(0, {**duplicate["results"][0], "visual_pass": False})
             packaging.atomic(review, duplicate)
@@ -607,6 +618,22 @@ class PackagingContractTests(unittest.TestCase):
             self.video.write_bytes(b"changed input")
             failures = packaging.validate(manifest, self.root / "report.json", review, authority)["failures"]
             self.assertIn("P1:input_changed", failures)
+
+    def test_missing_clean_manifest_returns_rejection_report(self):
+        controller = self.root / "clean-qc.json"
+        packaging.atomic(controller, {"schema": "video-montage-autonomous-clean-qc/v260929", "decision": "pass"})
+        manifest = self.root / "manifest.json"
+        packaging.atomic(manifest, {"schema": "video-montage-packaging-delivery/v1", "mode": "complete_autonomous",
+            "config_path": str(self.config), "config_sha256": packaging.sha(self.config),
+            "config_snapshot_path": str(self.config), "config_snapshot_sha256": packaging.sha(self.config),
+            "clean_delivery_path": str(self.root / "missing-clean.json"), "clean_delivery_sha256": "0" * 64,
+            "controller_validation_path": str(controller), "controller_validation_sha256": packaging.sha(controller),
+            "output_count": 0, "results": []})
+        report = self.root / "report.json"
+        result = packaging.validate(manifest, report)
+        self.assertEqual("reject", result["decision"])
+        self.assertIn("clean_delivery_changed", result["failures"])
+        self.assertTrue(report.is_file())
 
 
 if __name__ == "__main__":

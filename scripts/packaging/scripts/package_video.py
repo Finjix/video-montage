@@ -1053,12 +1053,13 @@ def validate(manifest_path: Path, report_path: Path, review_path: Path | None = 
     clean_path = manifest.get("clean_delivery_path")
     if clean_path:
         clean = Path(clean_path)
-        if not clean.is_file() or sha(clean) != manifest.get("clean_delivery_sha256"):
+        clean_valid = clean.is_file() and sha(clean) == manifest.get("clean_delivery_sha256")
+        if not clean_valid:
             failures.append("clean_delivery_changed")
         controller = Path(str(manifest.get("controller_validation_path") or ""))
         if not controller.is_file() or sha(controller) != manifest.get("controller_validation_sha256"):
             failures.append("controller_validation_changed")
-        else:
+        elif clean_valid:
             clean_report = read(controller)
             if manifest.get("mode") == "complete_autonomous":
                 if (read(clean).get("schema") != "video-montage-autonomous-clean/v260929"
@@ -1071,7 +1072,10 @@ def validate(manifest_path: Path, report_path: Path, review_path: Path | None = 
                 failures.append("controller_validation_binding")
     checks = []
     results = manifest.get("results", [])
-    if manifest.get("output_count") != len(results) or not results:
+    ids = [row.get("plan_id") for row in results]
+    if (manifest.get("output_count") != len(results) or not results
+            or any(not isinstance(pid, str) or not PLAN_ID.fullmatch(pid) for pid in ids)
+            or len({str(pid).casefold() for pid in ids}) != len(ids)):
         failures.append("result_scope")
     for row in results:
         plan_id = row.get("plan_id")

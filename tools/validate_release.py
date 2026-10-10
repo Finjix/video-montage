@@ -34,13 +34,13 @@ def validate() -> dict:
         run("packaging_tests", [str(PYTHON), "-B", "-m", "unittest", "discover", "-s", str(PACKAGING / "tests"), "-p", "test_*.py"]),
         run("autonomous_tests", [str(PYTHON), "-B", "-m", "unittest", "discover", "-s", str(AUTONOMOUS / "tests"), "-p", "test_*.py"]),
         run("integrity_tests", [str(PYTHON), "-B", "-m", "unittest", "discover", "-s", str(ROOT / "tools"), "-p", "test_release_integrity.py"]),
+        run("animation_lab_tests", [str(PYTHON), "-B", "-m", "unittest", "discover", "-s", str(ROOT / "tools/subtitle_animation_lab"), "-p", "test_*.py"]),
         run("single_skill", [str(PYTHON), str(ROOT / "scripts/validate_skill.py"), str(ROOT)]),
         run("suite_preflight", [str(PYTHON), str(EXECUTOR / "scripts/three_suite_ff.py"), "--suite-root", str(ROOT), "preflight"]),
     ]
     with tempfile.TemporaryDirectory(prefix="video-montage-check-") as temporary:
         checks.append(run("controller_preflight", [str(PYTHON), str(CONTROLLER / "scripts/ffmpeg_controller.py"), "preflight", "--output", str(Path(temporary) / "controller.json")]))
-    for script in (*SEMANTIC.glob("scripts/*.py"), *CONTROLLER.glob("scripts/*.py"), *PACKAGING.glob("scripts/*.py"),
-                   *EXECUTOR.glob("scripts/*.py"), *AUTONOMOUS.glob("scripts/*.py")):
+    for script in (*(ROOT / "scripts").rglob("*.py"), *(ROOT / "tools").rglob("*.py")):
         try:
             ast.parse(script.read_text(encoding="utf-8-sig"), filename=str(script))
         except SyntaxError as exc:

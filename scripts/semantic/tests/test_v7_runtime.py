@@ -185,6 +185,17 @@ class V7RuntimeTests(unittest.TestCase):
         self.assertIn("INVALID_PLAN_ID", {item["code"] for item in report["failures"]})
         self.assertFalse((self.root / "escape.json").exists())
 
+    def test_case_only_plan_ids_cannot_lock_colliding_files(self):
+        second = copy.deepcopy(self.fixture.plan)
+        second["plan_id"] = self.fixture.plan["plan_id"].upper()
+        self.fixture.plans.append(second)
+        self.fixture.work_order["requested_outputs"] = 2
+        self.fixture.refresh()
+        passed, report, index_path = self.run_gate("case-collision")
+        self.assertFalse(passed)
+        self.assertIsNone(index_path)
+        self.assertIn("DUPLICATE_PLAN_ID", {row["code"] for row in report["failures"]})
+
     def test_same_person_boundary_rejected(self):
         self.fixture.candidates[1]["boundary_open_person_id"] = "person:alpha"
         self.fixture.candidates[1]["visible_person_ids"].append("person:alpha")

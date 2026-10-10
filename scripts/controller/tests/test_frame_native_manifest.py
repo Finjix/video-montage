@@ -35,6 +35,16 @@ class FrameNativeManifestTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "unsafe plan ID"):
             controller.require_authorized_premasters([{"plan_id": "../escape"}], {"outputs": [{"plan_id": "../escape"}]})
 
+    def test_case_only_plan_ids_are_rejected_before_reading_media(self):
+        items = [{"plan_id": "P1"}, {"plan_id": "p1"}]
+        with self.assertRaisesRegex(RuntimeError, "duplicate.*plan IDs"):
+            controller.require_authorized_premasters(items, {"outputs": items})
+
+    def test_duplicate_premaster_ids_cannot_reuse_one_authorization(self):
+        items = [{"plan_id": "P1"}, {"plan_id": "P1"}]
+        with self.assertRaisesRegex(RuntimeError, "duplicate.*plan IDs"):
+            controller.require_authorized_premasters(items, {"outputs": [{"plan_id": "P1"}, {"plan_id": "P2"}]})
+
     def test_seconds_based_legacy_manifest_is_rejected(self):
         with self.assertRaises(RuntimeError):
             controller.require_frame_native_manifest({"results": [{"plan_id": "01"}]})

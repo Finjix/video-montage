@@ -100,11 +100,10 @@ def probe(path: Path) -> dict:
 def video(path: Path) -> dict:
     info = probe(path)
     stream = next(row for row in info["streams"] if row["codec_type"] == "video")
-    SOURCE_TIMING.require_constant_frame_rate(FFPROBE, path, stream)
+    frames = SOURCE_TIMING.require_constant_frame_rate(FFPROBE, path, stream)
     fps = Fraction(stream["avg_frame_rate"])
-    frames = int(stream.get("nb_frames") or round(float(info["format"]["duration"]) * fps))
     return {"fps_num": fps.numerator, "fps_den": fps.denominator, "frames": frames,
-            "duration": float(info["format"]["duration"]), "width": int(stream["width"]),
+            "duration": float(frames / fps), "width": int(stream["width"]),
             "height": int(stream["height"])}
 
 

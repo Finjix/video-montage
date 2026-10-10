@@ -60,7 +60,9 @@ def main(argv: list[str] | None = None) -> int:
     plan_ids = [str(item.get("plan_id") or "") for item in index.get("plans", [])]
     authorized_ids = [str(item.get("plan_id") or "") for item in rows]
     count = int(work_order.get("requested_outputs", 0) or 0)
-    if request.get("package_id") != gate.PACKAGE_ID or count != len(rows) or len(set(authorized_ids)) != count or set(authorized_ids) != set(plan_ids):
+    if (request.get("package_id") != gate.PACKAGE_ID or count != len(rows)
+            or len({pid.casefold() for pid in authorized_ids}) != count
+            or len({pid.casefold() for pid in plan_ids}) != count or set(authorized_ids) != set(plan_ids)):
         raise ValueError("authorization does not cover the complete locked batch")
     registry = ROOT.parents[2] / "references/semantic/wuzimu-v20-invalid-intervals.json"
     prelock = audit.audit_request(request_path, registry)

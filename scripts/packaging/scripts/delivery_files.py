@@ -5,7 +5,7 @@ import os
 import shutil
 import uuid
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from tempfile import mkdtemp
 
 
 def publish_files(copies: list[tuple[Path, Path]], temporary_root: Path) -> None:
@@ -16,27 +16,36 @@ def publish_files(copies: list[tuple[Path, Path]], temporary_root: Path) -> None
     prepared = []
     committed = []
     token = uuid.uuid4().hex
-    with TemporaryDirectory(prefix="publish-backup-", dir=temporary_root) as directory:
-        try:
-            for index, (source, target) in enumerate(copies):
-                target.parent.mkdir(parents=True, exist_ok=True)
-                backup = Path(directory) / str(index)
-                existed = target.exists()
-                if existed:
-                    shutil.copy2(target, backup)
-                staged = target.with_name(f".{target.name}.{token}.publish")
-                prepared.append((staged, target, backup, existed))
-                shutil.copy2(source, staged)
-            for staged, target, backup, existed in prepared:
-                os.replace(staged, target)
-                committed.append((target, backup, existed))
-        except Exception:
-            for target, backup, existed in reversed(committed):
+    directory = Path(mkdtemp(prefix="publish-backup-", dir=temporary_root))
+    rollback_errors = []
+    try:
+        for index, (source, target) in enumerate(copies):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            backup = directory / str(index)
+            existed = target.exists()
+            if existed:
+                shutil.copy2(target, backup)
+            staged = target.with_name(f".{target.name}.{token}.publish")
+            prepared.append((staged, target, backup, existed))
+            shutil.copy2(source, staged)
+        for staged, target, backup, existed in prepared:
+            os.replace(staged, target)
+            committed.append((target, backup, existed))
+    except Exception as publication_error:
+        for target, backup, existed in reversed(committed):
+            try:
                 if existed:
                     os.replace(backup, target)
                 else:
                     target.unlink(missing_ok=True)
-            raise
-        finally:
-            for staged, _, _, _ in prepared:
-                staged.unlink(missing_ok=True)
+            except Exception as rollback_error:
+                rollback_errors.append(f"{target}: {rollback_error}")
+        if rollback_errors:
+            raise RuntimeError(f"publication failed; rollback incomplete; backups retained at {directory}; "
+                               + "; ".join(rollback_errors)) from publication_error
+        raise
+    finally:
+        for staged, _, _, _ in prepared:
+            staged.unlink(missing_ok=True)
+        if not rollback_errors:
+            shutil.rmtree(directory)

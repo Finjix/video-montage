@@ -41,7 +41,7 @@ import uuid
 from pathlib import Path
 
 
-VERSION = "v261008"
+VERSION = "v261010"
 SKILL = "video-montage"
 
 
