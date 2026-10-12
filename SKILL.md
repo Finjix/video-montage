@@ -44,12 +44,19 @@ second final delivery, at least four real visual shots, and one declared visible
 protagonist per output. No other character may appear even alongside the lead;
 offscreen dialogue is allowed. Inspect every selected native frame and final
 encoded frame. Do not split one continuous shot to inflate counts or shuffle
-dependent speech for diversity. New plans bind `semantic-continuity/v1` and need
+dependent speech for diversity. New plans bind `semantic-continuity/v2` and need
 per-transition, per-shot and whole-edit findings; the diversity selector is removed.
 Historical completions and subtitle-only reburns keep their original contract.
+Every transition must cite retained prior speech in `content_evidence.premise_refs`.
+When a topic change needs a bridge, cite retained adjacent speech in `bridge_ref`.
+Discovery/ad-entry or audience-size claims do not directly establish gameplay
+mechanics; product names, relation labels and editorial explanations cannot supply
+missing spoken premises. Review relation support and missing premises individually,
+then review the whole narrative. Final v2 reviews repeat all transition findings,
+bound to each actual output hash and its `speech_evidence_digest`.
 
 For new jobs and full-edit repairs also read [whole-batch review](references/autonomous/batch-review.md).
-Bind `semantic-batch-review/v1`. Exhaust the source-turn inventory, prove enough
+Bind `semantic-batch-review/v2`. Exhaust the source-turn inventory, prove enough
 coherent unique routes for the requested count, and enforce source-content,
 exact-text, opening visual family, first-two-shot, closing and narrative reuse
 limits. Never cycle a few prior plans to fill a batch. Check the actual complete
@@ -63,7 +70,15 @@ record their instruction in the work order as `batch_reuse_authorization` with
 Use the documented reasonable-reuse caps in the batch contract. Preserve coherent
 speech, real shots, protagonist restrictions and full quality review. Never repeat
 whole finished edits or use packaging changes to conceal substantial duplication.
-Without explicit user authorization, retain the original stricter caps.
+Without explicit user authorization, retain the other stricter reuse caps.
+For v2, the same complete opening speech and actual opening visual family each
+have a hard per-batch maximum of four, including authorized reasonable reuse.
+Inventory canonical complete `spoken_turns`, their opening suitability and actual
+opening families; splitting a turn, renaming IDs or moving cut points cannot
+create another opening. Inspect the opening usage and capacity-shortfall report.
+When coherent capacity is insufficient, report the shortfall; do not exceed four,
+shuffle dependent speech or count a partial batch as complete. New init/full
+repair use v2; preserve v1 limits and report formats for historical jobs/reburns.
 
 Before delivering any finished video, apply a single whole-video 1.2x speed-up
 after editing and any requested packaging, and before final evidence, review and
@@ -111,7 +126,9 @@ never enlarge individual ordinary words inside an 8-size line. Ordinary yellow/w
 the calibrated CapCut black outline 40 (12.3px at 1440 width, text scale 164%),
 independent of font and size. Flower outlines/glows retain the existing effect
 without an additional ordinary stroke. Never use layout.size or shrink
-long text. Subtitles must stay on one line; split long speech into sequential,
+long text. Subtitles must stay on one line with at most 10 displayed characters
+(digits and punctuation count; whitespace does not). This is a hard limit even
+when a wider layout or font would fit. Split long speech into sequential,
 semantically complete reviewed cues with speech-aligned timing. Do not use line_breaks.
 Subtitle drafts use `semantic-reading/v1`: preserve ASR punctuation, pauses and
 word timestamps when proposing boundaries, and measure the calibrated font/flower

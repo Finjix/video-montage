@@ -42,9 +42,22 @@ class SemanticReadingTests(unittest.TestCase):
         self.assertEqual(1, sum("无尽冬日" in r["text"] for r in result))
         self.assertTrue(all(split.fits(r["text"]) for r in result))
 
-    def test_real_width_allows_longer_complete_phrase(self):
+    def test_ten_character_hard_limit_precedes_font_width(self):
         self.assertTrue(split.fits("这是中年人的解压神器"))
+        self.assertFalse(split.fits("现在玩无尽冬日更是快乐", font="fangtang", max_width=.96))
         self.assertFalse(split.fits("这是中年人的解压神器而且很好玩"))
+        self.assertEqual(10, split.character_count("ABCDEFGHIJ"))
+        self.assertEqual(11, split.character_count("ABCDEFGHIJ！"))
+        with self.assertRaisesRegex(ValueError, "10 characters"):
+            split.require_line_limit("ABCDEFGHIJ！")
+
+    def test_long_question_splits_semantically_with_complete_words(self):
+        result=rows("你还在为熔炉温度低而发愁吗？")
+        self.assertTrue(all(split.character_count(r["text"])<=10 for r in result))
+        self.assertEqual("你还在为熔炉温度低而发愁吗", "".join(r["text"] for r in result))
+        self.assertTrue(any("熔炉" in r["text"] for r in result))
+        self.assertEqual("line_character_limit",split.reading_issues([
+            {"text":"现在玩无尽冬日更是快乐","start_ms":0,"end_ms":3000}])[0]["code"])
 
     def test_english_spacing_and_word_boundaries(self):
         asr = {"segments": [{"text": "Play this game now.", "start": 0, "end": 3,

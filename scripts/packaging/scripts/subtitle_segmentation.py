@@ -14,6 +14,7 @@ import subtitle_fonts
 
 FINAL_SPEED = 1.2
 MIN_READ_MS = 800
+MAX_LINE_CHARACTERS = 10
 TARGET_READ_MS = (1200, 2500)
 POLICY = "semantic-reading/v1"
 GAME_NAMES = ("无尽冬日", "无尽动日", "无尽冬至")
@@ -45,7 +46,7 @@ def _font(path: str, pixels: int):
 def fits(text: str, names: tuple[str, ...] = GAME_NAMES, font: str | None = None,
          max_width: float = .9) -> bool:
     """Use the renderer's advances, flower gaps and outline/glow reservation."""
-    if sum(2 if ord(c) > 127 else 1 for c in text) > 28:
+    if character_count(text) > MAX_LINE_CHARACTERS:
         return False
     pattern = "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True))
     games = list(re.finditer(pattern, text)) if pattern else []
@@ -66,6 +67,16 @@ def fits(text: str, names: tuple[str, ...] = GAME_NAMES, font: str | None = None
         if width > 1440 * max_width - round(largest * .4):
             return False
     return True
+
+
+def character_count(text: str) -> int:
+    """Count displayed characters, including digits and punctuation, sans spaces."""
+    return sum(not c.isspace() for c in text)
+
+
+def require_line_limit(text: str) -> None:
+    if character_count(text) > MAX_LINE_CHARACTERS:
+        raise ValueError("subtitle line exceeds 10 characters; split into sequential semantic captions")
 
 
 def _shot_stream(shot: dict):
@@ -109,8 +120,7 @@ def split_shot(shot: dict, *, names: tuple[str, ...] = GAME_NAMES, font: str | N
         for match in re.finditer(re.escape(phrase), text):
             forbidden.update(range(match.start() + 1, match.end()))
     for match in re.finditer(r"[0-9A-Za-z]+", text):
-        if fits(match[0], names, font):
-            forbidden.update(i for i in range(match.start() + 1, match.end()) if i not in spaces)
+        forbidden.update(i for i in range(match.start() + 1, match.end()) if i not in spaces)
     for match in QUANTITY.finditer(text):
         forbidden.update(range(match.start() + 1, match.end()))
     # Genuine punctuation remains available even when a phrase dictionary match
@@ -168,6 +178,8 @@ def caption_rows(asr: dict, *, names: tuple[str, ...] = GAME_NAMES, font: str | 
 def reading_issues(cues: list[dict], *, speed: float = FINAL_SPEED) -> list[dict]:
     issues = []
     for index, cue in enumerate(cues, 1):
+        if character_count(cue["text"]) > MAX_LINE_CHARACTERS:
+            issues.append({"index": index, "code": "line_character_limit", "text": cue["text"]})
         duration = (cue["end_ms"] - cue["start_ms"]) / speed
         if duration < MIN_READ_MS:
             issues.append({"index": index, "code": "short_reading", "final_duration_ms": round(duration)})

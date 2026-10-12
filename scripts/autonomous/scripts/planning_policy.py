@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
+import json
 import re
 from fractions import Fraction
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
-POLICY = "semantic-continuity/v1"
+LEGACY_POLICY = "semantic-continuity/v1"
+POLICY = "semantic-continuity/v2"
+SUPPORTED_POLICIES = {LEGACY_POLICY, POLICY}
 CLEAN_FRAME_RANGE = (1296, 2160)
 FINAL_FRAME_RANGE = (1080, 1800)
 
@@ -93,7 +97,7 @@ def shot_timeline(output: dict) -> tuple[list[dict], list[str]]:
     return mapped, errors
 
 
-def audit_output(output: dict) -> list[str]:
+def audit_output(output: dict, policy: str = POLICY) -> list[str]:
     errors = []
     protagonist = output.get("protagonist_id")
     if not person_id(protagonist):
@@ -112,6 +116,70 @@ def audit_output(output: dict) -> list[str]:
                * segment["source_fps_den"] / segment["source_fps_num"]} for segment in segments]
     errors.extend(f"{row['code']}:{row['scope']}:{row['detail']}" for row in semantic.audit_semantic_sequence(
         output["plan_id"], spoken, output.get("transitions")))
+    if policy == POLICY:
+        errors.extend(grounded_transition_errors(output))
+    elif policy != LEGACY_POLICY:
+        errors.append("UNKNOWN_PLANNING_POLICY")
+    return errors
+
+
+def specific_reason(value) -> bool:
+    """Reject empty/general assent; editorial truth still requires Codex review."""
+    if not isinstance(value, str):
+        return False
+    normalized = semantic.normalize_text(value)
+    return len(normalized) >= 8 and not re.fullmatch(
+        r"(?:同一(?:个)?(?:游戏|人物|话题|主角)|语义连贯|逻辑连贯|衔接自然|增加(?:新的)?信息|接着介绍|继续介绍|通过审核)+",
+        normalized)
+
+
+def retained_quote(output: dict, reference, allowed: range) -> bool:
+    if not isinstance(reference, dict) or type(reference.get("segment_index")) is not int:
+        return False
+    index = reference["segment_index"]
+    quote = reference.get("quote")
+    return (index in allowed and isinstance(quote, str) and len(semantic.normalize_text(quote)) >= 4
+            and semantic.normalize_text(quote) in semantic.normalize_text(output["segments"][index - 1]["text"]))
+
+
+def gameplay_bridge(quote: str) -> bool:
+    # A product name or gameplay keyword alone does not introduce a method.
+    return bool(re.search(r"怎么(?:玩|上手|开始)|如何(?:玩|上手|开始)|玩法|开局|一上来|进去(?:以后|之后|一看)|首先|先(?:让|把|收集|采集|砍|升级|建)",
+                          semantic.normalize_text(quote)))
+
+
+def grounded_transition_errors(output: dict) -> list[str]:
+    errors = []
+    segments = output["segments"]
+    transitions = output.get("transitions")
+    if not isinstance(transitions, list) or len(transitions) != len(segments) - 1:
+        return ["TRANSITION_SCOPE_MISMATCH"]
+    for index, transition in enumerate(transitions, 1):
+        scope = f"transition:{index}"
+        evidence = transition.get("content_evidence", {}) if isinstance(transition, dict) else {}
+        if not isinstance(evidence, dict):
+            errors.append(f"{scope}:RETAINED_PREMISE_REQUIRED")
+            continue
+        premises = evidence.get("premise_refs")
+        if (not isinstance(premises, list) or not premises
+                or any(not retained_quote(output, ref, range(1, index + 1)) for ref in premises)
+                or len({json.dumps(ref, sort_keys=True, ensure_ascii=False) for ref in premises}) != len(premises)):
+            errors.append(f"{scope}:RETAINED_PREMISE_REQUIRED")
+        if (not specific_reason(evidence.get("entity_flow")) or not specific_reason(evidence.get("state_flow"))
+                or semantic.normalize_text(evidence.get("entity_flow")) == semantic.normalize_text(evidence.get("state_flow"))):
+            errors.append(f"{scope}:SPECIFIC_ENTITY_AND_STATE_FLOW_REQUIRED")
+        bridge = evidence.get("bridge_ref")
+        valid_bridge = retained_quote(output, bridge, range(index, index + 2))
+        if bridge is not None and not valid_bridge:
+            errors.append(f"{scope}:BRIDGE_NOT_IN_RETAINED_ADJACENT_SPEECH")
+        left, right = segments[index - 1], segments[index]
+        left_text = semantic.normalize_text(left["text"])
+        discovery = bool(re.search(r"入坑|刷.{0,8}广告|全球.{0,12}(?:亿|都在玩)|(?:亿|千万|百万)人.{0,6}玩", left_text))
+        purpose = right.get("purpose_contract")
+        method = ((isinstance(purpose, dict) and purpose.get("function") == "mechanism")
+                  or bool(re.search(r"砍树|获取资源|建造|升级熔炉|提升温度|吸引.{0,6}幸存者", semantic.normalize_text(right["text"]))))
+        if discovery and method and not (valid_bridge and gameplay_bridge(bridge["quote"])):
+            errors.append(f"{scope}:DISCOVERY_TO_GAMEPLAY_SPOKEN_BRIDGE_REQUIRED")
     return errors
 
 
@@ -157,7 +225,7 @@ def indexed_findings(rows, expected: set, key) -> tuple[dict, list[str]]:
         return {}, ["REVIEW_SCOPE_MISMATCH"]
 
 
-def output_review_errors(output: dict, finding: dict) -> list[str]:
+def output_review_errors(output: dict, finding: dict, policy: str = POLICY) -> list[str]:
     required = ("semantic_pass", "protagonist_only_pass", "visual_shots_pass")
     reasons = ("semantic_reason", "protagonist_reason", "shot_reason")
     if (any(finding.get(key) is not True for key in required)
@@ -166,22 +234,53 @@ def output_review_errors(output: dict, finding: dict) -> list[str]:
             or type(finding.get("visual_shot_count")) is not int
             or finding["visual_shot_count"] != len(output["visual_shots"])):
         return [f"{output['plan_id']}:WHOLE_EDIT_SEMANTIC_CAST_SHOT_REVIEW_REQUIRED"]
+    if policy == POLICY and (finding.get("narrative_pass") is not True
+                             or not specific_reason(finding.get("narrative_reason"))):
+        return [f"{output['plan_id']}:WHOLE_EDIT_NARRATIVE_REVIEW_REQUIRED"]
     return []
+
+
+def transition_review_errors(plan: dict, review: dict, evidence: dict | None = None) -> list[str]:
+    outputs = {output["plan_id"]: output for output in plan["outputs"]}
+    transitions = {(pid, index): transition for pid, output in outputs.items()
+                   for index, transition in enumerate(output["transitions"], 1)}
+    findings, errors = indexed_findings(review.get("transitions"), set(transitions),
+                                        lambda row: (row.get("plan_id"), row.get("transition_index")))
+    current = plan.get("planning_policy") == POLICY
+    final_rows = {row["plan_id"]: row for row in evidence["results"]} if evidence is not None else {}
+    for (pid, index), finding in findings.items():
+        if (finding.get("continuity_pass") is not True
+                or not isinstance(finding.get("reason"), str) or not finding["reason"].strip()):
+            errors.append(f"{pid}:transition:{index}:GROUNDED_TRANSITION_REVIEW_REQUIRED")
+        if current and (finding.get("relation_supported") is not True or finding.get("missing_premise") is not False
+                        or not specific_reason(finding.get("reason"))):
+            errors.append(f"{pid}:transition:{index}:RELATION_AND_PREMISE_REVIEW_REQUIRED")
+        if current and evidence is not None:
+            row = final_rows.get(pid, {})
+            expected = final_transition_evidence(outputs[pid], row)
+            if (row.get("transitions") != expected or not row.get("output", {}).get("sha256")
+                    or finding.get("output_sha256") != row["output"]["sha256"]
+                    or finding.get("speech_evidence_digest") != expected[index - 1]["speech_evidence_digest"]):
+                errors.append(f"{pid}:transition:{index}:FINAL_TRANSITION_SPEECH_BINDING_REQUIRED")
+    return errors
+
+
+def final_transition_evidence(output: dict, row: dict) -> list[dict]:
+    """Expose retained quotes for fresh final review, not an automatic approval."""
+    speech = {key: row.get(key) for key in ("output", "asr", "mix_evidence", "speech_preserved")}
+    fingerprint = hashlib.sha256(json.dumps(speech, ensure_ascii=False, sort_keys=True,
+                                            separators=(",", ":")).encode()).hexdigest()
+    return [{"plan_id": output["plan_id"], "transition_index": index,
+             "relation": transition["relation"], "content_evidence": transition["content_evidence"],
+             "speech_evidence_digest": fingerprint} for index, transition in enumerate(output["transitions"], 1)]
 
 
 def plan_review_errors(plan: dict, evidence: dict, review: dict) -> list[str]:
     outputs = {output["plan_id"]: output for output in plan["outputs"]}
     findings, errors = indexed_findings(review.get("outputs"), set(outputs), lambda row: row.get("plan_id"))
     for pid, finding in findings.items():
-        errors.extend(output_review_errors(outputs[pid], finding))
-    transitions = {(pid, index): transition for pid, output in outputs.items()
-                   for index, transition in enumerate(output["transitions"], 1)}
-    findings, scope_errors = indexed_findings(review.get("transitions"), set(transitions),
-                                             lambda row: (row.get("plan_id"), row.get("transition_index")))
-    errors.extend(scope_errors)
-    for key, finding in findings.items():
-        if finding.get("continuity_pass") is not True or not isinstance(finding.get("reason"), str) or not finding["reason"].strip():
-            errors.append(f"{key}:GROUNDED_TRANSITION_REVIEW_REQUIRED")
+        errors.extend(output_review_errors(outputs[pid], finding, plan.get("planning_policy", LEGACY_POLICY)))
+    errors.extend(transition_review_errors(plan, review))
     shots = {(pid, index): shot for pid, output in outputs.items()
              for index, shot in enumerate(output["visual_shots"], 1)}
     findings, scope_errors = indexed_findings(review.get("visual_shots"), set(shots),

@@ -24,11 +24,13 @@ def transition(left: str, right: str, relation="cause_effect") -> dict:
     return {"relation": relation, "information_gain": "从保暖措施推进到营地生活的结果",
             "content_evidence": {"from_quote": left, "to_quote": right,
                 "new_information": "稳定温度让营地居民能够安心生活",
+                "premise_refs": [{"segment_index": 1, "quote": left}],
                 "entity_flow": "同一座营地及其居民", "state_flow": "采取保暖措施后营地恢复生活"}}
 
 
 class SemanticFirstTests(unittest.TestCase):
     def setUp(self):
+        self.policy = editing.POLICY
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
         self.source = self.root / "source.mp4"
@@ -60,29 +62,30 @@ class SemanticFirstTests(unittest.TestCase):
                   "source_in_frame": cuts[index], "source_out_frame_exclusive": cuts[index + 1],
                   "source_visual_shot_id": f"camera-{index}", "visible_person_ids": ["person:lead"],
                   "boundary_kind": "opening" if index == 0 else "source_camera_change"} for index in range(4)]
-        return {"schema": auto.PLAN_SCHEMA, "planning_policy": editing.POLICY,
+        return {"schema": auto.PLAN_SCHEMA, "planning_policy": self.policy,
                 "outputs": [{"plan_id": "P1", "protagonist_id": "person:lead", "segments": segments,
                              "transitions": [transition(*texts)], "visual_shots": shots}]}
 
     def source_index(self, fps=(60, 1)):
-        return {"sources": [{"source": auto.ref(self.source),
+        return {"planning_policy": self.policy, "sources": [{"source": auto.ref(self.source),
                 "video": {"fps_num": fps[0], "fps_den": fps[1], "frames": 10000}}]}
 
     def errors(self, plan=None):
-        return auto.check_plan(plan or self.plan, self.source_index(), 1, editing.POLICY)
+        return auto.check_plan(plan or self.plan, self.source_index(), 1, self.policy)
 
     def findings(self, output):
         return {"plan_id": output["plan_id"], "protagonist_id": output["protagonist_id"],
                 "visual_shot_count": len(output["visual_shots"]), "semantic_pass": True,
                 "protagonist_only_pass": True, "visual_shots_pass": True,
                 "semantic_reason": "保暖措施推进到营地生活结果，最后完整收束。",
+                "narrative_pass": True, "narrative_reason": "先取得资源改善营地温度，再说明居民安定生活的结果，主体及因果连续。",
                 "protagonist_reason": "逐帧检查完整区间，只有该条主角出镜，画外问话不计为可见角色。",
                 "shot_reason": "四个真实机位镜头，各六秒，完整覆盖成片。"}
 
     def approval_fixture(self, job=None):
         folder = job or self.root
         order = folder / "order.json"
-        auto.write(order, {"schema": auto.ORDER_SCHEMA, "requested_outputs": 1, "planning_policy": editing.POLICY})
+        auto.write(order, {"schema": auto.ORDER_SCHEMA, "requested_outputs": 1, "planning_policy": self.policy})
         index = folder / "source_index.json"
         auto.write(index, self.source_index())
         plan = folder / "plan.json"
@@ -101,16 +104,17 @@ class SemanticFirstTests(unittest.TestCase):
                          "asr_exact": True, "decision": "pass"})
         evidence_path = folder / "evidence.json"
         auto.write(evidence_path, {"plan": auto.ref(plan), "source_index": auto.ref(index),
-                                   "results": rows, "planning_policy": editing.POLICY})
+                                   "results": rows, "planning_policy": self.policy})
         output = self.plan["outputs"][0]
         review = {"schema": auto.REVIEW_SCHEMA, "stage": "plan", "reviewer_role": "codex",
-            "planning_policy": editing.POLICY, "evidence_sha256": auto.sha(evidence_path),
+            "planning_policy": self.policy, "evidence_sha256": auto.sha(evidence_path),
             "plan_sha256": auto.sha(plan), "outputs": [self.findings(output)],
             "segments": [{"plan_id": "P1", "segment_index": row["segment_index"], "semantic_pass": True,
                 "visual_pass": True, "reason": "完整源话轮", "protagonist_only_pass": True,
                 "visible_person_ids": ["person:lead"], "continuous_visual_sha256": row["continuous_visual"]["sha256"],
                 "protagonist_reason": "全部帧只有主角"} for row in rows],
             "transitions": [{"plan_id": "P1", "transition_index": 1, "continuity_pass": True,
+                "relation_supported": True, "missing_premise": False,
                 "reason": "先改善温度，再说明营地生活的结果"}],
             "visual_shots": [{"plan_id": "P1", "shot_index": index, "shot_pass": True,
                 "protagonist_only_pass": True, "visible_person_ids": ["person:lead"],
@@ -119,7 +123,7 @@ class SemanticFirstTests(unittest.TestCase):
         review_path = folder / "review.json"
         auto.write(review_path, review)
         value = {"schema": auto.STATE_SCHEMA, "review_mode": "codex_asr_pcm", "repair_round": 0,
-            "phase": "plan_evidenced", "planning_policy": editing.POLICY, "work_order": auto.ref(order),
+            "phase": "plan_evidenced", "planning_policy": self.policy, "work_order": auto.ref(order),
             "source_index": auto.ref(index), "plan": auto.ref(plan), "plan_evidence": auto.ref(evidence_path)}
         auto.write(folder / "autonomous_state.json", value)
         return review_path, value, review
@@ -177,12 +181,12 @@ class SemanticFirstTests(unittest.TestCase):
         auto.write(render_path, {"schema": "portable-frame-render-evidence/v260928", "expected_output_frames": 1440,
             "actual_output_frames": 1440, "segments": timeline})
         clean_path = pending / "临时文件" / "manifests" / "clean_delivery.json"
-        auto.write(clean_path, {"schema": "video-montage-autonomous-clean/v260929", "planning_policy": editing.POLICY,
+        auto.write(clean_path, {"schema": "video-montage-autonomous-clean/v260929", "planning_policy": self.policy,
             "plan_sha256": value["plan"]["sha256"], "results": [{"plan_id": "P1", "output": auto.ref(clean_output),
             "render_evidence": auto.ref(render_path), "expected_text": asr["text"]}]})
         value["clean_delivery"] = auto.ref(clean_path)
         qc_path = job / "reports" / "clean_qc.json"
-        auto.write(qc_path, {"schema": "video-montage-autonomous-clean-qc/v260929", "decision": "pass", "clean_delivery": value["clean_delivery"], "planning_policy": editing.POLICY,
+        auto.write(qc_path, {"schema": "video-montage-autonomous-clean-qc/v260929", "decision": "pass", "clean_delivery": value["clean_delivery"], "planning_policy": self.policy,
             "plan_sha256": value["plan"]["sha256"], "results": [{"plan_id": "P1", "output": auto.ref(clean_output),
                 "text_match": True, "asr": asr, "timing_asr": asr, "metrics": auto.audio_metrics(auto.pcm(clean_output)), "cut_pcm": []}]})
         value["clean_qc"] = auto.ref(qc_path)
@@ -203,7 +207,12 @@ class SemanticFirstTests(unittest.TestCase):
         row = evidence["results"][0]
         path = job / "reviews" / "final.json"
         auto.write(path, {"schema": auto.REVIEW_SCHEMA, "stage": "final", "reviewer_role": "codex",
-            "planning_policy": editing.POLICY, "evidence_sha256": value["final_evidence"]["sha256"],
+            "planning_policy": self.policy, "evidence_sha256": value["final_evidence"]["sha256"],
+            "transitions": [{"plan_id": "P1", "transition_index": item["transition_index"],
+                "continuity_pass": True, "relation_supported": True, "missing_premise": False,
+                "reason": "实际成片先改善温度，再说明居民生活的结果，完整保留前提。",
+                "output_sha256": row["output"]["sha256"], "speech_evidence_digest": item["speech_evidence_digest"]}
+                for item in row.get("transitions", [])],
             "outputs": [{**self.findings(self.plan["outputs"][0]), "output_sha256": row["output"]["sha256"],
                 "visual_pass": True, "subtitle_pass": True, "overlay_pass": True, "design_pass": True,
                 "design_reason": "Test static subtitles", "reason": "Synthetic editorial test findings",
@@ -214,8 +223,20 @@ class SemanticFirstTests(unittest.TestCase):
         value = auto.state(job)
         clean_row = auto.read(Path(value["clean_delivery"]["path"]))["results"][0]
         subtitle = pending / "字幕" / "subtitle-P1.txt"
-        texts = [segment["text"] for segment in self.plan["outputs"][0]["segments"]]
-        subtitle.write_text(f"1\n00:00:00,100 --> 00:00:11,800\n{texts[0]}\n\n2\n00:00:12,100 --> 00:00:23,800\n{texts[1]}\n", encoding="utf-8")
+        texts = ["开局收集木材", "让营地暖起来", "温度稳定", "大家终于安心生活"]
+        # Synthetic ASR distributes each original turn uniformly over 12 seconds.
+        # Preserve its word timing while splitting the two complete spoken turns.
+        word_times = auto.character_times(asr)
+        times = []
+        cursor = 0
+        for text in texts:
+            end = cursor + len(auto.normalized(text))
+            times.append((word_times[cursor][0], word_times[end - 1][1]))
+            cursor = end
+        def stamp(ms):
+            return f"00:00:{ms // 1000:02d},{ms % 1000:03d}"
+        subtitle.write_text("\n\n".join(f"{i}\n{stamp(start)} --> {stamp(end)}\n{text}"
+            for i, (text, (start, end)) in enumerate(zip(texts, times), 1)) + "\n", encoding="utf-8")
         snapshot = job / "evidence" / "draft.txt"
         shutil.copyfile(subtitle, snapshot)
         draft = job / "reports" / "subtitle_draft.json"
@@ -318,7 +339,7 @@ class SemanticFirstTests(unittest.TestCase):
     def test_mixed_native_rates_and_overlap_use_shared_render_rounding(self):
         for fps, count in (((25, 1), 600), ((30000, 1001), 720)):
             changed = self.make_plan(frames=count, source_fps=fps)
-            self.assertEqual([], auto.check_plan(changed, self.source_index(fps), 1, editing.POLICY))
+            self.assertEqual([], auto.check_plan(changed, self.source_index(fps), 1, self.policy))
             expected = editing.renderer.segment_output_frames(editing.renderer.coalesce_segments(changed["outputs"][0]["segments"])[0])
             self.assertEqual(expected, editing.summary(changed["outputs"][0])["clean_frames"])
         changed = copy.deepcopy(self.plan)
@@ -439,7 +460,7 @@ class SemanticFirstTests(unittest.TestCase):
         auto.write(review_path, good)
         auto.complete(SimpleNamespace(job_dir=job, review=review_path))
         value = auto.state(job)
-        self.assertEqual(editing.POLICY, value["planning_policy"])
+        self.assertEqual(self.policy, value["planning_policy"])
         self.assertTrue(value["compact_delivery"])
         self.assertEqual(1200, packager.video_spec(delivery / "混剪（无包装）" / "P1.mp4")["frames"])
         self.assertEqual(1440, packager.video_spec(job / "manifests" / "clean_inputs" / "P1.mp4")["frames"])
@@ -459,7 +480,7 @@ class SemanticFirstTests(unittest.TestCase):
         self.assertEqual(1200, packager.video_spec(delivery / "成片" / "P1.mp4")["frames"])
         subtitle = delivery / "字幕" / "subtitle-P1.txt"
         auto.reburn(SimpleNamespace(job_dir=job, plan_id="P1", subtitle_txt=subtitle))
-        self.assertEqual(editing.POLICY, auto.state(job)["planning_policy"])
+        self.assertEqual(self.policy, auto.state(job)["planning_policy"])
         self.approve_subtitle(job)
         config = Path(auto.state(job)["reburn_config"]["path"])
         auto.package(SimpleNamespace(job_dir=job, config=config))

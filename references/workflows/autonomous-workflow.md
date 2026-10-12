@@ -15,7 +15,7 @@ Keep records there throughout the job, alongside necessary render/edit files and
 reusable packaging config; do not create a root-level `.runtime` for new jobs.
 
 Read [semantic-first planning](../autonomous/semantic-planning.md). New jobs and
-full-edit repairs bind `semantic-continuity/v1`. Analyze complete source turns,
+full-edit repairs bind `semantic-continuity/v2`. Analyze complete source turns,
 scene context, identities and propositions before composing an edit; require
 grounded adjacent relations and an earned close. Select at natural speed for a
 21.6–36 second clean input and enforce 18–30 seconds after the final 1.2x speed-up.
@@ -28,13 +28,25 @@ stage or diversity-reason requirement for new plans; coherent material may be
 reused. Historical jobs and subtitle-only reburns retain their original contract.
 
 Read [whole-batch review](../autonomous/batch-review.md). New jobs and full repairs
-also bind `semantic-batch-review/v1`: analyze an exhausted complete-turn inventory,
+also bind `semantic-batch-review/v2`: analyze an exhausted complete-turn inventory,
 prove enough coherent unique plans, review actual opening/second-shot families,
 and enforce the original FF batch reuse limits. Reject exact route clones and
 head/tail-only variants before rendering. Clean QC compares complete decoded
 base-picture sequences; packaging variations never count as new content. Require
 fresh hash-bound batch findings at plan approval and final completion. Completed
 historical jobs and subtitle-only reburns preserve their pinned version.
+
+For v2, cite actual retained prior speech in each transition's `premise_refs` and
+retain a real adjacent `bridge_ref` when crossing topics. Discovery/ad-entry or
+audience-scale hooks cannot jump directly to gameplay mechanics without a spoken
+introduction or related question. Review `relation_supported`, `missing_premise`
+and the complete narrative; final reviews must repeat all transitions against
+the actual encoded output and its speech evidence digest. Inventory canonical
+complete `spoken_turns` with actual opening families. The same complete opening
+speech and opening visual family each have a hard maximum of four per batch,
+even under reasonable reuse authorization. Report usage and capacity shortfalls;
+never break coherence or exceed four to fill the count. Retain v1 behavior and
+hash-bound report formats for older jobs and their subtitle-only reburns.
 
 For requested packaging, after subtitle review read [AI packaging design](../packaging/design.md).
 Choose a main font for each video, write a hash-bound subtitle design without decorative cards, inspect catalog previews, then package. New jobs require these explicit

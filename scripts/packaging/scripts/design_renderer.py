@@ -51,6 +51,7 @@ def text_sprite(text: str, font_path: str, size: int, color="yellow", spans=None
     """Fixed-size, single-line glyphs; resegment long cues before rendering."""
     if line_breaks or text.splitlines() != [text]:
         raise ValueError("subtitles must stay on one line; split reviewed cue into sequential captions")
+    design.subtitle_segmentation.require_line_limit(text)
     chars = [{"color": color, "flower": None, "pixels": size} for _ in text]
     for span in spans or []:
         for i in range(span["start"], span["end"]):

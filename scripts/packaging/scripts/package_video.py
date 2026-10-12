@@ -951,7 +951,20 @@ def verify_autonomous_speech(measured: dict, item: dict, manifest: dict) -> bool
     if qc.get("decision") != "pass" or clean_row.get("text_match") is not True or clean_row.get("output", {}).get("sha256") != item["input"]["sha256"]:
         return False
     output = verifier.pcm(Path(item["output_path"]))
-    proof = verifier.delivery_mix_evidence(output, item)
+    cleanup_render = None
+    if measured.get("mix_evidence", {}).get("audio_cleanup") is not None:
+        # Final evidence includes the authorized cleanup proof. Rebuild it from
+        # the bound clean render; omitting it makes equal signal proofs differ.
+        clean_path = Path(str(manifest.get("clean_delivery_path") or ""))
+        if not clean_path.is_file() or sha(clean_path) != manifest.get("clean_delivery_sha256"):
+            return False
+        clean = read(clean_path)
+        clean_item = next((r for r in clean.get("results", []) if r.get("plan_id") == item["plan_id"]), {})
+        if clean_item.get("output") != clean_row.get("output"):
+            return False
+        cleanup_render = verifier.read(verifier.require_ref(clean_item.get("render_evidence", {}), "clean cleanup render"))
+    proof = (verifier.delivery_mix_evidence(output, item, cleanup_render)
+             if cleanup_render is not None else verifier.delivery_mix_evidence(output, item))
     return proof.get("decision") == "pass" and proof == measured.get("mix_evidence")
 
 

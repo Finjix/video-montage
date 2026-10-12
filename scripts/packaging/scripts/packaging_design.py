@@ -86,6 +86,7 @@ def cue_style(row: dict, cue: dict, names: list[str], default_flower: str, game_
         raise ValueError("subtitle design text must match the reviewed cue exactly")
     if cue["text"].splitlines() != [cue["text"]]:
         raise ValueError("subtitles must stay on one line; split into sequential captions")
+    subtitle_segmentation.require_line_limit(cue["text"])
     color = row.get("color", "yellow")
     size = font_size(row.get("font_size", 8))
     if color not in COLORS:

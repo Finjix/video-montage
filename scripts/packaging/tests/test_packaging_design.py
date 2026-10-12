@@ -166,11 +166,11 @@ class DesignTests(unittest.TestCase):
 
     def test_long_sentence_must_be_resegmented_for_single_line_display(self):
         cue = {"start_ms": 0, "end_ms": 2000, "text": "我也是刷着广告才入坑的现在一直在玩"}
-        prepared = self.prepare(cues=[cue], value=fixture([cue], font="w8"))
-        with self.assertRaisesRegex(ValueError, "one line"):
-            renderer.prepare_track(self.root, [cue], prepared, subtitle_fonts.FONTS["w8"]["path"], 120)
-        split = [{"start_ms": 0, "end_ms": 1200, "text": "我也是刷着广告才入坑的"},
-                 {"start_ms": 1200, "end_ms": 2000, "text": "现在一直在玩"}]
+        with self.assertRaisesRegex(ValueError, "10 characters"):
+            self.prepare(cues=[cue], value=fixture([cue], font="w8"))
+        split = [{"start_ms": 0, "end_ms": 700, "text": "我也是刷着广告"},
+                 {"start_ms": 700, "end_ms": 1300, "text": "才入坑的"},
+                 {"start_ms": 1300, "end_ms": 2000, "text": "现在一直在玩"}]
         track = renderer.prepare_track(self.root, split, self.prepare(cues=split, value=fixture(split, font="w8")),
                                        subtitle_fonts.FONTS["w8"]["path"], 120)
         for event in track["record"]["events"]:
@@ -180,7 +180,7 @@ class DesignTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "font_size"):
             renderer.fit_sprite(Image.new("RGBA", (2000, 100)), {"x": .5, "y": .69, "max_width": .9})
         value = fixture([cue], font="w8"); value["cues"][0]["line_breaks"] = [7]
-        with self.assertRaisesRegex(ValueError, "one line"):
+        with self.assertRaisesRegex(ValueError, "10 characters"):
             self.prepare(value, cues=[cue])
 
     def test_explicit_multiline_and_overlong_mixed_flower_text_are_rejected(self):
@@ -193,7 +193,7 @@ class DesignTests(unittest.TestCase):
         for key in subtitle_fonts.FONTS:
             for size in (8, 9):
                 text = "现在来玩无尽冬日体验冰雪世界的生存建设"
-                with self.assertRaisesRegex(ValueError, "one line"):
+                with self.assertRaisesRegex(ValueError, "10 characters"):
                     renderer.text_sprite(text, subtitle_fonts.FONTS[key]["path"], subtitle_fonts.pixels(key, size),
                                          spans=[{"start": 4, "end": 8, "flower": "ice2", "pixels": subtitle_fonts.pixels(key, 9)}],
                                          max_width=1440 * .92)
@@ -303,9 +303,8 @@ class DesignTests(unittest.TestCase):
         value = fixture([cue], font="w8"); value["game_names"] = []
         value["cues"][0].update(spans=[{"start": 0, "end": len(long_text), "flower": "ice2"}],
                                 entrance={"effect": "shout_wave", "duration_ms": 300})
-        prepared = design.prepare(value, [cue], "subtitle", [], self.root, 90)
-        with self.assertRaisesRegex(ValueError, "fit|split"):
-            renderer.prepare_track(self.root, [cue], prepared, subtitle_fonts.FONTS["w8"]["path"], 90)
+        with self.assertRaisesRegex(ValueError, "10 characters"):
+            design.prepare(value, [cue], "subtitle", [], self.root, 90)
 
 
 

@@ -29,6 +29,12 @@ Codex 在同一个任务中完成语义与画面判断，不委派独立代理�
 
 口播数量核对按数值处理 10–99 的十进制与中文写法，例如 30 与三十相同、13 与十三相同；不把 13 视为一三，也不把 30 视为 300。原始 ASR 数字写法保留，词时间按等价中文字符展开核对。
 
+v2原声核验另识别三个有明确语境的转写用字对应：`慢慢的/慢慢地`、
+`乌央乌央的/乌央乌央地`、`幸存者不来啊/幸存者不来呀`。它们不改音频、
+不覆盖原始ASR、不允许增删字符，也不提供语义前提。候选仍须精确绑定原片台词、
+源哈希及帧界，非精确转写仍需逐段、哈希绑定的具体用字审核；底片逐镜重新核验。
+历史v1及未绑定策略的流程保留原比较规则。字幕接口与其他改字规则保持原要求。
+
 底片口播以绑定实际成片的完整逐镜复识别为证：每镜音频哈希、原声台词、连续输出帧范围均核验，全部覆盖实际成片才通过。整片 ASR 继续原样保留，记录 `whole_asr_match`；其词漂移不能推翻已经完整逐镜验证的口播，也不能代替缺失的逐镜证据。削波、切点 PCM、实际帧数和整批画面指纹仍独立检查。
 
 ## 阶段
@@ -41,13 +47,15 @@ Codex 在同一个任务中完成语义与画面判断，不委派独立代理�
 
 字幕审核后、`package` 前阅读 [AI 包装设计](../packaging/design.md)，结合实际镜头、素材文案和效果预览编写逐视频 `subtitle_design` （`graphic_layers` 省略或为空）。新初始化的任务要求每条包装输出有设计方案，AI只选择和搭配现成效果，不临时生成新效果或装饰素材；没有合适效果时静态呈现。主字体按视频选择，普通文字黄主白辅，实际游戏名完整花字，叙述保留静态阅读段。程序核对字幕哈希与游戏名来源，并增加动画过程取证；最终审核增加 `design_pass` 与具体 `design_reason`。所有包装与重烧均要求设计字段；纯净交付继续直接走无包装流程。
 
-组片前阅读[语义优先规则](semantic-planning.md)。新任务及完整剪辑返修绑定 `semantic-continuity/v1`：完整话轮与语境分析在先，相邻真实关系及整条叙事审核在后；不再执行批次多样化选片。底片 21.6–36 秒，最终倍速成品严格 18–30 秒，至少四个实际视觉镜头，每条画面只允许其指定主角，允许其他角色的画外对白。同一连续镜头不能拆段凑数。候选与最终输出取证覆盖完整区间，计划审核提交逐转场、逐镜及逐成片判断。历史完成任务和单纯字幕重烧保留原契约。
+组片前阅读[语义优先规则](semantic-planning.md)。新任务及完整剪辑返修绑定 `semantic-continuity/v2`：完整话轮与语境分析在先，相邻真实关系及整条叙事审核在后；不再执行批次多样化选片。底片 21.6–36 秒，最终倍速成品严格 18–30 秒，至少四个实际视觉镜头，每条画面只允许其指定主角，允许其他角色的画外对白。同一连续镜头不能拆段凑数。候选与最终输出取证覆盖完整区间，计划审核提交逐转场、逐镜及逐成片判断。历史完成任务和单纯字幕重烧保留原契约。
 
-还须执行[整批审核](batch-review.md)：新任务和完整返修固定 `semantic-batch-review/v1`，完整候选库存、语义分类和实际视觉类别纳入计划；`plan-evidence` 先拒绝组合重复、片头/前两镜集中复用、相同中段变体和容量不足。计划与最终审核提交绑定自动报告的整批判断及逐条片头类别结论。`clean-qc` 完整解码底片并拒绝相同画面序列；文件名、字幕字体、BGM、增益和切点轻微变化均不能充当内容差异。
+还须执行[整批审核](batch-review.md)：新任务和完整返修固定 `semantic-batch-review/v2`，完整候选库存、语义分类和实际视觉类别纳入计划；`plan-evidence` 先拒绝组合重复、片头/前两镜集中复用、相同中段变体和容量不足。计划与最终审核提交绑定自动报告的整批判断及逐条片头类别结论。`clean-qc` 完整解码底片并拒绝相同画面序列；文件名、字幕字体、BGM、增益和切点轻微变化均不能充当内容差异。
+
+v2每处 `content_evidence` 必须引用实际保留前文的 `premise_refs`，跨主题需要真实承接时填写相邻原声 `bridge_ref`。拒绝入坑经历或玩家规模宣传直接跳到具体玩法；同一游戏、人物和关系标签均不能代替前提。整批库存增加规范 `spoken_turns`，核实完整话轮、开头适用性及实际机位。同一完整开场台词和实际片头画面类别每批各最多4次，合理复用也不放宽；拆段、改ID、微移切点不能增加类别。查阅开头使用清单和容量缺口，数量不足时报告缺口，不将部分批次标为完整交付。
 
 1. `init --work-order <JSON>`，程序返回 `work/自动化混剪_xx/临时文件/` 的任务路径，然后 `prepare --job-dir <返回的任务路径>`。也可显式传入符合该结构的 `--job-dir`。工作单使用 `video-montage-autonomous-work-order/v260929`，包含 `requested_outputs`、`sources: [{"path": "原片绝对路径", "sha256": "可选校验值"}]`、`asset_root` ，可选 `output_root` 必须指向项目的 `work` 目录，省略时自动使用项目 `work`。`prepare` 对每条原片重新转写，记录原生帧率、源哈希、说明文字和图片哈希。
 2. Codex 查看素材图片并提交 `video-montage-codex-asset-copy/v260929`：`reviewer_role: "codex"`、`sources_sha256` 指向 `asset_copy_sources.json`，`assets` 对每个素材哈希给出可见文字。说明文件必须逐字保留；看不清的图片填空，不能猜测。
-3. Codex 依据原片转写与画面提交 `video-montage-autonomous-plan/v260929`，顶层声明 `planning_policy: "semantic-continuity/v1"`，`outputs` 逐成片增加 `protagonist_id`、完整 `visual_shots`；逐片段增加目的与叙事阶段，逐相邻话轮增加有实际台词引用的 `transitions`。完整接口和审核字段见[语义优先规则](semantic-planning.md)。依次运行 `plan-evidence --plan <JSON>`、`approve-plan --review <JSON>`。后者的 `video-montage-codex-review/v260929` 需声明 `stage: "plan"`、`reviewer_role: "codex"`、`evidence_sha256`、`plan_sha256`，并逐片段给出 `semantic_pass`、`visual_pass`、`entry_visual_pass`、`exit_visual_pass`、具体 `reason` 和 `boundary_reason`。机器另查完整转写、首尾 40 毫秒低能量、削波、孤立突发声和逐帧证据；比较片段首尾各 13 帧，并扫描首尾半秒内是否藏有原片转场。Codex 必须看首尾连续 30 帧及相邻片段交界，比较人物位置、景别和画面尺寸；成片后逐帧复查每个拼接点，避免短时间内连续跳镜。不合格片段不可批准。
+3. Codex 依据原片转写与画面提交 `video-montage-autonomous-plan/v260929`，顶层声明 `planning_policy: "semantic-continuity/v2"`，`outputs` 逐成片增加 `protagonist_id`、完整 `visual_shots`；逐片段增加目的与叙事阶段，逐相邻话轮增加有实际台词引用的 `transitions`。完整接口和审核字段见[语义优先规则](semantic-planning.md)。依次运行 `plan-evidence --plan <JSON>`、`approve-plan --review <JSON>`。后者的 `video-montage-codex-review/v260929` 需声明 `stage: "plan"`、`reviewer_role: "codex"`、`evidence_sha256`、`plan_sha256`，并逐片段给出 `semantic_pass`、`visual_pass`、`entry_visual_pass`、`exit_visual_pass`、具体 `reason` 和 `boundary_reason`。机器另查完整转写、首尾 40 毫秒低能量、削波、孤立突发声和逐帧证据；比较片段首尾各 13 帧，并扫描首尾半秒内是否藏有原片转场。Codex 必须看首尾连续 30 帧及相邻片段交界，比较人物位置、景别和画面尺寸；成片后逐帧复查每个拼接点，避免短时间内连续跳镜。不合格片段不可批准。
 4. `render-clean` 用原生整数帧范围渲染 1440×2560、60 fps 的纯净成片；`clean-qc` 保留整片复转写，并按实际渲染镜头分别复转写核对源口播，把每镜词时间偏移到成片时间轴供字幕审核使用，避免整片 ASR 把首词时间归到上一镜的静音；继续检查削波和每处切点前后 40 毫秒的残音与突发声。`subtitle-draft` 生成草稿及不可变快照。Codex 提交 `video-montage-codex-subtitle-review/v260929`，其中 `draft_sha256`、`asset_copy_sha256`、每条字幕的原文、新文、原时间码和更改依据都完整绑定；运行 `subtitle-review` 后才允许烧录。改字必须援引实际源转写、计划口播或素材文案的哈希和文字；全片字幕归一化后必须与原片口播一致，不能照抄与口播相异的广告文案。字幕不能跨越对应口播的渲染镜头边界，ASR 词时间戳偏早时以镜头边界为准。
 5. `package --config <JSON>` 使用已纠错的 `subtitle-<plan_id>.txt` 及其哈希，按现有包装配置叠加铭牌、文字钉、免责和 BGM。包装版清单标记为 `complete_autonomous`，并绑定纯净成片及自动 QC。`final-evidence` 对包装版再次转写，检查削波、切点 PCM 和口播对 BGM 的声级差；抓取每条字幕中间帧与起止前后帧、每处切点前后 72 帧、片头片尾及图层起止帧。Codex 检查这些画面并提交 `stage: "final"` 的逐成片审核。`complete --review <JSON>` 重新执行包装器技术与自动审核校验，全部通过才写 `video_montage_autonomous_completion.json`。
 
@@ -72,8 +80,16 @@ Codex 在同一个任务中完成语义与画面判断，不委派独立代理�
 以下仅展示计划审核的原有片段字段；新规则还必须填写[语义优先规则](semantic-planning.md)中的人物、完整区间证据、逐转场、逐镜和整条 `outputs` 字段，不可直接使用不完整示例批准：
 
 ```json
-{"schema":"video-montage-codex-review/v260929","stage":"plan","reviewer_role":"codex","evidence_sha256":"<plan_evidence SHA-256>","plan_sha256":"<plan SHA-256>","planning_policy":"semantic-continuity/v1","segments":[{"plan_id":"demo-01","segment_index":1,"semantic_pass":true,"visual_pass":true,"entry_visual_pass":true,"exit_visual_pass":true,"reason":"完整一句，人物和画面含义一致","boundary_reason":"已查看原生首尾连续帧，画面稳定且没有残留转场"}]}
+{"schema":"video-montage-codex-review/v260929","stage":"plan","reviewer_role":"codex","evidence_sha256":"<plan_evidence SHA-256>","plan_sha256":"<plan SHA-256>","planning_policy":"semantic-continuity/v2","segments":[{"plan_id":"demo-01","segment_index":1,"semantic_pass":true,"visual_pass":true,"entry_visual_pass":true,"exit_visual_pass":true,"reason":"完整一句，人物和画面含义一致","boundary_reason":"已查看原生首尾连续帧，画面稳定且没有残留转场"}]}
 ```
+
+v2逐转场审核示例（按实际全部转场填写；整条输出另须 `narrative_pass` 和具体 `narrative_reason`）：
+
+```json
+{"plan_id":"demo-01","transition_index":1,"continuity_pass":true,"relation_supported":true,"missing_premise":false,"reason":"原声先说明升级熔炉提高温度，后句明确说明温度提升使幸存者到来"}
+```
+
+最终审核顶层也须有完整 `transitions`。每项保留上述字段，另加实际最终 `output_sha256` 和 `results[].transitions` 中的 `speech_evidence_digest`；重新检查实际成片衔接，不能复制计划结论当作最终审核。批次审核还须 `opening_turns_pass: true`，核实规范完整开头与画面类别。v1历史审核无需补填v2字段；完整返修升级后须重新审核。
 
 字幕纠错的每条 `cues` 必须给出 `index`、原草稿的 `draft_start_ms`、`draft_end_ms`、`before`，以及纠错后的 `start_ms`、`end_ms`、`after`；新时间要与成片 ASR 的词时间戳相符。改字时还需 `evidence: [{"kind":"asset_copy|source_asr|plan_speech","sha256":"<对应哈希>","text":"<原证据中的字词>"}]`。未改字可留空依据。最终审核的 `outputs` 每条给出 `plan_id`、`output_sha256`、`visual_pass`、`subtitle_pass`、`overlay_pass` 和具体 `reason`。
 

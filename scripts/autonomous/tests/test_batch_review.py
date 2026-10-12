@@ -19,6 +19,7 @@ batch = auto.BATCH
 
 def add_analysis(plan, index):
     plan["batch_review_policy"] = batch.POLICY
+    index["batch_review_policy"] = batch.POLICY
     by_source = {}
     for output in plan["outputs"]:
         for segment in output["segments"]:
@@ -33,11 +34,19 @@ def add_analysis(plan, index):
                         "text": unit["text"], "status": "eligible", "reason": "Complete synthetic spoken unit"}
                        for unit in by_source.get(source["source"]["sha256"], {}).values()]}
         for source in index["sources"]]}
+    for entry in plan["batch_analysis"]["sources"]:
+        sha = entry["source_sha256"]
+        shots = [shot for output in plan["outputs"] for shot in output["visual_shots"] if shot["source_sha256"] == sha]
+        entry["spoken_turns"] = [{**unit, "complete": True, "opening_eligible": True,
+            "opening_visual_family_id": next((shot["visual_family_id"] for shot in shots
+                if shot["source_in_frame"] <= unit["source_in_frame"] < shot["source_out_frame_exclusive"]), "inventory-only-camera")}
+            for unit in entry["candidates"]]
 
 
 def add_findings(review, report):
     review["batch_review_policy"] = batch.POLICY
     review["batch_review"] = {"report_digest": batch.digest(report), "source_inventory_pass": True,
+        "opening_turns_pass": True,
         "semantic_routes_pass": True, "visual_families_pass": True, "reuse_pass": True,
         "reason": "Synthetic test findings exercise hash binding, not actual editorial approval."}
     for finding, result in zip(review["outputs"], report["plans"]):
@@ -83,7 +92,7 @@ class BatchPlanTests(unittest.TestCase):
         plan, index = self.make_batch()
         self.authorize_reuse(plan, index)
         report = batch.audit(plan, index)
-        self.assertEqual(report["limits"]["opening_uses"], 7)
+        self.assertEqual(report["limits"]["opening_uses"], 4)
         plan["batch_reuse_authorization"]["instruction"] = "different"
         self.assertIn("BATCH_REUSE_AUTHORIZATION_MISMATCH", self.codes(plan, index))
         index["batch_reuse_authorization"]["authorized_by"] = "codex"
@@ -125,8 +134,8 @@ class BatchPlanTests(unittest.TestCase):
                          "OPENING_VISUAL_FAMILY_REUSE_EXCEEDED", "CLOSING_REUSE_EXCEEDED"} <= codes)
 
     def test_reuse_caps_have_inclusive_boundaries(self):
-        cases = [("opening", 3, "OPENING_REUSE_EXCEEDED"),
-                 ("family", 3, "OPENING_VISUAL_FAMILY_REUSE_EXCEEDED"),
+        cases = [("opening", 4, "OPENING_REUSE_EXCEEDED"),
+                 ("family", 4, "OPENING_VISUAL_FAMILY_REUSE_EXCEEDED"),
                  ("pair", 2, "OPENING_SECOND_VISUAL_PAIR_REUSE_EXCEEDED"),
                  ("closing", 4, "CLOSING_REUSE_EXCEEDED"),
                  ("candidate", 6, "CANDIDATE_REUSE_EXCEEDED")]
@@ -278,11 +287,12 @@ class BatchWorkflowTests(unittest.TestCase):
         value["work_order"] = a.ref(order_path);value["batch_review_policy"] = batch.POLICY
         index = a.read(Path(value["source_index"]["path"]))
         add_analysis(self.fixture.plan, index)
+        index_path = Path(value["source_index"]["path"]);a.write(index_path, index);value["source_index"] = a.ref(index_path)
         plan_path = Path(value["plan"]["path"]);a.write(plan_path, self.fixture.plan);value["plan"] = a.ref(plan_path)
         report = a.BATCH.audit(self.fixture.plan, index)
         self.assertEqual(report["decision"], "pass", report["failures"])
         evidence_path = Path(value["plan_evidence"]["path"]);evidence = a.read(evidence_path)
-        evidence.update(plan=value["plan"], batch_review_policy=batch.POLICY, batch_review_report=report)
+        evidence.update(plan=value["plan"], source_index=value["source_index"], batch_review_policy=batch.POLICY, batch_review_report=report)
         a.write(evidence_path, evidence);value["plan_evidence"] = a.ref(evidence_path)
         review_path = Path(value["plan_review"]["path"]);review = a.read(review_path)
         review.update(plan_sha256=value["plan"]["sha256"], evidence_sha256=value["plan_evidence"]["sha256"])
@@ -326,6 +336,7 @@ class BatchWorkflowTests(unittest.TestCase):
         index["sources"][0]["asr"] = a.ref(source_asr);a.write(index_path, index)
         value["source_index"] = a.ref(index_path)
         add_analysis(self.fixture.plan, index)
+        a.write(index_path, index);value["source_index"] = a.ref(index_path)
         plan_path = Path(value["plan"]["path"]);a.write(plan_path, self.fixture.plan);value["plan"] = a.ref(plan_path)
         order_path = Path(value["work_order"]["path"]);order = a.read(order_path)
         order["batch_review_policy"] = batch.POLICY;a.write(order_path, order)
