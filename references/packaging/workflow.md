@@ -52,7 +52,7 @@ assets\dependencies\python\python.exe scripts\packaging\scripts\package_video.py
 }
 ```
 
-名牌省略区间时显示前192帧，免责覆盖全片，图片须为含透明区域的9:16 PNG。文字钉仅按明确要求添加，并写明起止帧；装饰卡片不支持。BGM循环到片尾，口播不自动减半。字体为W8、得意黑、方糖体，花字为冰1、冰2、火1。所有选择由设计明确指定，配置与清单保存实际资源哈希；重烧要求原设计快照及哈希，字幕改字或条数改变须重新审查设计，不从旧清单推断字体/花字。
+名牌省略区间时显示前192帧，免责覆盖全片，图片须为含透明区域的9:16 PNG。文字钉仅按明确要求添加，并写明起止帧；装饰卡片不支持。BGM循环到片尾，口播不自动减半。字体仅使用新青年体W8和方糖体，花字为冰1、冰2、火1。所有选择由设计明确指定，配置与清单保存实际资源哈希；重烧要求原设计快照及哈希，字幕改字或条数改变须重新审查设计，不从旧清单推断字体/花字。
 
 独立生成可换字的透明 PNG：`assets/dependencies/python/python.exe tools/render_subtitle_flower.py --font w8 --text "冰雪世界" --style ice1 --scale 2 --output work/自动化混剪_YYYYMMDD_HHMMSS/临时文件/evidence/ice-text.png`。同一接口支持单字、较长文案、中英文混排和标点。
 
@@ -128,7 +128,7 @@ assets\dependencies\python\python.exe scripts\executor\scripts\three_suite_ff.py
 新字体可单独预览，例如：
 
 ```powershell
-assets/dependencies/python/python.exe tools/render_subtitle_flower.py --font smiley --text "冰雪世界" --style ice1 --output work/自动化混剪_YYYYMMDD_HHMMSS/临时文件/evidence/smiley-ice.png
+assets/dependencies/python/python.exe tools/render_subtitle_flower.py --font fangtang --text "冰雪世界" --style ice1 --output work/自动化混剪_YYYYMMDD_HHMMSS/临时文件/evidence/fangtang-ice.png
 assets/dependencies/python/python.exe tools/render_subtitle_flower.py --font fangtang --text "全新挑战" --style fire1 --output work/自动化混剪_YYYYMMDD_HHMMSS/临时文件/evidence/fangtang-fire.png
 ```
 

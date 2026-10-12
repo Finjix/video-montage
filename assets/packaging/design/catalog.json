@@ -2,7 +2,6 @@
   "schema": "video-montage-design-catalog/v1",
   "fonts": [
     "w8",
-    "smiley",
     "fangtang"
   ],
   "palette": {
@@ -24,7 +23,6 @@
       },
       "fonts": [
         "w8",
-        "smiley",
         "fangtang"
       ],
       "controls": {
@@ -47,7 +45,6 @@
       },
       "fonts": [
         "w8",
-        "smiley",
         "fangtang"
       ],
       "controls": {
@@ -71,7 +68,6 @@
       },
       "fonts": [
         "w8",
-        "smiley",
         "fangtang"
       ],
       "controls": {
@@ -95,7 +91,6 @@
       },
       "fonts": [
         "w8",
-        "smiley",
         "fangtang"
       ],
       "controls": {

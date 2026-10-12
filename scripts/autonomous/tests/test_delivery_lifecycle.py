@@ -175,6 +175,63 @@ class DeliveryLifecycleTests(unittest.TestCase):
                 "start_ms": 100, "end_ms": 800, "after": "口播"}]}]})
         auto.subtitle_review(SimpleNamespace(job_dir=job, review=path))
 
+    def test_imported_resegmentation_refreshes_snapshot_and_cue_count(self):
+        job, delivery, pending, asr, packager = self.fixture()
+        edits = job / "config" / "edits"
+        edits.mkdir(parents=True)
+        source = edits / "subtitle-P1.txt"
+        source.write_text("1\n00:00:00,100 --> 00:00:00,450\n口\n\n2\n00:00:00,450 --> 00:00:00,800\n播\n", encoding="utf-8")
+        auto.subtitle_draft(SimpleNamespace(job_dir=job, subtitle_dir=edits))
+        draft = auto.read(Path(auto.state(job)["subtitle_draft"]["path"]))["results"][0]
+        snapshot = Path(draft["subtitle_txt_path"])
+        self.assertEqual(2, len(packager.parse_srt(snapshot, 1000)))
+        self.assertEqual(auto.sha(source), draft["subtitle_txt_sha256"])
+        source.write_text("edited again", encoding="utf-8")
+        self.assertEqual(draft["subtitle_txt_sha256"], auto.sha(snapshot))
+
+    def test_imported_resegmentation_rejects_changed_speech_before_snapshot(self):
+        job, delivery, pending, asr, packager = self.fixture()
+        edits = job / "config" / "edits"
+        edits.mkdir(parents=True)
+        (edits / "subtitle-P1.txt").write_text("1\n00:00:00,100 --> 00:00:00,800\n改词\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "differ from verified speech"):
+            auto.subtitle_draft(SimpleNamespace(job_dir=job, subtitle_dir=edits))
+        self.assertEqual("clean_validated", auto.state(job)["phase"])
+        self.assertFalse((job / "reports" / "subtitle_draft.json").exists())
+
+    def test_new_reading_policy_requires_reason_for_short_standalone_phrase(self):
+        job, delivery, pending, asr, packager = self.fixture()
+        edits = job / "config" / "edits"
+        edits.mkdir(parents=True)
+        (edits / "subtitle-P1.txt").write_text("1\n00:00:00,100 --> 00:00:00,800\n口播\n", encoding="utf-8")
+        value = auto.state(job)
+        value["subtitle_segmentation_policy"] = "semantic-reading/v1"
+        auto.save(job, value, "clean_validated")
+        auto.subtitle_draft(SimpleNamespace(job_dir=job, subtitle_dir=edits))
+        with self.assertRaisesRegex(ValueError, "short_cue_reason"):
+            self.approve_subtitle(job)
+        path = job / "reviews" / "subtitle.json"
+        review = auto.read(path)
+        review["results"][0]["cues"][0]["short_cue_reason"] = "The complete isolated two-word utterance has no adjacent speech to merge."
+        auto.write(path, review)
+        auto.subtitle_review(SimpleNamespace(job_dir=job, review=path))
+        self.assertEqual("subtitle_approved", auto.state(job)["phase"])
+
+    def test_complete_head_word_needs_specific_reason_and_bound_speech(self):
+        plan = self.root / "head_plan.json"
+        auto.write(plan, {"outputs": [{"segments": [{"text": "地形复杂得分领先真过瘾"}]}]})
+        reference = auto.ref(plan)
+        for word in ("地形", "得分", "过瘾"):
+            correction = {"after": word + "很好", "head_word": word,
+                "head_word_reason": "A complete lexical word starts this sentence, rather than a dependent particle.",
+                "evidence": [{"kind": "plan_speech", "sha256": reference["sha256"], "text": word}]}
+            self.assertTrue(auto.subtitle_head_word_supported(correction, {}, {"sources": []}, reference))
+            correction["head_word_reason"] = ""
+            self.assertFalse(auto.subtitle_head_word_supported(correction, {}, {"sources": []}, reference))
+        correction = {"after": "的幸存者", "head_word": "的", "head_word_reason": "Claimed exception",
+            "evidence": [{"kind": "plan_speech", "sha256": reference["sha256"], "text": "的"}]}
+        self.assertFalse(auto.subtitle_head_word_supported(correction, {}, {"sources": []}, reference))
+
     def test_clean_only_completion_publishes_after_visual_approval(self):
         job, delivery, pending, asr, packager = self.fixture()
         with patch.object(auto, "load_model"), patch.object(auto, "transcribe", return_value=asr):
@@ -279,7 +336,7 @@ class DeliveryLifecycleTests(unittest.TestCase):
         auto.write(config, {"schema": packager.SCHEMA, "outputs": [{"plan_id": "P1",
             "input_path": clean_row["output"]["path"], "input_sha256": clean_row["output"]["sha256"],
             "subtitle_txt": str(subtitle), "subtitle_sha256": auto.sha(subtitle),
-            "subtitle_design": {"subtitle_sha256": auto.sha(subtitle), "font": "smiley", "game_names": [],
+            "subtitle_design": {"subtitle_sha256": auto.sha(subtitle), "font": "w8", "game_names": [],
                 "reason": "短叙述保留静态黄字，不加装饰卡片。", "cues": [{"index": 1, "text": "口播", "color": "yellow"}]},
             "graphic_layers": []}]})
         legacy_config = auto.read(config)

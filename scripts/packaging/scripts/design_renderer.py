@@ -213,7 +213,7 @@ def paint_event(event: dict, frame: int) -> tuple[Image.Image, int, int]:
 
 def prepare_track(directory: Path, cues: list[dict], value: dict, font_path: str, frames: int) -> dict:
     events, resources = [], {str(design.CATALOG): design.digest(design.CATALOG)}
-    for name in ("design_renderer.py", "packaging_design.py", "subtitle_fonts.py", "reference_animation.py", "animation_common.py", "animation_shader.py", "dynamic_flowers.py"):
+    for name in ("design_renderer.py", "packaging_design.py", "subtitle_segmentation.py", "subtitle_fonts.py", "reference_animation.py", "animation_common.py", "animation_shader.py", "dynamic_flowers.py"):
         path = Path(__file__).parent / name
         resources[str(path)] = design.digest(path)
     for i, (cue, setting) in enumerate(zip(cues, value["cues"]), 1):
@@ -351,6 +351,7 @@ def prepare_track(directory: Path, cues: list[dict], value: dict, font_path: str
     target.write_text("\n".join(concat) + "\n", encoding="utf-8")
     return {"path": str(target), "y": band_top, "record": {"schema": "video-montage-rendered-design/v1",
             "font": value["font"], "subtitle_sha256": value["subtitle_sha256"], "reason": value["reason"],
+            **({"reading_policy": value["reading_policy"]} if value.get("reading_policy") else {}),
             "ordinary_outline": {"color": "#000000", "editor_width": subtitle_fonts.EDITOR_OUTLINE_WIDTH,
                                  "radius_pixels": subtitle_fonts.OUTLINE_PIXELS, "flower_outline": "existing_effect"},
             "events": records, "resources": [{"path": path, "sha256": sha} for path, sha in sorted(resources.items())],

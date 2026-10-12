@@ -98,7 +98,7 @@ create a separate output and preserves the clean video. Read the
 [packaging workflow](references/packaging/workflow.md) for configuration and
 reburn commands. Subtitles burn into the picture only. Each new packaging task
 uses a Codex-authored design for each video: choose its main font from WenYue
-W8, Smiley Sans (得意黑) or FangTang (方糖体), keep ordinary text primarily yellow
+W8 (新青年体) or FangTang (方糖体), keep ordinary text primarily yellow
 with white support, and use complete flower text for every actual game name.
 Never use an ordinary all-white cue. Yellow remains the main color; when a cue
 needs selective emphasis, make the emphasized words yellow and the rest white
@@ -113,6 +113,27 @@ independent of font and size. Flower outlines/glows retain the existing effect
 without an additional ordinary stroke. Never use layout.size or shrink
 long text. Subtitles must stay on one line; split long speech into sequential,
 semantically complete reviewed cues with speech-aligned timing. Do not use line_breaks.
+Subtitle drafts use `semantic-reading/v1`: preserve ASR punctuation, pauses and
+word timestamps when proposing boundaries, and measure the calibrated font/flower
+width rather than dividing narration into equal character counts. Review complete
+sentences before individual cues. Never attach the tail of one clause to the
+beginning of the next, separate a quantity from its classifier, or leave dependent
+particles such as 的/了 at a cue head; actual words such as 的确/了解 remain valid.
+For a flagged but legitimate complete word (for example 地形/得分/过瘾), supply
+the `head_word`, a concrete `head_word_reason`, and hash-bound speech/copy evidence
+quoting that exact word. Do not approve an isolated dependent particle this way.
+Keep short complete speech together. Judge reading time after the final 1.2x:
+aim for 1.2–2.5 seconds and revise cues below 0.8 seconds; unavoidable standalone
+short phrases require a concrete `short_cue_reason` in the subtitle review.
+For a new draft, use `subtitle-draft --subtitle-dir <complete batch TXT directory>`
+to refresh the immutable draft snapshots after Codex resegmentation, then perform
+the normal word/shot-bound review. Completed deliveries still use `reburn`.
+New designs bind `reading_policy: "semantic-reading/v1"`. At most one actual
+game name per video may display alone. Choose it by context, leaving meaningful
+surrounding phrases; never create isolated fillers such as 玩. Require at least
+0.8 seconds of final display and 0.6 seconds fully settled, use existing complete
+flower text at size 9, prefer ice_drift, and default to a 200ms entrance on the
+unaccelerated timeline. If those conditions fail, retain readable mixed text.
 After subtitle review, read [AI packaging design](references/packaging/design.md),
 inspect the effect catalog and relevant previews, then write `subtitle_design`
 with `graphic_layers` omitted or empty. Select only existing installed library

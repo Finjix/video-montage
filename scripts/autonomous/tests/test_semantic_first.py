@@ -226,7 +226,7 @@ class SemanticFirstTests(unittest.TestCase):
         config = job / "config" / "new_config.json"
         auto.write(config, {"schema": packager.SCHEMA, "outputs": [{"plan_id": "P1", "input_path": clean_row["output"]["path"],
             "input_sha256": clean_row["output"]["sha256"], "subtitle_txt": str(subtitle), "subtitle_sha256": auto.sha(subtitle),
-            "graphic_layers": [], "subtitle_design": {"subtitle_sha256": auto.sha(subtitle), "font": "smiley", "game_names": [],
+            "graphic_layers": [], "subtitle_design": {"subtitle_sha256": auto.sha(subtitle), "font": "w8", "game_names": [],
                 "reason": "Test static yellow subtitles", "cues": [{"index": index, "text": text, "color": "yellow"} for index, text in enumerate(texts, 1)]}}]})
         self.approve_subtitle(job)
         return config

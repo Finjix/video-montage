@@ -388,6 +388,19 @@ def character_times(asr: dict) -> list[tuple[int, int]]:
     return times
 
 
+def subtitle_head_word_supported(change: dict, asset_copy: dict, source_index: dict, plan: dict) -> bool:
+    """A flagged initial character may belong to a reviewed, evidenced word."""
+    word = change.get("head_word")
+    reason = change.get("head_word_reason")
+    if (not isinstance(word, str) or len(normalized(word)) < 2
+            or not normalized(change.get("after", "")).startswith(normalized(word))
+            or not isinstance(reason, str) or not reason.strip()
+            or not any(normalized(item.get("text", "")) == normalized(word)
+                       for item in change.get("evidence", []) if isinstance(item, dict))):
+        return False
+    return subtitle_change_supported(change, asset_copy, source_index, plan)
+
+
 def validate_subtitle_timing(start: int, end: int, first: tuple[int, int],
                              last: tuple[int, int], shot: tuple[int, int]) -> None:
     shot_start, shot_end = shot
@@ -633,6 +646,7 @@ def init(args) -> None:
                "repair_delivery_policy": "overwrite", "delivery_layout": "chinese/v1", "records_policy": "delivery-temporary/v1",
                "temporary_root": str(output / "临时文件"), "repair_round": 0,
                "packaging_design_policy": "codex/v1",
+               "subtitle_segmentation_policy": "semantic-reading/v1",
                "planning_policy": EDITING.POLICY,
                "batch_review_policy": BATCH.POLICY,
                "audio_cleanup_policy": AUDIO.POLICY,
@@ -1462,9 +1476,25 @@ def subtitle_draft(args) -> None:
     rows = []
     timing_by_id = {row["plan_id"]: row.get("timing_asr")
                     for row in read(require_ref(value["clean_qc"], "clean QC"))["results"]}
+    subtitle_dir = getattr(args, "subtitle_dir", None)
+    imported = {}
+    if subtitle_dir is not None:
+        # Validate the complete batch before writing any new snapshot. A revised
+        # draft may change cue count, but cannot change the verified speech.
+        for row in clean["results"]:
+            source = subtitle_dir.resolve() / packager.subtitle_filename(row["plan_id"])
+            duration = round(packager.video_spec(require_ref(row["output"], "clean output"))["duration"] * 1000)
+            cues = packager.parse_srt(source, duration)
+            if subtitle_spelling("".join(cue["text"] for cue in cues)) != subtitle_spelling(row["expected_text"]):
+                raise ValueError(f"{row['plan_id']}: imported subtitles differ from verified speech")
+            imported[row["plan_id"]] = source
     for row in clean["results"]:
-        draft = packager.draft_one(require_ref(row["output"], "clean output"), row["plan_id"], output,
-                                  overwrite=True, verified_asr=timing_by_id.get(row["plan_id"]))
+        if imported:
+            draft = {"plan_id": row["plan_id"], "input_path": row["output"]["path"],
+                     "subtitle_txt_path": str(imported[row["plan_id"]]), "asr_device": "reviewed_resegmentation"}
+        else:
+            draft = packager.draft_one(require_ref(row["output"], "clean output"), row["plan_id"], output,
+                                      overwrite=True, verified_asr=timing_by_id.get(row["plan_id"]))
         source = Path(draft["subtitle_txt_path"])
         snapshot = job / f"attempt-{value['repair_round'] + 1:02d}" / "evidence" / "subtitle_drafts" / source.name
         snapshot.parent.mkdir(parents=True, exist_ok=True)
@@ -1546,10 +1576,23 @@ def subtitle_review(args) -> None:
             raise ValueError(f"{pid}: corrected cue words do not cover output ASR")
         if subtitle_spelling("".join(cue["after"] for cue in cues)) != subtitle_spelling(expected[pid]):
             raise ValueError(f"{pid}: subtitle words differ from exact source speech")
+        reading = packager.subtitle_segmentation.reading_issues(
+            [{"start_ms": cue["start_ms"], "end_ms": cue["end_ms"], "text": cue["after"]} for cue in cues])
+        if value.get("subtitle_segmentation_policy") == packager.subtitle_segmentation.POLICY:
+            for issue in reading:
+                correction = cues[issue["index"] - 1]
+                if issue["code"] == "dependent_head":
+                    if not subtitle_head_word_supported(correction, asset_copy_value, source_index, value["plan"]):
+                        raise ValueError(f"{pid}: dependent subtitle head; revise segmentation or evidence the complete head_word")
+                    continue
+                reason = correction.get("short_cue_reason")
+                if not isinstance(reason, str) or not reason.strip():
+                    raise ValueError(f"{pid}: short final subtitle requires a concrete short_cue_reason")
         corrected = module("autonomous_subtitle_layout", "scripts/packaging/scripts/package_video.py").subtitle_output(processing_dir(value), pid)
         corrected.write_text("\n\n".join(blocks) + "\n", encoding="utf-8")
         packager.parse_srt(corrected, duration)
-        revised.append({"plan_id": pid, "subtitle": ref(corrected), "draft": ref(draft_sub)})
+        revised.append({"plan_id": pid, "subtitle": ref(corrected), "draft": ref(draft_sub),
+                        "reading_issues": reading})
     report = job / "reports" / "subtitle_review.json"
     write(report, {"schema": "video-montage-autonomous-subtitle-review/v260929",
                    "draft": ref(draft_path), "codex_review": ref(args.review), "results": revised,
@@ -1585,6 +1628,8 @@ def package(args) -> None:
         raise ValueError("packaging config scope mismatch")
     for row in config["outputs"]:
         subtitle = require_ref(by_id[row["plan_id"]]["subtitle"], "corrected subtitle")
+        if value.get("subtitle_segmentation_policy") and row.get("subtitle_design", {}).get("reading_policy") != value["subtitle_segmentation_policy"]:
+            raise ValueError("subtitle design must bind the reviewed reading policy")
         supplied = Path(row.get("subtitle_txt", ""))
         if not supplied.is_absolute():
             supplied = args.config.parent / supplied
@@ -2235,7 +2280,8 @@ def compact_delivery(job: Path, value: dict) -> None:
         "schema", "review_mode", "work_order", "source_hashes", "asset_root", "output_root",
         "delivery_directory", "repair_delivery_policy", "delivery_layout", "records_policy",
         "temporary_root", "repair_round", "max_repair_rounds", "continue_until_complete", "packaging_design_policy",
-        "continuation_authorization", "planning_policy", "batch_review_policy", "audio_cleanup_policy") if key in value}
+        "continuation_authorization", "planning_policy", "batch_review_policy", "audio_cleanup_policy",
+        "subtitle_segmentation_policy") if key in value}
     retained.update(phase="complete", compact_delivery=True)
     retained["delivery_mode"] = value.get("delivery_mode", "packaged")
     inputs = {}
@@ -2324,6 +2370,8 @@ def main() -> None:
         if name in {"approve-plan", "subtitle-review", "complete"}: action.add_argument("--review", type=Path, required=True)
         if name == "package": action.add_argument("--config", type=Path, required=True)
         if name == "final-evidence": action.add_argument("--clean", action="store_true")
+        if name == "subtitle-draft":
+            action.add_argument("--subtitle-dir", type=Path, help="complete reviewed resegmentation batch; refresh draft snapshots before review")
         if name == "reburn":
             action.add_argument("--plan-id")
             action.add_argument("--subtitle-txt", type=Path)

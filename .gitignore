@@ -3,6 +3,4 @@ __pycache__/
 .pytest_cache/
 release/
 test/
-output/
 work/
-.runtime/

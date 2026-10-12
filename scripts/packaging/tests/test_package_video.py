@@ -9,7 +9,7 @@ import types
 import unittest
 from pathlib import Path
 from unittest.mock import patch
-from PIL import Image
+from PIL import Image, ImageFont
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts/package_video.py"
@@ -36,6 +36,15 @@ class PackagingContractTests(unittest.TestCase):
             **packaging.subtitle_fonts.FONTS["w8"], "path": str(self.font), "sha256": packaging.sha(self.font)}})
         font_mock.start()
         self.addCleanup(font_mock.stop)
+        # Font provenance uses byte fixtures; glyph measurements use the actual
+        # bundled font so the draft tests exercise calibrated width decisions.
+        bundled_w8 = packaging.ROOT / "assets/packaging/fonts/WenYue-XinQingNianTi-W8.otf"
+        measure = patch.object(packaging.subtitle_segmentation, "_font",
+            side_effect=lambda path, pixels: ImageFont.truetype(str(bundled_w8) if path == str(self.font) else path, pixels))
+        measure.start()
+        self.addCleanup(measure.stop)
+        packaging.subtitle_segmentation.fits.cache_clear()
+        self.addCleanup(packaging.subtitle_segmentation.fits.cache_clear)
         choice_mock = patch.object(packaging.subtitle_fonts.secrets, "choice", return_value="w8")
         choice_mock.start()
         self.addCleanup(choice_mock.stop)
@@ -462,7 +471,7 @@ class PackagingContractTests(unittest.TestCase):
             {'output_in_frame': 120, 'asr': {'segments': [{'start': .1, 'end': 3.8, 'text': text,
               'words': [{'start': .1, 'end': 3.8, 'word': text}]}]}}]})
         self.assertEqual(''.join(row['text'] for row in rows), text)
-        self.assertTrue(all(3 <= len(row['text']) <= 10 for row in rows))
+        self.assertTrue(all(packaging.subtitle_segmentation.fits(row['text']) for row in rows))
         self.assertEqual(sum('无尽冬日' in row['text'] for row in rows), 1)
         self.assertTrue(all(row['start'] >= 2.1 and row['end'] <= 5.8 for row in rows))
 

@@ -24,6 +24,7 @@ import flower_effects
 import subtitle_fonts
 import packaging_design
 import design_renderer
+import subtitle_segmentation
 FFMPEG = ROOT / "assets/dependencies/ffmpeg/bin/ffmpeg.exe"
 FFPROBE = ROOT / "assets/dependencies/ffmpeg/bin/ffprobe.exe"
 MODEL_ROOT = ROOT / "assets/dependencies/models"
@@ -276,7 +277,7 @@ def subtitle_style(config: dict, base: Path) -> dict:
     ass = dict(SUBTITLE_ASS)
     # Historical ASS measurements use libass metrics, distinct from the current
     # reference-calibrated PIL design. Preserve legacy layout/read compatibility.
-    ass_scale = {"w8": 1.0, "smiley": .83, "fangtang": .98}[font_id]
+    ass_scale = {"w8": 1.0, "fangtang": .98}[font_id]
     ass["font_size"] = round(ass["font_size"] * ass_scale)
     emphasis["ass_font_size"] = round(emphasis["ass_font_size"] * ass_scale)
     return {"font": font, "font_id": font_id, "font_label": spec["label"],
@@ -394,52 +395,8 @@ def timed_lines(lines: list[str], start_ms: int, end_ms: int) -> list[tuple[int,
 
 
 def verified_caption_rows(asr: dict) -> list[dict]:
-    """Balance Chinese shot captions without replaying recognition or tiny tails."""
-    protected = ('无尽冬日', '无尽动日', '无尽冬至', '幸存者', '熔炉', '发展建设',
-                 '三分钟', '中年人', '解压神器', '庇护所', '冰雪末日', '沉浸感',
-                 '明星玩家', '吴岳', '吴樾', '升级', '温度', '砍树', '打猎', '挖矿',
-                 '资源', '厨房', '三十', '快乐', '聚爽', '聚解压', '然后', '不断',
-                 '获取', '建造', '建设', '收集', '收留', '几个', '更多', '现在玩',
-                 '三分钟一局', '现在玩无尽冬日', '更是快乐')
-    observations = asr.get('shot_observations')
-    if not observations:
-        observations = [{'output_in_frame': 0, 'asr': asr}]
-    rows = []
-    for shot in observations:
-        offset = shot['output_in_frame'] / 60
-        letters, times = [], []
-        for segment in shot['asr']['segments']:
-            words = segment.get('words') or [{'word': segment['text'], 'start': segment['start'], 'end': segment['end']}]
-            for word in words:
-                chars = re.findall(r'[0-9A-Za-z\u4e00-\u9fff]', word['word'])
-                for index, char in enumerate(chars):
-                    letters.append(char)
-                    start = word['start'] + (word['end'] - word['start']) * index / len(chars)
-                    end = word['start'] + (word['end'] - word['start']) * (index + 1) / len(chars)
-                    times.append((start + offset, end + offset))
-        text = ''.join(letters)
-        forbidden = set()
-        for word in protected:
-            for match in re.finditer(re.escape(word), text):
-                forbidden.update(range(match.start() + 1, match.end()))
-        for match in re.finditer(r'[0-9A-Za-z]+', text):
-            if len(match[0]) <= 10:forbidden.update(range(match.start() + 1, match.end()))
-        cursor = 0
-        while cursor < len(text):
-            remaining = len(text) - cursor
-            parts = (remaining + 9) // 10
-            if parts == 1:end = len(text)
-            else:
-                choices = []
-                while not choices and parts <= remaining:
-                    ideal = cursor + round(remaining / parts)
-                    choices = [end for end in range(max(cursor + 1, len(text) - (parts - 1) * 10), min(cursor + 10, len(text) - 1) + 1) if end not in forbidden]
-                    if not choices:parts += 1
-                if not choices:raise ValueError('cannot fit protected caption phrase')
-                end = min(choices, key=lambda candidate: (abs(candidate - ideal), candidate))
-            rows.append({'start': times[cursor][0], 'end': times[end - 1][1], 'text': text[cursor:end]})
-            cursor = end
-    return rows
+    """Propose measured, speech-bound phrases; Codex still reviews semantics."""
+    return subtitle_segmentation.caption_rows(asr)
 
 
 def draft_one(input_path: Path, plan_id: str, output_dir: Path, *, overwrite: bool = False,
@@ -470,29 +427,9 @@ def draft_one(input_path: Path, plan_id: str, output_dir: Path, *, overwrite: bo
             del model
             model, device, _ = module.build_model("large-v3-turbo", MODEL_ROOT, "cpu", "int8", "float16")
             asr, _ = module.transcribe(model, str(input_path), "zh")
-    rows = []
-    for segment in asr["segments"]:
-        words = segment.get("words") or [{"start": segment["start"], "end": segment["end"], "word": segment["text"]}]
-        current = []
-        for word in words:
-            current_text = "".join(item["word"] for item in current)
-            candidate = current_text + word["word"]
-            title_start = candidate.find(SUBTITLE_EMPHASIS["text"])
-            title = SUBTITLE_EMPHASIS["text"]
-            cuts_title = (0 <= title_start < len(current_text) < title_start + len(title)
-                          or any(current_text.endswith(title[:prefix]) and str(word["word"]).startswith(title[prefix])
-                                 for prefix in range(1, len(title))))
-            if current and not cuts_title and float(word["end"]) - float(current[0]["start"]) > 3.5:
-                rows.append({"start": float(current[0]["start"]), "end": float(current[-1]["end"]), "text": "".join(item["word"] for item in current)})
-                current = []
-            current.append(word)
-            if re.search(r"[。！？!?]$", str(word["word"])) and float(word["end"]) - float(current[0]["start"]) >= 0.7:
-                rows.append({"start": float(current[0]["start"]), "end": float(current[-1]["end"]), "text": "".join(item["word"] for item in current)})
-                current = []
-        if current:
-            rows.append({"start": float(current[0]["start"]), "end": float(current[-1]["end"]), "text": "".join(item["word"] for item in current)})
-    if verified_asr is not None:
-        rows = verified_caption_rows(verified_asr)
+    # Both routes use the same punctuation-aware proposal logic. Verified shot
+    # observations additionally prevent a caption from crossing a visual cut.
+    rows = verified_caption_rows(asr)
     if not rows:
         raise RuntimeError("Whisper produced no subtitle cues")
     duration_ms = round(video_spec(input_path)["duration"] * 1000)

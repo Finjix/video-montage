@@ -25,7 +25,7 @@ configuration, then run `packaging-finalize` and `packaging-validate` after
 `controller-validate` and before `complete`. Read the
 [packaging workflow](../packaging/workflow.md). Without packaging,
 keep the clean delivery behavior.
-Packaging randomly selects bundled WenYue W8, Smiley Sans or FangTang once per
+Packaging randomly selects bundled WenYue W8 (新青年体) or FangTang (方糖体) once per
 task and burns yellow, black-outlined subtitles by default. The selected OTF in
 `assets/packaging/fonts` is shared by the batch and retained for reburns.
 Burn subtitles into the video picture only. All new deliveries must use a

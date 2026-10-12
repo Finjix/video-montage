@@ -9,6 +9,7 @@ import re
 from pathlib import Path
 
 import subtitle_fonts
+import subtitle_segmentation
 
 ROOT = Path(__file__).resolve().parents[3]
 CATALOG = ROOT / "assets/packaging/design/catalog.json"
@@ -173,12 +174,12 @@ def prepare(value: dict, cues: list[dict], subtitle_sha256: str, layers: list[di
     if not isinstance(value, dict) or value.get("subtitle_sha256") != subtitle_sha256:
         raise ValueError("subtitle_design must bind the reviewed subtitle SHA-256")
     allowed = {"subtitle_sha256", "font", "game_names", "game_flower", "game_font_size", "reason", "cues",
-               "protected_regions", "graphic_layers", "needs_design_review"}
+               "protected_regions", "graphic_layers", "needs_design_review", "reading_policy"}
     if set(value) - allowed:
         raise ValueError("subtitle_design only selects existing library resources; unsupported design fields: "
                          + ", ".join(sorted(set(value) - allowed)))
     if value.get("font") not in subtitle_fonts.FONTS:
-        raise ValueError("subtitle_design.font must explicitly select w8, smiley or fangtang")
+        raise ValueError("subtitle_design.font must explicitly select w8 or fangtang")
     if not isinstance(value.get("reason"), str) or not value["reason"].strip():
         raise ValueError("subtitle_design requires a concrete design reason")
     names = value.get("game_names")
@@ -196,6 +197,18 @@ def prepare(value: dict, cues: list[dict], subtitle_sha256: str, layers: list[di
     if game_size == 8:
         raise ValueError("game_font_size must be 9")
     styles = [cue_style(row, cue, names, game_flower, game_size) for row, cue in zip(requested, cues)]
+    if "reading_policy" in value:
+        if value["reading_policy"] != subtitle_segmentation.POLICY:
+            raise ValueError("unsupported subtitle reading_policy")
+        standalone_games = []
+        for style, cue in zip(styles, cues):
+            if normalized(cue["text"]) in {normalized(name) for name in names}:
+                standalone_games.append(style)
+                interval = cue["end_ms"] - cue["start_ms"]
+                if interval / 1.2 < 800 or (interval - style["entrance"]["duration_ms"]) / 1.2 < 600:
+                    raise ValueError("standalone game name needs 800ms final display and 600ms settled reading")
+        if len(standalone_games) > 1:
+            raise ValueError("choose at most one standalone game-name cue per video")
     # A split game name cannot satisfy the all-occurrences guarantee.
     for name in names:
         compact = [normalized(c["text"]) for c in cues]

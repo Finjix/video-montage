@@ -20,7 +20,7 @@ import design_renderer as renderer
 import subtitle_fonts
 
 
-def fixture(cues, digest="subtitle", font="smiley"):
+def fixture(cues, digest="subtitle", font="w8"):
     return {"subtitle_sha256": digest, "font": font, "game_names": ["无尽冬日"],
             "reason": "黄字承担主叙述，白字解释，冰字突出游戏名；开头强调后保留阅读段。",
             "cues": [{"index": i, "text": row["text"], "color": "yellow",
@@ -273,7 +273,7 @@ class DesignTests(unittest.TestCase):
         value = fixture(self.cues)
         value["cues"][0]["entrance"] = {"effect": "bounce_up", "duration_ms": 250}
         value = self.prepare(value)
-        track = renderer.prepare_track(self.root, self.cues, value, subtitle_fonts.FONTS["smiley"]["path"], 120)
+        track = renderer.prepare_track(self.root, self.cues, value, subtitle_fonts.FONTS["w8"]["path"], 120)
         self.assertEqual(15, track["record"]["events"][0]["entrance_frames"])
         images = sorted(self.root.glob("design-*.png"))
         with Image.open(images[-1]) as image:
@@ -281,7 +281,7 @@ class DesignTests(unittest.TestCase):
             self.assertEqual(0, image.getchannel("A").getextrema()[0])
         value["protected_regions"] = [{"box": [.1, .5, .9, .9]}]
         with self.assertRaisesRegex(ValueError, "protected"):
-            renderer.prepare_track(self.root, self.cues, value, subtitle_fonts.FONTS["smiley"]["path"], 120)
+            renderer.prepare_track(self.root, self.cues, value, subtitle_fonts.FONTS["w8"]["path"], 120)
 
     def test_fade_is_rejected_and_only_three_animations_are_available(self):
         self.assertEqual({"none", "bounce_up", "shout_wave", "ice_drift"}, set(design.ENTRANCES))
@@ -296,7 +296,7 @@ class DesignTests(unittest.TestCase):
         value = fixture([cue]); value["game_names"] = []
         value["cues"][0]["entrance"] = {"effect": "bounce_up", "duration_ms": 50}
         prepared = design.prepare(value, [cue], "subtitle", [], self.root, 6)
-        track = renderer.prepare_track(self.root, [cue], prepared, subtitle_fonts.FONTS["smiley"]["path"], 6)
+        track = renderer.prepare_track(self.root, [cue], prepared, subtitle_fonts.FONTS["w8"]["path"], 6)
         self.assertEqual(3, track["record"]["events"][0]["entrance_frames"])
         long_text = "冰雪世界轻松解压赶快上线" * 3
         cue = {"start_ms": 0, "end_ms": 1500, "text": long_text}
@@ -322,9 +322,9 @@ class RealBurnTests(unittest.TestCase):
             cues = pack.parse_srt(subtitle, 2000)
             config = root / "config.json"
             outputs = []
-            for i, font in enumerate(("smiley", "fangtang")):
+            for i, font in enumerate(("w8", "fangtang")):
                 presentation = fixture(cues, pack.sha(subtitle), font)
-                presentation["cues"][0]["entrance"] = {"effect": ("bounce_up", "ice_drift")[i], "duration_ms": 200}
+                presentation["cues"][0]["entrance"] = {"effect": ("ice_drift", "bounce_up")[i], "duration_ms": 200}
                 presentation["cues"][1]["color"] = "white"
                 presentation["cues"][1]["spans"] = [{"start": 0, "end": 1, "color": "yellow"}]
                 outputs.append({"plan_id": f"P{i}", "input_path": str(source), "subtitle_txt": str(subtitle),
@@ -332,7 +332,7 @@ class RealBurnTests(unittest.TestCase):
             pack.atomic(config, {"schema": pack.SCHEMA, "outputs": outputs})
             output = root / "delivery"; manifest = output / "manifest.json"
             result = pack.render(config, output, manifest)
-            self.assertEqual(["smiley", "fangtang"], [r["subtitle_style"]["font_id"] for r in result["results"]])
+            self.assertEqual(["w8", "fangtang"], [r["subtitle_style"]["font_id"] for r in result["results"]])
             for row in result["results"]:
                 self.assertEqual(100, row["output_frames"])
                 self.assertEqual(0, row["output_spec"]["subtitle_streams"])

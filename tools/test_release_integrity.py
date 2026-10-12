@@ -358,7 +358,7 @@ for font in f.FONTS:
     assert image.getbbox() and image.mode == 'RGBA'
 assert d.TEMPLATES == ()
 for effect in d.ENTRANCES:
-    image=r.text_sprite('冰雪世界',f.FONTS['smiley']['path'],120)
+    image=r.text_sprite('冰雪世界',f.FONTS['w8']['path'],120)
     event={'sprite':image,'entrance':{'effect':effect},'entrance_frames':18,'start_frame':0,
            'base_x':300,'base_y':1400,'cx':720,'cy':1766}
     assert r.paint_event(event,10)[0].mode == 'RGBA'

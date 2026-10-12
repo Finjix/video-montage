@@ -16,7 +16,7 @@ def main():
     parser.add_argument("--style", choices=("fire1", "ice1", "ice2"), required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--scale", type=float, default=1.)
-    parser.add_argument("--font", choices=("random", "w8", "smiley", "fangtang"), default="random")
+    parser.add_argument("--font", choices=("random", "w8", "fangtang"), default="random")
     args = parser.parse_args()
     if not 0 < args.scale <= 10:
         parser.error("--scale must be between 0 and 10")

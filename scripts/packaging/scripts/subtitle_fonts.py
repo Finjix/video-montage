@@ -23,9 +23,6 @@ FONTS = {
     "w8": {"label": "文悦新青年体 W8", "path": str(FONT_ROOT / "WenYue-XinQingNianTi-W8.otf"),
            "sha256": "20b03dfe8dc982a19946726fe4acf156f9bb8b45adae8aac22a4a3590bb9a6bf",
            "family": "WenYue XinQingNianTi J W8", "postscript": "WenYue_XinQingNianTi_J-W8", "size_scale": 1.0},
-    "smiley": {"label": "得意黑", "path": str(FONT_ROOT / "SmileySans-Oblique.otf"),
-               "sha256": "139b5dcbe70d6d52de85a62d148784c6af4bd161e38fdb62ba0c1e7e5065fca6",
-               "family": "Smiley Sans Oblique", "postscript": "SmileySans-Oblique", "size_scale": 0.93},
     "fangtang": {"label": "方糖体", "path": str(FONT_ROOT / "WenYue-FangTangTi-J-2.otf"),
                 "sha256": "306bcecf10ffed57b823b8d04802f81ad746289661d00b14fab802e8f8625739",
                 "family": "WenYue FangTangTi (Authorization Required) J", "postscript": "WenYue-FangTangTi-J", "size_scale": 0.93},
@@ -43,7 +40,7 @@ def select(value: str = "random") -> tuple[str, dict]:
     if value == "random":
         value = secrets.choice(tuple(FONTS))
     if not isinstance(value, str) or value not in FONTS:
-        raise ValueError("subtitle_font must be random, w8, smiley or fangtang")
+        raise ValueError("subtitle_font must be random, w8 or fangtang")
     return value, FONTS[value]
 
 

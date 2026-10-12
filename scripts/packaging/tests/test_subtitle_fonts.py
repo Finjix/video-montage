@@ -24,6 +24,18 @@ class FontSelectionTests(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
 
+    def test_only_current_fonts_are_available_and_removed_font_is_rejected(self):
+        self.assertEqual({"w8", "fangtang"}, set(subtitle_fonts.FONTS))
+        catalog = packaging.read(ROOT / "assets/packaging/design/catalog.json")
+        self.assertEqual(set(subtitle_fonts.FONTS), set(catalog["fonts"]))
+        for entrance in catalog["entrances"].values():
+            self.assertEqual(set(subtitle_fonts.FONTS), set(entrance["fonts"]))
+        self.assertFalse((subtitle_fonts.FONT_ROOT / "SmileySans-Oblique.otf").exists())
+        with self.assertRaises(ValueError):
+            packaging.subtitle_style({"subtitle_font": "smiley"}, self.root)
+        with self.assertRaisesRegex(ValueError, "SHA-256"):
+            subtitle_fonts.by_hash("139b5dcbe70d6d52de85a62d148784c6af4bd161e38fdb62ba0c1e7e5065fca6")
+
     def test_every_font_asset_is_hash_bound_and_can_be_selected_by_copy(self):
         for key, spec in subtitle_fonts.FONTS.items():
             with self.subTest(font=key):
@@ -42,7 +54,7 @@ class FontSelectionTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 packaging.subtitle_style({"subtitle_font": invalid}, self.root)
         with self.assertRaisesRegex(ValueError, "different fonts"):
-            packaging.subtitle_style({"subtitle_font": "w8", "subtitle_font_path": subtitle_fonts.FONTS["smiley"]["path"]}, self.root)
+            packaging.subtitle_style({"subtitle_font": "w8", "subtitle_font_path": subtitle_fonts.FONTS["fangtang"]["path"]}, self.root)
 
     def test_per_output_font_is_explicit_and_frozen_in_snapshot(self):
         source = self.root / "source.mp4"; source.write_bytes(b"clean video")
@@ -60,7 +72,7 @@ class FontSelectionTests(unittest.TestCase):
             rows = packaging.prepared_rows(config)
             self.assertEqual(list(subtitle_fonts.FONTS), [r["subtitle_style"]["font_id"] for r in rows])
             snapshot = self.root / "frozen.json"
-            packaging.atomic(snapshot, packaging.relocated_config(config, rows, [subtitles]*3, snapshot))
+            packaging.atomic(snapshot, packaging.relocated_config(config, rows, [subtitles]*len(rows), snapshot))
             self.assertNotIn("subtitle_font", packaging.read(snapshot))
             reopened = packaging.prepared_rows(snapshot)
             self.assertEqual(list(subtitle_fonts.FONTS), [r["subtitle_style"]["font_id"] for r in reopened])
@@ -106,11 +118,11 @@ class NewFontBurnTests(unittest.TestCase):
             heights[key] = y1 - y0
             self.assertLessEqual(abs((y0 + y1) / 2 + band_y - 1768), 5)
             self.assertLessEqual(abs((x0 + x1) / 2 - 720), 5)
-        for key in ("smiley", "fangtang"):
+        for key in ("fangtang",):
             self.assertLessEqual(abs(heights[key] / heights["w8"] - 1), .08)
 
     def test_new_fonts_burn_all_three_effects_with_clear_gaps_and_arbitrary_text(self):
-        for key in ("smiley", "fangtang"):
+        for key in subtitle_fonts.FONTS:
             for effect in ("fire1", "ice1", "ice2"):
                 with self.subTest(font=key, effect=effect):
                     directory = self.root / f"{key}-{effect}"
