@@ -18,6 +18,11 @@ containing this file in both the source project and the installed skill. Resolve
   actual ASR, native frames, asset copy, candidate and final packaged evidence;
   machine gates check ASR, PCM, subtitles and hashes. Do not claim independent
   review, human listening or forced word alignment.
+  New jobs also bind `spoken-audio-cleanup/v1`; read
+  [spoken audio cleanup](references/autonomous/audio-cleanup.md). Review source
+  waveform, word context and VAD proposals before authorizing sample-bound mutes.
+  Preserve natural expression, picture duration and subtitles; clean source audio
+  before BGM and final speed-up. Never mute merely because ASR produced no text.
 - For existing jobs containing `three_suite_ff_state.json` or v260928 review
   receipts, read [legacy workflow](references/workflows/legacy-workflow.md). Keep the bundled
   `scripts/executor/scripts/three_suite_ff.py` state machine, hash-bound work

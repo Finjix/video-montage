@@ -15,6 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from v20_frame_plan_gate import validate_plan_value
 from source_timing import require_constant_frame_rate
+import audio_cleanup
 
 
 RENDER_MODE = "source_frame_ranges/v1"
@@ -99,7 +100,9 @@ def coalesce_segments(segments: list[dict]) -> list[dict]:
             monotonic = int(current["source_in_frame"]) >= int(previous["source_in_frame"])
             touches_or_overlaps = int(current["source_in_frame"]) <= int(previous["source_out_frame_exclusive"])
             extends_forward = int(current["source_out_frame_exclusive"]) > int(previous["source_out_frame_exclusive"])
-            if same_source and same_hash and same_fps and same_speed and same_gain and monotonic and touches_or_overlaps and extends_forward:
+            cleanup_separate = any(item.get("audio_cleanup_policy") or item.get("audio_cleanup", {}).get("mute_ranges")
+                                   for item in (previous, current))
+            if same_source and same_hash and same_fps and same_speed and same_gain and monotonic and touches_or_overlaps and extends_forward and not cleanup_separate:
                 previous["source_out_frame_exclusive"] = int(current["source_out_frame_exclusive"])
                 previous["speech_end_frame"] = max(int(previous["speech_end_frame"]), int(current["speech_end_frame"]))
                 previous["_candidate_ids"].extend(current["_candidate_ids"])
@@ -184,6 +187,11 @@ def render(plan_path: Path, output: Path, evidence: Path, width: int, height: in
             f"[{index}:a]atrim=start={audio_start:.12f}:end={audio_end:.12f},"
             "asetpts=PTS-STARTPTS,aresample=48000"
         )
+        cleanup = segment.get("audio_cleanup")
+        if segment.get("audio_cleanup_policy") and not cleanup:
+            raise ValueError("reviewed audio cleanup required before rendering")
+        if cleanup:
+            audio = f"[{index}:a]" + audio_cleanup.filter_chain(cleanup, segment)
         # Reserve headroom before lossy encoding when the frame plan requests it.
         audio_gain_db = float(segment.get("audio_gain_db", 0.0))
         if not -24.0 <= audio_gain_db <= 0.0:
@@ -212,6 +220,7 @@ def render(plan_path: Path, output: Path, evidence: Path, width: int, height: in
                 "audio_end_seconds_derived_from_frame": audio_end,
                 "speed": speed,
                 "audio_gain_db": audio_gain_db,
+                **({"audio_cleanup": cleanup} if cleanup else {}),
                 "expected_output_frames": output_frame_count,
                 "nominal_duration_seconds": nominal_duration,
                 "output_duration_seconds": output_duration,

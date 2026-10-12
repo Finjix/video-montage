@@ -51,6 +51,8 @@ video-montage/
 
 默认成片为 H.264/AAC、1440×2560、60 fps，不额外添加背景音乐、字幕或叠加元素。新任务合同见[自动混剪流程](references/autonomous/workflow.md)；旧任务合同见 [语义流程](references/workflows/semantic-workflow.md)、[渲染流程](references/workflows/executor-workflow.md) 和 [控制器流程](references/workflows/controller-workflow.md)。
 
+新自主任务默认执行[纯口播残音清理](references/autonomous/audio-cleanup.md)：扫描完整片段的波形、VAD 与上下句逐词转写，由 AI 逐项复核残音和杂音，再对确认区间静音。保留画面、时长、字幕、呼吸和笑声，在加配乐及倍速前清理所有原片音频声道；底片和最终成品都复检。识别不出文字不直接触发静音。历史任务缺少新策略字段时保留原有流程，字幕重烧复用已通过的清理底轨。
+
 未请求包装的新任务，在 `clean-qc` 后运行 `final-evidence --clean`，由 Codex 查看成片画面并提交最终审核，再执行 `complete --review <JSON>`。整批通过后交付 `混剪（无包装）/` 中的 MP4。
 
 ### 可选成片包装

@@ -41,6 +41,13 @@ Choose a main font for each video, write a hash-bound subtitle design without de
 decisions; final review also requires `design_pass` and a concrete `design_reason`.
 Retain subtitle choices and timing with the configuration for reburn.
 
+Read [spoken audio cleanup](../autonomous/audio-cleanup.md). New work
+orders and plans bind `spoken-audio-cleanup/v1`; every segment carries its policy
+marker before shot planning. Examine the entire waveform and context, preserve
+natural expression, and review every proposal. Approved source-sample intervals
+are muted before mixing and acceleration, without shortening picture or captions.
+Historical jobs lacking this policy retain their original behavior.
+
 Codex itself examines source ASR, native decoded frames, the asset copy pack,
 candidate evidence and final packaged frame evidence. Submit honest,
 hash-bound `reviewer_role: codex` findings. Never claim an independent reviewer,

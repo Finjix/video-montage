@@ -94,6 +94,76 @@ class DeliveryLifecycleTests(unittest.TestCase):
                 "subtitle_pass": True, "overlay_pass": True, "design_pass": True, "design_reason": "Test explicit static layout", "reason": "Test fixture", **changes}]})
         return review
 
+    def enable_audio_cleanup(self, job):
+        """Upgrade only this synthetic fixture, using the actual review compiler."""
+        value = auto.state(job)
+        order_path = Path(value["work_order"]["path"])
+        order = auto.read(order_path)
+        order["audio_cleanup_policy"] = auto.AUDIO.POLICY
+        auto.write(order_path, order)
+        value["work_order"] = auto.ref(order_path)
+        value["audio_cleanup_policy"] = auto.AUDIO.POLICY
+        plan_path = Path(value["plan"]["path"])
+        plan = auto.read(plan_path)
+        plan["audio_cleanup_policy"] = auto.AUDIO.POLICY
+        segment = plan["outputs"][0]["segments"][0]
+        segment["audio_cleanup_policy"] = auto.AUDIO.POLICY
+        auto.write(plan_path, plan)
+        value["plan"] = auto.ref(plan_path)
+        source_row = auto.read(Path(value["source_index"]["path"]))["sources"][0]
+        source_asr = auto.read(Path(source_row["asr"]["path"]))["asr"]
+        observation = auto.AUDIO.analyze(auto.FFMPEG, Path(segment["source_path"]), segment, source_asr, job / "evidence/audio_cleanup")
+        audio_review = {"policy": auto.AUDIO.POLICY, "evidence_digest": observation["evidence_digest"],
+            "natural_expression_preserved": True, "decisions": [],
+            "protected_speech_ranges": [{k: w[k] for k in ("word_index", "text", "start_sample", "end_sample")}
+                                        for w in observation["target_words"]]}
+        self.assertEqual([], observation["candidates"])
+        evidence_path = Path(value["plan_evidence"]["path"])
+        auto.write(evidence_path, {"plan": value["plan"], "audio_cleanup_policy": auto.AUDIO.POLICY,
+            "results": [{"plan_id": "P1", "segment_index": 1, "source": source_row["source"],
+                         "pcm": observation["context_pcm"], "frames": [], "asr_exact": True, "audio_cleanup": observation}]})
+        value["plan_evidence"] = auto.ref(evidence_path)
+        review_path = Path(value["plan_review"]["path"])
+        auto.write(review_path, {"schema": auto.REVIEW_SCHEMA, "stage": "plan", "reviewer_role": "codex",
+            "audio_cleanup_policy": auto.AUDIO.POLICY, "plan_sha256": value["plan"]["sha256"],
+            "evidence_sha256": value["plan_evidence"]["sha256"], "segments": [{"plan_id": "P1", "segment_index": 1,
+                "semantic_pass": True, "visual_pass": True, "reason": "synthetic fixture", "audio_cleanup": audio_review}]})
+        auto.save(job, value, "plan_evidenced")
+        auto.approve_plan(SimpleNamespace(job_dir=job, review=review_path))
+        value = auto.state(job)
+        cleanup = auto.read(Path(value["audio_cleanup_authorization"]["path"]))["segments"][0]["audio_cleanup"]
+        clean_path = Path(value["clean_delivery"]["path"])
+        clean = auto.read(clean_path)
+        render_path = Path(clean["results"][0]["render_evidence"]["path"])
+        render = auto.read(render_path)
+        render["segments"][0]["audio_cleanup"] = cleanup
+        auto.write(render_path, render)
+        clean["results"][0]["render_evidence"] = auto.ref(render_path)
+        auto.write(clean_path, clean)
+        value["clean_delivery"] = auto.ref(clean_path)
+        qc_path = Path(value["clean_qc"]["path"])
+        qc = auto.read(qc_path)
+        qc["clean_delivery"] = value["clean_delivery"]
+        qc["results"][0]["audio_cleanup"] = auto.AUDIO.verify_output(
+            auto.AUDIO.decode(auto.FFMPEG, Path(clean["results"][0]["output"]["path"])), render)
+        auto.write(qc_path, qc)
+        value["clean_qc"] = auto.ref(qc_path)
+        auto.save(job, value, "clean_validated")
+
+    def test_cleanup_authorization_survives_packaged_compaction_and_reburn(self):
+        original_fixture = self.fixture
+        def cleaned_fixture():
+            result = original_fixture()
+            self.enable_audio_cleanup(result[0])
+            return result
+        with patch.object(self, "fixture", side_effect=cleaned_fixture):
+            self.test_compacted_packaged_job_reburns_and_completes_with_fresh_reviews()
+        job = self.root / "work/自动化混剪_20261008_120000/临时文件"
+        value = auto.state(job)
+        self.assertEqual(auto.AUDIO.POLICY, value["audio_cleanup_policy"])
+        self.assertEqual(value["audio_cleanup_authorization"], value["reburn_inputs"]["audio_cleanup_authorization"])
+        auto.require_audio_approval(value)
+
     def approve_subtitle(self, job):
         value = auto.state(job)
         draft = auto.read(Path(value["subtitle_draft"]["path"]))["results"][0]

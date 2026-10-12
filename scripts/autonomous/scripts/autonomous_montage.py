@@ -50,6 +50,7 @@ def module(name: str, relative: str):
 SOURCE_TIMING = module("autonomous_source_timing", "scripts/semantic/scripts/source_timing.py")
 EDITING = module("autonomous_editing_policy", "scripts/autonomous/scripts/planning_policy.py")
 BATCH = module("autonomous_batch_review", "scripts/autonomous/scripts/batch_review.py")
+AUDIO = module("autonomous_audio_cleanup", "scripts/semantic/scripts/audio_cleanup.py")
 
 
 def read(path: Path) -> dict:
@@ -313,10 +314,11 @@ def packaged_mix_evidence(output_audio: np.ndarray, clean_audio: np.ndarray,
             "checked_samples": len(expected), "basis": "decoded_clean_voice_plus_hash_bound_bgm"}
 
 
-def delivery_mix_evidence(output_audio: np.ndarray, row: dict) -> dict:
+def delivery_mix_evidence(output_audio: np.ndarray, row: dict, cleanup_render: dict | None = None) -> dict:
     """Rebuild the same full mix and tempo transform from authorized inputs."""
     packager = module("delivery_audio_packager", "scripts/packaging/scripts/package_video.py")
-    if packager.delivery_speed(row) == 1.0:
+    speed = packager.delivery_speed(row)
+    if speed == 1.0 and cleanup_render is None:
         return packaged_mix_evidence(output_audio, pcm(Path(row["input"]["path"])),
             pcm(Path(row["bgm"]["path"])) if row.get("bgm") else None,
             float(row["bgm"]["gain_db"]) if row.get("bgm") else 0)
@@ -329,17 +331,24 @@ def delivery_mix_evidence(output_audio: np.ndarray, row: dict) -> dict:
                    "[0:a][m]amix=inputs=2:duration=first:normalize=0,")
     else:
         filters = "[0:a]"
-    filters += "asetpts=PTS-STARTPTS,atempo=1.2,apad[a]"
+    filters += f"asetpts=PTS-STARTPTS,atempo={speed},apad[a]"
     # Match encoder sample rate and channel negotiation before decoding to mono.
     with tempfile.TemporaryDirectory(prefix="montage-tempo-proof-") as directory:
         expected_path = Path(directory) / "expected.m4a"
         command += ["-filter_complex", filters, "-map", "[a]", "-vn", "-c:a", "aac",
                     "-b:a", "192k", "-ar", "48000", "-t",
-                    f"{packager.final_frames(row['input_frames']) / 60:.6f}", str(expected_path)]
+                    f"{row.get('output_frames', round(row['input_frames'] / speed)) / 60:.6f}", str(expected_path)]
         run(command)
         expected = pcm(expected_path)
+        cleanup_proof = (AUDIO.verify_output(AUDIO.decode(FFMPEG, Path(row["output_path"])), cleanup_render,
+                                             speed, AUDIO.decode(FFMPEG, expected_path))
+                         if cleanup_render is not None else None)
     proof = packaged_mix_evidence(output_audio, expected, None)
-    proof["basis"] = "hash_bound_clean_mix_then_atempo_1.2"
+    proof["basis"] = f"hash_bound_clean_mix_then_atempo_{speed}"
+    if cleanup_proof is not None:
+        proof["audio_cleanup"] = cleanup_proof
+        if cleanup_proof["decision"] != "pass":
+            proof["decision"] = "reject"
     return proof
 
 
@@ -490,6 +499,11 @@ def state(job: Path) -> dict:
         raise ValueError("work-order batch review policy changed or missing in state")
     if value.get("batch_review_policy") not in {None, BATCH.POLICY}:
         raise ValueError("unknown batch review policy")
+    if (order.get("audio_cleanup_policy") != value.get("audio_cleanup_policy")
+            or value.get("audio_cleanup_policy") not in {None, AUDIO.POLICY}):
+        raise ValueError("work-order audio cleanup policy changed or missing in state")
+    if value.get("plan") and read(require_ref(value["plan"], "audio cleanup plan policy")).get("audio_cleanup_policy") != value.get("audio_cleanup_policy"):
+        raise ValueError("plan cannot lose its audio cleanup policy")
     if not value.get("batch_review_policy") and value.get("plan"):
         if read(require_ref(value["plan"], "plan policy")).get("batch_review_policy"):
             raise ValueError("whole-batch plan cannot lose its job review policy")
@@ -540,7 +554,8 @@ def repair(args) -> None:
     value["work_order"] = ref(upgraded_order)
     value["batch_review_policy"] = BATCH.POLICY
     for key in ("plan", "plan_evidence", "plan_review", "editing_context", "batch_diversity", "diversity_selection",
-                "clean_delivery", "clean_qc", "subtitle_draft", "subtitle_review", "packaging_delivery", "packaging_config"):
+                "clean_delivery", "clean_qc", "subtitle_draft", "subtitle_review", "packaging_delivery", "packaging_config",
+                "audio_cleanup_authorization"):
         value.pop(key, None)
     if value.pop("compact_delivery", False):
         for key in ("source_index", "asset_copy", "plan", "plan_evidence", "plan_review",
@@ -574,6 +589,8 @@ def init(args) -> None:
         raise ValueError("new autonomous work order required")
     if order.get("planning_policy", EDITING.POLICY) != EDITING.POLICY:
         raise ValueError("new jobs require semantic-continuity/v1")
+    if order.get("audio_cleanup_policy", AUDIO.POLICY) != AUDIO.POLICY:
+        raise ValueError("new jobs require spoken-audio-cleanup/v1")
     seen = set()
     for row in sources:
         path = Path(row["path"]).resolve()
@@ -608,7 +625,8 @@ def init(args) -> None:
     job.mkdir(parents=True)
     packager.ensure_delivery_layout(output)
     order_snapshot = job / "work_order.json"
-    write(order_snapshot, {**order, "planning_policy": EDITING.POLICY, "batch_review_policy": BATCH.POLICY})
+    write(order_snapshot, {**order, "planning_policy": EDITING.POLICY, "batch_review_policy": BATCH.POLICY,
+                           "audio_cleanup_policy": AUDIO.POLICY})
     save(job, {"schema": STATE_SCHEMA, "review_mode": "codex_asr_pcm", "work_order": ref(order_snapshot),
                "source_hashes": {str(Path(row["path"]).resolve()): sha(Path(row["path"])) for row in sources},
                "asset_root": str(asset), "output_root": str(output), "delivery_directory": str(output),
@@ -617,6 +635,7 @@ def init(args) -> None:
                "packaging_design_policy": "codex/v1",
                "planning_policy": EDITING.POLICY,
                "batch_review_policy": BATCH.POLICY,
+               "audio_cleanup_policy": AUDIO.POLICY,
                "max_repair_rounds": MAX_ROUNDS, "continue_until_complete": True}, "initialized")
     print(json.dumps({"job_dir": str(job), "delivery_directory": str(output)}, ensure_ascii=False))
 
@@ -842,8 +861,85 @@ def continuous_visual(path: Path, start: int, end: int, directory: Path) -> dict
     return ref(target)
 
 
+def audio_plan_errors(value: dict, plan: dict) -> list[str]:
+    enabled = value.get("audio_cleanup_policy") == AUDIO.POLICY
+    errors = []
+    if plan.get("audio_cleanup_policy") != value.get("audio_cleanup_policy"):
+        errors.append("audio cleanup plan policy missing or changed")
+    for output in plan.get("outputs", []):
+        previous = None
+        for segment in output["segments"]:
+            if segment.get("audio_cleanup") or segment.get("audio_mute_ranges"):
+                errors.append("audio cleanup must come from bound review, not an editable plan")
+            if segment.get("audio_cleanup_policy") != (AUDIO.POLICY if enabled else None):
+                errors.append("audio cleanup segment policy missing or changed")
+            if enabled and previous and previous["source_sha256"] == segment["source_sha256"] and segment["source_in_frame"] < previous["source_out_frame_exclusive"]:
+                errors.append("audio cleanup segments must not repeat overlapping source frames")
+            previous = segment
+    return errors
+
+
+def compile_audio_segments(value: dict, plan: dict, evidence: dict, review: dict) -> list[dict]:
+    if (evidence.get("audio_cleanup_policy") != AUDIO.POLICY or review.get("audio_cleanup_policy") != AUDIO.POLICY):
+        raise ValueError("audio cleanup policy missing in evidence/review")
+    evidence_by_key = {(r["plan_id"], r["segment_index"]): r for r in evidence["results"]}
+    findings = review.get("segments", [])
+    review_by_key = {(r["plan_id"], r["segment_index"]): r for r in findings}
+    expected = {(o["plan_id"], i) for o in plan["outputs"] for i in range(1, len(o["segments"]) + 1)}
+    if len(findings) != len(expected) or set(review_by_key) != expected or set(evidence_by_key) != expected:
+        raise ValueError("audio cleanup review scope incomplete")
+    index = read(require_ref(value["source_index"], "audio cleanup source index"))
+    source_asr = {r["source"]["sha256"]: read(require_ref(r["asr"], "audio cleanup source ASR"))["asr"] for r in index["sources"]}
+    rows = []
+    for output in plan["outputs"]:
+        for i, segment in enumerate(output["segments"], 1):
+            key = output["plan_id"], i
+            observation = evidence_by_key[key].get("audio_cleanup", {})
+            if observation.get("source_asr_digest") != AUDIO.digest(source_asr[segment["source_sha256"]]):
+                raise ValueError("audio cleanup source transcript changed")
+            cleanup = AUDIO.compile_review(observation, review_by_key[key].get("audio_cleanup", {}), segment)
+            rows.append({"plan_id": key[0], "segment_index": i, "audio_cleanup": cleanup})
+    return rows
+
+
+def require_audio_approval(value: dict) -> None:
+    if not value.get("audio_cleanup_policy"):
+        return
+    plan = read(require_ref(value["plan"], "audio cleanup plan"))
+    errors = audio_plan_errors(value, plan)
+    if errors:
+        raise ValueError("; ".join(errors))
+    artifact = read(require_ref(value["audio_cleanup_authorization"], "audio cleanup authorization"))
+    if artifact.get("policy") != AUDIO.POLICY:
+        raise ValueError("audio cleanup authorization policy changed")
+    if value.get("reburn_only") or value.get("compact_delivery"):
+        if artifact.get("clean_delivery") != value.get("clean_delivery") or artifact.get("plan") != value["plan"]:
+            raise ValueError("retained audio cleanup authorization changed")
+        return
+    evidence_path = require_ref(value["plan_evidence"], "audio cleanup evidence")
+    review_path = require_ref(value["plan_review"], "audio cleanup review")
+    evidence, review = read(evidence_path), read(review_path)
+    if (evidence.get("plan") != value["plan"] or review.get("evidence_sha256") != sha(evidence_path)
+            or review.get("plan_sha256") != value["plan"]["sha256"] or review.get("reviewer_role") != "codex"
+            or artifact.get("plan") != value["plan"] or artifact.get("plan_review") != value["plan_review"]
+            or artifact.get("plan_evidence") != value["plan_evidence"]):
+        raise ValueError("audio cleanup approval binding changed")
+    if artifact.get("segments") != compile_audio_segments(value, plan, evidence, review):
+        raise ValueError("audio cleanup parameters or review changed")
+
+
+def audio_render_check(value: dict, plan_id: str, rendered: dict) -> None:
+    if not value.get("audio_cleanup_policy"):
+        return
+    authorization = read(require_ref(value["audio_cleanup_authorization"], "audio cleanup authorization"))
+    approved = [r["audio_cleanup"] for r in authorization["segments"] if r["plan_id"] == plan_id]
+    if [s.get("audio_cleanup") for s in rendered["segments"]] != approved:
+        raise ValueError("render did not use the approved audio cleanup intervals")
+
+
 def require_editing_approval(value: dict) -> None:
     """Recheck editorial approvals before rendering and publishing new edits."""
+    require_audio_approval(value)
     if not semantic_first(value):
         return
     plan_path = require_ref(value["plan"], "semantic-first plan")
@@ -1033,9 +1129,11 @@ def plan_evidence(args) -> None:
     plan = read(args.plan)
     value["planning_policy"] = EDITING.POLICY
     for key in ("plan_review", "final_review", "completion", "clean_delivery", "clean_qc", "subtitle_review",
-                "packaging_delivery", "final_evidence", "editing_context", "batch_diversity", "diversity_selection"):
+                "packaging_delivery", "final_evidence", "editing_context", "batch_diversity", "diversity_selection",
+                "audio_cleanup_authorization"):
         value.pop(key, None)
     errors = check_plan(plan, source_index, int(order["requested_outputs"]), EDITING.POLICY, value.get("batch_review_policy"))
+    errors.extend(audio_plan_errors(value, plan))
     if errors:
         fail_round(job, value, "plan", errors)
     model = load_model()
@@ -1044,12 +1142,15 @@ def plan_evidence(args) -> None:
                   for row in source_index["sources"]}
     result = []
     candidate_cache = {}
+    source_asr_values = {row["source"]["sha256"]: read(require_ref(row["asr"], "source ASR"))["asr"]
+                         for row in source_index["sources"]} if value.get("audio_cleanup_policy") else {}
     for output in plan["outputs"]:
         pid = output["plan_id"]
         for index, segment in enumerate(output["segments"], 1):
             cache_key = (segment["source_sha256"], segment["source_in_frame"],
                          segment["source_out_frame_exclusive"], segment["source_fps_num"],
-                         segment["source_fps_den"], float(segment.get("audio_gain_db", 0.0)), segment["text"])
+                         segment["source_fps_den"], float(segment.get("audio_gain_db", 0.0)), segment["text"],
+                         value.get("audio_cleanup_policy"), AUDIO.digest(source_asr_values.get(segment["source_sha256"])))
             if cache_key in candidate_cache:
                 result.append({**candidate_cache[cache_key], "plan_id": pid, "segment_index": index,
                                "candidate_id": segment.get("candidate_id")})
@@ -1066,6 +1167,8 @@ def plan_evidence(args) -> None:
             samples = pcm(target)
             metrics = audio_metrics(samples)
             asr = transcribe(model, target, segment["text"], asset_copy_value)
+            cleanup_evidence = AUDIO.analyze(FFMPEG, source, segment, source_asr_values[segment["source_sha256"]],
+                                             target.parent / "audio_cleanup") if value.get("audio_cleanup_policy") else None
             expected = normalized(segment["text"])
             actual = normalized(asr["text"])
             clean_gap = metrics["head_40ms_dbfs"] <= -36 and metrics["tail_40ms_dbfs"] <= -36
@@ -1090,11 +1193,15 @@ def plan_evidence(args) -> None:
                    "text_match": text_match,
                    "source_text_match": source_text_match, "isolated_transients": transient_count,
                    "clean_gap": clean_gap, "visual_boundary": visual_boundary,
-                   "decision": "pass" if text_match and source_text_match and clean_gap and metrics["clipped_samples"] == 0 and transient_count == 0 and visual_boundary["decision"] == "pass" else "reject"}
+                   **({"audio_cleanup": cleanup_evidence} if cleanup_evidence else {}),
+                   "audio_signal_pending_cleanup_review": bool(cleanup_evidence),
+                   "decision": "pass" if text_match and source_text_match and visual_boundary["decision"] == "pass"
+                   and (cleanup_evidence is not None or (clean_gap and metrics["clipped_samples"] == 0 and transient_count == 0)) else "reject"}
             result.append(row)
             candidate_cache[cache_key] = row
     evidence_path = job / "evidence" / f"plan_evidence_round_{value['repair_round'] + 1}.json"
     write(evidence_path, {"schema": "video-montage-plan-evidence/v260929", "plan": ref(args.plan),
+                          **({"audio_cleanup_policy": AUDIO.POLICY} if value.get("audio_cleanup_policy") else {}),
                           "source_index": value["source_index"], "planning_policy": EDITING.POLICY,
                           "outputs": [EDITING.summary(output) for output in plan["outputs"]],
                           **batch_fields(value, plan, source_index),
@@ -1157,6 +1264,15 @@ def approve_plan(args) -> None:
                 or not subtitle_change_supported(correction, asset_copy_value, source_index, value["plan"])):
             fail_round(job, value, "codex_plan_review", ["uncorroborated candidate ASR correction"])
     value["plan_review"] = ref(args.review)
+    if value.get("audio_cleanup_policy"):
+        try:
+            audio_segments = compile_audio_segments(value, read(require_ref(value["plan"], "plan")), evidence, review)
+        except ValueError as error:
+            fail_round(job, value, "audio_cleanup_review", [str(error)])
+        target = job / "reviews" / f"audio_cleanup_round_{value['repair_round'] + 1}.json"
+        write(target, {"policy": AUDIO.POLICY, "plan": value["plan"], "plan_evidence": value["plan_evidence"],
+                       "plan_review": value["plan_review"], "segments": audio_segments})
+        value["audio_cleanup_authorization"] = ref(target)
     require_editing_approval(value)
     save(job, value, "plan_approved")
 
@@ -1170,13 +1286,19 @@ def render_clean(args) -> None:
     require_ref(value["plan_review"], "plan review")
     plan_path = require_ref(value["plan"], "plan")
     plan = read(plan_path)
+    audio_by_key = {}
+    if value.get("audio_cleanup_policy"):
+        audio_by_key = {(r["plan_id"], r["segment_index"]): r["audio_cleanup"] for r in
+                        read(require_ref(value["audio_cleanup_authorization"], "audio cleanup authorization"))["segments"]}
     start_pending_delivery(job, value)
     renderer = module("autonomous_renderer", "scripts/semantic/scripts/portable_frame_renderer.py")
     rows = []
     for output in plan["outputs"]:
         pid = output["plan_id"]
         unit = job / f"attempt-{value['repair_round'] + 1:02d}" / "plans" / f"{pid}.json"
-        write(unit, {"segments": output["segments"], "transitions": output.get("transitions", [])})
+        segments = [{**s, **({"audio_cleanup": audio_by_key[(pid, i)]} if audio_by_key else {})}
+                    for i, s in enumerate(output["segments"], 1)]
+        write(unit, {"segments": segments, "transitions": output.get("transitions", [])})
         if value.get("delivery_layout") == "chinese/v1":
             packager = module("autonomous_layout", "scripts/packaging/scripts/package_video.py")
             packager.ensure_delivery_layout(processing_dir(value))
@@ -1185,6 +1307,7 @@ def render_clean(args) -> None:
             target = processing_dir(value) / "clean" / f"{pid}.mp4"
         evidence_path = job / f"attempt-{value['repair_round'] + 1:02d}" / "evidence" / "render" / f"{pid}.json"
         rendered = renderer.render(unit, target, evidence_path, 1440, 2560, 60, "libx264", overwrite=True)
+        audio_render_check(value, pid, rendered)
         if semantic_first(value):
             errors = EDITING.render_errors(output, rendered, rendered["actual_output_frames"])
             if errors:
@@ -1274,6 +1397,12 @@ def clean_qc(args) -> None:
     plan_by_id = {row["plan_id"]: row for row in read(require_ref(value["plan"], "plan"))["outputs"]}
     for row in clean["results"]:
         output = require_ref(row["output"], "clean output")
+        rendered_audio = read(require_ref(row["render_evidence"], "render evidence"))
+        audio_render_check(value, row["plan_id"], rendered_audio)
+        cleanup_proof = (AUDIO.verify_output(AUDIO.decode(FFMPEG, output), rendered_audio)
+                         if value.get("audio_cleanup_policy") else None)
+        if cleanup_proof is not None and cleanup_proof["decision"] != "pass":
+            failures.append(f"{row['plan_id']}: audio cleanup residual/boundary failure")
         if semantic_first(value):
             spec = video(output)
             rendered = read(require_ref(row["render_evidence"], "render evidence"))
@@ -1298,6 +1427,7 @@ def clean_qc(args) -> None:
         if not shot_match or metrics["clipped_samples"] or any(cut["decision"] != "pass" for cut in cut_metrics):
             failures.append(f"{row['plan_id']}: clean ASR/clipping/cut PCM mismatch")
         rows.append({"plan_id": row["plan_id"], "output": row["output"], "asr": asr,
+                     **({"audio_cleanup": cleanup_proof} if cleanup_proof is not None else {}),
                      "timing_asr": timing_asr,
                      "metrics": metrics, "cut_pcm": cut_metrics, "expected_text": row["expected_text"],
                      "asr_exact": exact, "whole_asr_match": match, "text_match": shot_match,
@@ -1533,7 +1663,10 @@ def final_evidence(args) -> None:
         if row.get("bgm"):
             music = pcm(Path(row["bgm"]["path"]))
             bgm_db = voice_over_music_db(clean_audio, music, float(row["bgm"]["gain_db"]))
-        mix_evidence = delivery_mix_evidence(output_audio, row)
+        render_path = require_ref(clean_by_id[pid]["render_evidence"], "render evidence")
+        render_value = read(render_path)
+        audio_render_check(value, pid, render_value)
+        mix_evidence = delivery_mix_evidence(output_audio, row, render_value) if value.get("audio_cleanup_policy") else delivery_mix_evidence(output_audio, row)
         speech_preserved = mix_evidence["decision"] == "pass" and clean_qc_by_id[pid]["text_match"]
         source_cues = packager.parse_srt(Path(row["subtitles"]["path"]), round(row["input_frames"] / 60 * 1000))
         cues = packager.delivery_cues(row)
@@ -1574,6 +1707,7 @@ def final_evidence(args) -> None:
         visual = frames(output, frame_numbers, job / f"attempt-{value['repair_round'] + 1:02d}" / "evidence" / "packaged_frames" / pid)
         decision = ((asr_match or speech_preserved) and subtitle_timing_pass and metrics["clipped_samples"] == 0
                     and all(cut["decision"] == "pass" for cut in cut_metrics)
+                    and (not value.get("audio_cleanup_policy") or mix_evidence.get("audio_cleanup", {}).get("decision") == "pass")
                     and (bgm_db is None or bgm_db >= 6))
         if not decision:
             failures.append(f"{pid}: ASR/subtitle timing/clipping/BGM masking failure")
@@ -1619,6 +1753,13 @@ def require_clean_qc(value: dict) -> tuple[dict, dict]:
         measured = by_id[row["plan_id"]]
         require_ref(row["output"], "clean output")
         require_ref(row["render_evidence"], "clean render evidence")
+        if value.get("audio_cleanup_policy"):
+            render_value = read(Path(row["render_evidence"]["path"]))
+            audio_render_check(value, row["plan_id"], render_value)
+            if (measured.get("audio_cleanup", {}).get("decision") != "pass"
+                    or measured.get("audio_cleanup", {}).get("ranges") != AUDIO.verify_output(
+                        AUDIO.decode(FFMPEG, Path(row["output"]["path"])), render_value)["ranges"]):
+                raise ValueError("clean audio cleanup QC changed or missing")
         if semantic_first(value):
             spec = video(Path(row["output"]["path"]))
             errors = EDITING.render_errors(plan_by_id[row["plan_id"]], read(Path(row["render_evidence"]["path"])), spec["frames"])
@@ -1672,8 +1813,10 @@ def clean_final_evidence(job: Path, value: dict) -> None:
         cut_metrics = cut_pcm_metrics(audio, cuts, clean=True)
         asr = transcribe(model, output)
         asr_match = normalized(asr["text"]) == normalized(row["expected_text"])
-        proof = delivery_mix_evidence(audio, delivery)
+        audio_render_check(value, row["plan_id"], render)
+        proof = delivery_mix_evidence(audio, delivery, render) if value.get("audio_cleanup_policy") else delivery_mix_evidence(audio, delivery)
         passed = ((asr_match or proof["decision"] == "pass") and metrics["clipped_samples"] == 0
+                  and (not value.get("audio_cleanup_policy") or proof.get("audio_cleanup", {}).get("decision") == "pass")
                   and all(cut["decision"] == "pass" for cut in cut_metrics))
         if not passed:
             failures.append(f"{row['plan_id']}: accelerated clean audio QC")
@@ -1709,6 +1852,8 @@ def reburn(args) -> None:
     for key in ("plan", "source_index", "asset_copy", "clean_delivery", "clean_qc", "packaging_delivery"):
         require_ref(inputs[key], f"reburn {key}")
         value[key] = inputs[key]
+    if value.get("audio_cleanup_policy"):
+        value["audio_cleanup_authorization"] = inputs["audio_cleanup_authorization"]
     if semantic_first(value):
         value["editing_context"] = inputs["editing_context"]
         require_ref(value["editing_context"], "retained editing authorization")
@@ -1953,6 +2098,8 @@ def complete(args) -> None:
         raise ValueError("final review scope mismatch")
     for row in evidence["results"]:
         finding = by_id[row["plan_id"]]
+        if value.get("audio_cleanup_policy") and row.get("mix_evidence", {}).get("audio_cleanup", {}).get("decision") != "pass":
+            fail_round(job, value, "final_audio_cleanup", [f"{row['plan_id']}: final audio cleanup proof missing or failed"])
         if semantic_first(value):
             output = plan_by_id[row["plan_id"]]
             errors = EDITING.output_review_errors(output, finding)
@@ -2088,7 +2235,7 @@ def compact_delivery(job: Path, value: dict) -> None:
         "schema", "review_mode", "work_order", "source_hashes", "asset_root", "output_root",
         "delivery_directory", "repair_delivery_policy", "delivery_layout", "records_policy",
         "temporary_root", "repair_round", "max_repair_rounds", "continue_until_complete", "packaging_design_policy",
-        "continuation_authorization", "planning_policy", "batch_review_policy") if key in value}
+        "continuation_authorization", "planning_policy", "batch_review_policy", "audio_cleanup_policy") if key in value}
     retained.update(phase="complete", compact_delivery=True)
     retained["delivery_mode"] = value.get("delivery_mode", "packaged")
     inputs = {}
@@ -2136,6 +2283,17 @@ def compact_delivery(job: Path, value: dict) -> None:
         write(context_path, context)
         inputs["editing_context"] = ref(context_path)
         keep.add(context_path)
+    if value.get("audio_cleanup_policy"):
+        original = read(require_ref(value["audio_cleanup_authorization"], "audio cleanup authorization"))
+        target = root / "manifests" / "audio_cleanup_authorization.json"
+        write(target, {"policy": AUDIO.POLICY, "plan": inputs["plan"], "clean_delivery": inputs["clean_delivery"],
+                       "segments": original["segments"], "original_authorization_digest": AUDIO.digest(original)})
+        inputs["audio_cleanup_authorization"] = ref(target)
+        retained["audio_cleanup_authorization"] = inputs["audio_cleanup_authorization"]
+        # A completed compact job can validate its retained clean audio directly.
+        retained["plan"] = inputs["plan"]
+        retained["clean_delivery"] = inputs["clean_delivery"]
+        keep.add(target)
     # Shot timing approvals bind actual WAV bytes; these are required for reburn.
     if inputs.get("clean_qc"):
         for row in read(require_ref(inputs["clean_qc"], "retained clean QC")).get("results", []):

@@ -52,8 +52,9 @@ class FontSelectionTests(unittest.TestCase):
         packaging.atomic(config, {"schema": packaging.SCHEMA, "outputs": [
             {"plan_id": key, "input_path": str(source), "subtitle_txt": str(subtitles),
              "subtitle_design": {"font": key, "subtitle_sha256": packaging.sha(subtitles), "game_names": ["无尽冬日"],
-                 "reason": "Test explicit per-video font", "cues": [{"index": 1, "text": "无尽冬日"}]}}
-            for key in subtitle_fonts.FONTS]})
+                 "reason": "Test explicit per-video font", "cues": [{"index": 1, "text": "无尽冬日",
+                     "entrance": {"effect": effect, "duration_ms": 200}}]}}
+            for key, effect in zip(subtitle_fonts.FONTS, ("bounce_up", "shout_wave", "ice_drift"))]})
         with patch.object(subtitle_fonts.secrets, "choice") as choice, patch.object(packaging, "video_spec",
                 return_value={"frames": 60, "duration": 1.0, "width": 1440, "height": 2560}):
             rows = packaging.prepared_rows(config)
