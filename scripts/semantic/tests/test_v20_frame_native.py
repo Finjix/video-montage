@@ -94,6 +94,22 @@ class FrameNativeContractTests(unittest.TestCase):
         }
         self.assertEqual([], gate.validate_plan_value(plan))
 
+    def test_invalid_speed_is_rejected_without_crashing_validation(self):
+        segment = {"source_path": "source.mp4", "source_in_frame": 0,
+                   "speech_end_frame": 10, "source_out_frame_exclusive": 30,
+                   "source_fps_num": 60, "source_fps_den": 1}
+        for speed in (float("inf"), float("nan"), -float("inf"), 0, -1, True, None, "bad", 2 ** 4096):
+            with self.subTest(speed=speed):
+                errors = gate.validate_plan_value({"segments": [{**segment, "speed": speed}]})
+                self.assertIn("segment[0]:speed:invalid", errors)
+
+    def test_invalid_speed_in_overlapping_ranges_still_returns_rejection(self):
+        first = {"source_path": "source.mp4", "source_in_frame": 0, "speech_end_frame": 9,
+                 "source_out_frame_exclusive": 10, "source_fps_num": 60, "source_fps_den": 1}
+        second = {**first, "source_in_frame": 8, "speech_end_frame": 18, "source_out_frame_exclusive": 20,
+                  "speed": None}
+        self.assertIn("segment[1]:speed:invalid", gate.validate_plan_value({"segments": [first, second]}))
+
     def test_interleaved_return_cannot_replay_source_frames(self):
         first = {
             "source_path": "first.mp4", "source_sha256": "a" * 64,

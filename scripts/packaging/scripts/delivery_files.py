@@ -14,7 +14,7 @@ def publish_files(copies: list[tuple[Path, Path]], temporary_root: Path) -> None
         raise ValueError("duplicate publication target")
     temporary_root.mkdir(parents=True, exist_ok=True)
     prepared = []
-    committed = []
+    attempted = []
     token = uuid.uuid4().hex
     directory = Path(mkdtemp(prefix="publish-backup-", dir=temporary_root))
     rollback_errors = []
@@ -29,16 +29,19 @@ def publish_files(copies: list[tuple[Path, Path]], temporary_root: Path) -> None
             prepared.append((staged, target, backup, existed))
             shutil.copy2(source, staged)
         for staged, target, backup, existed in prepared:
+            # A signal can arrive after the rename takes effect but before it
+            # returns. Track the attempt first so that target is restored too.
+            attempted.append((target, backup, existed))
             os.replace(staged, target)
-            committed.append((target, backup, existed))
-    except Exception as publication_error:
-        for target, backup, existed in reversed(committed):
+    except BaseException as publication_error:
+        # Ctrl+C must restore the batch before backups can be discarded.
+        for target, backup, existed in reversed(attempted):
             try:
                 if existed:
                     os.replace(backup, target)
                 else:
                     target.unlink(missing_ok=True)
-            except Exception as rollback_error:
+            except BaseException as rollback_error:
                 rollback_errors.append(f"{target}: {rollback_error}")
         if rollback_errors:
             raise RuntimeError(f"publication failed; rollback incomplete; backups retained at {directory}; "

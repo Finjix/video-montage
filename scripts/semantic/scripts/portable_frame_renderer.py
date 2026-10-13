@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 import subprocess
 import sys
@@ -41,6 +42,13 @@ def atomic_json(path: Path, value: dict) -> None:
     os.replace(temporary, path)
 
 
+def require_render_paths(output: Path, evidence: Path, inputs: list[Path], *, partial: Path | None = None) -> None:
+    partial = partial if partial is not None else output.with_suffix(".partial.mp4")
+    targets = [path.resolve() for path in (output, partial, evidence, evidence.with_suffix(evidence.suffix + ".tmp"))]
+    if len(set(targets)) != len(targets) or {path.resolve() for path in inputs}.intersection(targets):
+        raise ValueError("render output, evidence and input paths collide")
+
+
 def runtime_binary(name: str) -> Path:
     environment = os.environ.get(f"MONTAGE_{name.upper()}")
     candidates = []
@@ -71,8 +79,12 @@ def probe(ffprobe: Path, path: Path) -> dict:
 
 
 def atempo_chain(speed: float) -> str:
-    if speed <= 0:
-        raise ValueError("speed must be positive")
+    try:
+        valid = type(speed) in (int, float) and math.isfinite(speed) and speed > 0
+    except OverflowError:
+        valid = False
+    if not valid:
+        raise ValueError("speed must be finite and positive")
     factors = []
     while speed > 2.0:
         factors.append(2.0)
@@ -139,6 +151,13 @@ def render(plan_path: Path, output: Path, evidence: Path, width: int, height: in
     errors = validate_plan_value(plan)
     if errors:
         raise ValueError("frame plan rejected: " + "; ".join(errors))
+    partial = output.with_suffix(".partial.mp4")
+    if output.parent.name == "混剪（无包装）" and output.parent.parent.name.startswith("自动化混剪_"):
+        partial = output.parent.parent / "临时文件" / partial.name
+    require_render_paths(output, evidence, [plan_path, *(Path(segment["source_path"]) for segment in plan["segments"])],
+                         partial=partial)
+    if partial.exists() or (output.exists() and not overwrite):
+        raise FileExistsError(f"refusing overwrite: {output}")
     ffmpeg = runtime_binary("ffmpeg")
     ffprobe = runtime_binary("ffprobe")
     source_segments = plan["segments"]
@@ -243,11 +262,6 @@ def render(plan_path: Path, output: Path, evidence: Path, width: int, height: in
         if balanced:
             evidence_segments[index]["audio_balance"] = {**balanced[index], "total_gain_db": total_gain}
     filters.append("".join(concat_inputs) + f"concat=n={len(segments)}:v=1:a=1[vout][aout]")
-    partial = output.with_suffix(".partial.mp4")
-    if output.parent.name == "混剪（无包装）" and output.parent.parent.name.startswith("自动化混剪_"):
-        partial = output.parent.parent / "临时文件" / partial.name
-    if partial.exists() or (output.exists() and not overwrite):
-        raise FileExistsError(f"refusing overwrite: {output}")
     output.parent.mkdir(parents=True, exist_ok=True)
     partial.parent.mkdir(parents=True, exist_ok=True)
     codec = (

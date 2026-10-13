@@ -10,7 +10,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from portable_frame_renderer import atomic_json, probe, runtime_binary, sha256
+from portable_frame_renderer import atomic_json, probe, require_render_paths, runtime_binary, sha256
 
 
 SCHEMA = "frame-delete-registry/v260928"
@@ -70,6 +70,7 @@ def validate_alignment_evidence(registry: dict, registry_path: Path) -> dict:
 
 
 def render(source: Path, output: Path, registry_path: Path, evidence: Path, encoder: str) -> dict:
+    require_render_paths(output, evidence, [source, registry_path])
     ffmpeg = runtime_binary("ffmpeg")
     ffprobe = runtime_binary("ffprobe")
     info = probe(ffprobe, source)
@@ -80,6 +81,7 @@ def render(source: Path, output: Path, registry_path: Path, evidence: Path, enco
     total_frames = int(video.get("nb_frames") or round(float(info["format"]["duration"]) * 60))
     registry = json.loads(registry_path.read_text(encoding="utf-8-sig"))
     alignment = validate_alignment_evidence(registry, registry_path)
+    require_render_paths(output, evidence, [source, registry_path, Path(alignment["path"])])
     ranges = normalize_ranges(registry, total_frames, 60)
     if not ranges:
         raise ValueError("at least one frame range is required")
@@ -113,16 +115,19 @@ def render(source: Path, output: Path, registry_path: Path, evidence: Path, enco
         "-r", "60", "-fps_mode", "cfr", *codec,
         "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart", str(partial),
     ]
-    run = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
-    if run.returncode:
-        raise RuntimeError(run.stderr[-5000:])
-    result_info = probe(ffprobe, partial)
-    result_video = next(item for item in result_info["streams"] if item["codec_type"] == "video")
-    expected_frames = total_frames - sum(end - start + 1 for start, end in ranges)
-    actual_frames = int(result_video.get("nb_frames") or round(float(result_info["format"]["duration"]) * 60))
-    if actual_frames != expected_frames:
+    try:
+        run = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if run.returncode:
+            raise RuntimeError(run.stderr[-5000:])
+        result_info = probe(ffprobe, partial)
+        result_video = next(item for item in result_info["streams"] if item["codec_type"] == "video")
+        expected_frames = total_frames - sum(end - start + 1 for start, end in ranges)
+        actual_frames = int(result_video.get("nb_frames") or round(float(result_info["format"]["duration"]) * 60))
+        if actual_frames != expected_frames:
+            raise RuntimeError(f"frame count mismatch: expected={expected_frames} actual={actual_frames}")
+    except BaseException:
         partial.unlink(missing_ok=True)
-        raise RuntimeError(f"frame count mismatch: expected={expected_frames} actual={actual_frames}")
+        raise
     os.replace(partial, output)
     value = {
         "schema": "frame-range-repair-evidence/v260928",

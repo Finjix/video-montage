@@ -13,6 +13,56 @@ SPEC.loader.exec_module(publisher)
 
 
 class PublicationRecoveryTests(unittest.TestCase):
+    def test_interrupted_publication_restores_entire_previous_batch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            copies = []
+            for index in range(2):
+                source, target = root / f"new-{index}.mp4", root / f"old-{index}.mp4"
+                source.write_bytes(f"new {index}".encode())
+                target.write_bytes(f"old {index}".encode())
+                copies.append((source, target))
+            original_replace = publisher.os.replace
+
+            def interrupt(source, target):
+                if str(source).endswith(".publish") and target == copies[1][1]:
+                    raise KeyboardInterrupt("publication interrupted")
+                return original_replace(source, target)
+
+            with patch.object(publisher.os, "replace", side_effect=interrupt):
+                with self.assertRaises(KeyboardInterrupt):
+                    publisher.publish_files(copies, root / "runtime")
+            for index, (_, target) in enumerate(copies):
+                self.assertEqual(f"old {index}".encode(), target.read_bytes())
+            self.assertFalse(list(root.glob("*.publish")))
+            self.assertFalse(list((root / "runtime").glob("publish-backup-*")))
+
+    def test_interruption_after_rename_restores_replaced_and_new_targets(self):
+        for existed in (False, True):
+            with self.subTest(existed=existed), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                source, target = root / "source.mp4", root / "target.mp4"
+                source.write_bytes(b"new video")
+                if existed:
+                    target.write_bytes(b"old video")
+                original_replace = publisher.os.replace
+
+                def interrupt(source, target):
+                    result = original_replace(source, target)
+                    if str(source).endswith(".publish"):
+                        raise KeyboardInterrupt("interrupted just after rename")
+                    return result
+
+                with patch.object(publisher.os, "replace", side_effect=interrupt):
+                    with self.assertRaises(KeyboardInterrupt):
+                        publisher.publish_files([(source, target)], root / "runtime")
+                if existed:
+                    self.assertEqual(b"old video", target.read_bytes())
+                else:
+                    self.assertFalse(target.exists())
+                self.assertFalse(list(root.glob("*.publish")))
+                self.assertFalse(list((root / "runtime").glob("publish-backup-*")))
+
     def test_rollback_failure_keeps_backup_and_restores_other_files(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

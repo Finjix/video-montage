@@ -622,6 +622,19 @@ class PackagingContractTests(unittest.TestCase):
                 packaging.render(self.config, output, output / "subtitles" / "subtitle-P1.txt")
             encode.assert_not_called()
 
+    def test_overwrite_cannot_replace_clean_input_or_other_render_dependencies(self):
+        output = self.root / "collision-output"
+        dependencies = [self.video, self.srt, self.config, self.pin, self.font]
+        with patch.object(packaging, "video_spec", return_value=self.spec), \
+             patch.object(packaging, "render_one", side_effect=AssertionError("encoding began before collision validation")) as encode:
+            for dependency in dependencies:
+                with self.subTest(dependency=dependency.name):
+                    original = dependency.read_bytes()
+                    with self.assertRaisesRegex(ValueError, "input.*collid|collid.*input"):
+                        packaging.render(self.config, output, dependency, overwrite=True)
+                    self.assertEqual(original, dependency.read_bytes())
+                    encode.assert_not_called()
+
     def test_reburn_requires_review_when_text_changes(self):
         previous = self.root / "previous.json"
         packaging.atomic(previous, {"schema": "video-montage-packaging-delivery/v1",

@@ -821,6 +821,35 @@ def render(config_path: Path, output_dir: Path, manifest_path: Path, delivery_ma
     copies = [(config_path, config_snapshot)] + [
         (Path(row["subtitles"]["path"]), snapshot) for row, snapshot in zip(rows, snapshots)
     ]
+    reserved = {}
+    for path, label in [(manifest_path, "manifest"), *[(target, "snapshot") for _, target in copies],
+                        *[(delivery_category(output_dir, "video") / f"{row['plan_id']}{suffix}", "render")
+                          for row in rows for suffix in (".mp4", ".partial.mp4", ".ass")]]:
+        resolved = path.resolve()
+        if resolved in reserved:
+            raise ValueError(f"packaging paths collide: {reserved[resolved]} and {label}: {resolved}")
+        reserved[resolved] = label
+
+    def dependency_paths(item):
+        if isinstance(item, dict):
+            if isinstance(item.get("path"), str):
+                yield Path(item["path"]).resolve()
+            for child in item.values():
+                yield from dependency_paths(child)
+        elif isinstance(item, list):
+            for child in item:
+                yield from dependency_paths(child)
+
+    immutable = {path for row in rows for key, item in row.items() if key != "subtitles"
+                 for path in dependency_paths(item)}
+    immutable.update(path.resolve() for path in
+                     (delivery_manifest, controller_validation, autonomous_clean, autonomous_clean_qc) if path)
+    editable = {config_path.resolve(), *(Path(row["subtitles"]["path"]).resolve() for row in rows)}
+    in_place_snapshots = {target.resolve() for source, target in copies if source.resolve() == target.resolve()}
+    for path, label in reserved.items():
+        if path in immutable or (path in editable and (label != "snapshot" or path not in in_place_snapshots)):
+            raise ValueError(f"packaging output paths collide with input: {path}")
+
     # Publication can finish before Windows releases a temporary file held by a
     # concurrent preview. Recover only an exact, fully hash-bound publication.
     if resume and overwrite and manifest_path.is_file():
@@ -858,14 +887,6 @@ def render(config_path: Path, output_dir: Path, manifest_path: Path, delivery_ma
         if valid:
             invalidate_delivery_receipts(output_dir)
             return previous
-    reserved = {}
-    for path, label in [(manifest_path, "manifest"), *[(target, "snapshot") for _, target in copies],
-                        *[(delivery_category(output_dir, "video") / f"{row['plan_id']}{suffix}", "render")
-                          for row in rows for suffix in (".mp4", ".partial.mp4", ".ass")]]:
-        resolved = path.resolve()
-        if resolved in reserved:
-            raise ValueError(f"packaging paths collide: {reserved[resolved]} and {label}: {resolved}")
-        reserved[resolved] = label
     for source, target in copies:
         if source.resolve() != target.resolve() and target.exists() and not overwrite:
             raise FileExistsError(f"refusing to overwrite packaging file: {target}")

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -50,7 +51,12 @@ def validate_segment(segment: dict, index: int) -> list[str]:
         errors.append(f"{prefix}:invalid_source_fps")
     if not str(segment.get("source_path") or "").strip():
         errors.append(f"{prefix}:source_path:required")
-    if float(segment.get("speed", 1.0)) <= 0:
+    speed = segment.get("speed", 1.0)
+    try:
+        valid_speed = type(speed) in (int, float) and math.isfinite(speed) and speed > 0
+    except OverflowError:
+        valid_speed = False
+    if not valid_speed:
         errors.append(f"{prefix}:speed:invalid")
     if float(segment.get("video_hold", 0.0) or 0.0) > 0:
         errors.append(f"{prefix}:video_hold:forbidden")
@@ -68,7 +74,7 @@ def validate_source_progression(segments: list[dict]) -> list[str]:
     for index, segment in enumerate(segments):
         if not isinstance(segment, dict) or any(
             type(segment.get(field)) is not int for field in REQUIRED_INTEGER_FIELDS
-        ):
+        ) or validate_segment(segment, index):
             continue
         source_hash = str(segment.get("source_sha256") or "").strip().lower()
         source_path = str(segment.get("source_path") or "").strip()
