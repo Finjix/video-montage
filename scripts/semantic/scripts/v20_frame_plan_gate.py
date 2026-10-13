@@ -6,7 +6,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import audio_balance
 
 
 REQUIRED_INTEGER_FIELDS = (
@@ -182,6 +186,10 @@ def validate_plan_value(plan: dict, plan_root: Path | None = None) -> list[str]:
     if not isinstance(segments, list) or not segments:
         return ["segments:required_nonempty_list"]
     errors: list[str] = []
+    try:
+        audio_balance.configuration(plan.get("audio_balance"))
+    except ValueError as error:
+        errors.append(str(error))
     for index, segment in enumerate(segments):
         if not isinstance(segment, dict):
             errors.append(f"segment[{index}]:must_be_object")

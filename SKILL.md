@@ -124,6 +124,9 @@ bounds and source FPS. Reject seconds-only cuts, rejected source ranges, stale
 evidence and incomplete speech. Keep the requested batch scope; technical decode
 or a generated pass alone cannot authorize completion. Render through the bundled
 portable frame renderer and apply the selected workflow's quality gates.
+New clean renders default to [segment loudness balancing](references/autonomous/audio-balance.md).
+Measure cleaned segment audio, apply static peak-safe gains, and require encoded
+loudness/peak verification. Preserve existing clean inputs for subtitle-only reburns.
 Require decoded constant-rate timestamps starting at zero; reject variable-rate
 or shifted sources before authorizing frame/FPS audio cuts. Plan IDs must also
 be unique ignoring case on Windows.

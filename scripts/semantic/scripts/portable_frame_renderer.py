@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from v20_frame_plan_gate import validate_plan_value
 from source_timing import require_constant_frame_rate
 import audio_cleanup
+import audio_balance
 
 
 RENDER_MODE = "source_frame_ranges/v1"
@@ -142,10 +143,13 @@ def render(plan_path: Path, output: Path, evidence: Path, width: int, height: in
     ffprobe = runtime_binary("ffprobe")
     source_segments = plan["segments"]
     segments = coalesce_segments(source_segments)
+    balance_config = audio_balance.configuration(plan.get("audio_balance"))
     command = [str(ffmpeg), "-hide_banner", "-nostdin", "-y"]
     filters = []
     concat_inputs = []
     evidence_segments = []
+    audio_specs = []
+    measurements = []
     expected_frames = 0
     for index, segment in enumerate(segments):
         source = Path(segment["source_path"]).resolve()
@@ -196,12 +200,14 @@ def render(plan_path: Path, output: Path, evidence: Path, width: int, height: in
         audio_gain_db = float(segment.get("audio_gain_db", 0.0))
         if not -24.0 <= audio_gain_db <= 0.0:
             raise ValueError("audio_gain_db must be between -24 and 0 dB")
-        if audio_gain_db:
-            audio += f",volume={audio_gain_db:.6f}dB"
         if abs(speed - 1.0) > 1e-12:
             audio += "," + atempo_chain(speed)
-        audio += f",apad=pad_dur={output_duration:.12f},atrim=duration={output_duration:.12f}[a{index}]"
-        filters.append(audio)
+        if balance_config["enabled"]:
+            audio += ",aformat=channel_layouts=stereo"
+        audio += f",apad=pad_dur={output_duration:.12f},atrim=duration={output_duration:.12f}"
+        audio_specs.append((audio, audio_gain_db))
+        if balance_config["enabled"]:
+            measurements.append(audio_balance.measure(ffmpeg, source, audio.split("]", 1)[1]))
         concat_inputs.append(f"[v{index}][a{index}]")
         evidence_segments.append(
             {
@@ -226,6 +232,16 @@ def render(plan_path: Path, output: Path, evidence: Path, width: int, height: in
                 "output_duration_seconds": output_duration,
             }
         )
+    common_target, balanced = (audio_balance.choose_gains(measurements, balance_config)
+                               if balance_config["enabled"] else (None, []))
+    for index, (audio, manual_gain) in enumerate(audio_specs):
+        balance_gain = balanced[index]["gain_db"] if balanced else 0.0
+        total_gain = balance_gain + manual_gain
+        if total_gain:
+            audio += f",volume={total_gain:.6f}dB"
+        filters.append(audio + f"[a{index}]")
+        if balanced:
+            evidence_segments[index]["audio_balance"] = {**balanced[index], "total_gain_db": total_gain}
     filters.append("".join(concat_inputs) + f"concat=n={len(segments)}:v=1:a=1[vout][aout]")
     partial = output.with_suffix(".partial.mp4")
     if output.parent.name == "混剪（无包装）" and output.parent.parent.name.startswith("自动化混剪_"):
@@ -262,6 +278,19 @@ def render(plan_path: Path, output: Path, evidence: Path, width: int, height: in
             "aac_48k": audio["codec_name"] == "aac" and audio["sample_rate"] == "48000",
             "frame_count_close": abs(actual_frames - expected_frames) <= len(segments),
         }
+        if balanced:
+            cursor = 0
+            for segment in evidence_segments:
+                end = cursor + segment["expected_output_frames"]
+                measured = audio_balance.measure(ffmpeg, partial,
+                    f"atrim=start={cursor / fps:.12f}:end={end / fps:.12f},asetpts=PTS-STARTPTS")
+                balance = segment["audio_balance"]
+                expected_lufs = (balance["integrated_lufs"] + balance["total_gain_db"]
+                                 if balance["status"] == "balanced" else None)
+                balance["output_verification"] = audio_balance.verify(measured, expected_lufs, balance_config)
+                cursor = end
+            checks["audio_balance"] = all(s["audio_balance"]["output_verification"]["decision"] == "pass"
+                                          for s in evidence_segments)
         if not all(checks.values()):
             raise RuntimeError(f"render validation failed: {checks}")
     except Exception:
@@ -281,6 +310,7 @@ def render(plan_path: Path, output: Path, evidence: Path, width: int, height: in
         "source_segment_count": len(source_segments),
         "render_segment_count": len(segments),
         "coalesced_adjacent_source_groups": [item.get("_candidate_ids", []) for item in segments if item.get("_coalesced")],
+        "audio_balance": {"policy": audio_balance.POLICY, **balance_config, "common_target_lufs": common_target},
         "segments": evidence_segments,
         "checks": checks,
         "command": command,

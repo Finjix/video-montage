@@ -1,5 +1,9 @@
 # 无人值守混剪流程（v261008，协议 v260929）
 
+底片渲染默认执行[不同片段的音量均衡](audio-balance.md)，并记录编码后逐片段响度
+与峰值复检。配置可写在计划根对象或逐输出的 `audio_balance` 中；包装与重烧复用
+已处理底轨，既有成片需重新渲染才会应用。
+
 新任务还须执行[纯口播残音清理](audio-cleanup.md)。`init` 默认绑定
 `spoken-audio-cleanup/v1`，计划根对象和各片段包含 `audio_cleanup_policy`。
 `plan-evidence` 扫描完整音频与原片上下文；`approve-plan` 的逐片段审核须增加清理

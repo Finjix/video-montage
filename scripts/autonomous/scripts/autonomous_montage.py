@@ -53,6 +53,7 @@ EDITING = module("autonomous_editing_policy", "scripts/autonomous/scripts/planni
 CAST = EDITING.CAST
 BATCH = module("autonomous_batch_review", "scripts/autonomous/scripts/batch_review.py")
 AUDIO = module("autonomous_audio_cleanup", "scripts/semantic/scripts/audio_cleanup.py")
+BALANCE = module("autonomous_audio_balance", "scripts/semantic/scripts/audio_balance.py")
 
 
 def read(path: Path) -> dict:
@@ -824,7 +825,12 @@ def check_plan(plan: dict, source_index: dict, count: int, policy: str | None = 
             errors.append(f"{pid}: empty segments")
             continue
         frame_gate = module("auto_frame_gate", "scripts/semantic/scripts/v20_frame_plan_gate.py")
-        errors.extend(f"{pid}:{error}" for error in frame_gate.validate_plan_value({"segments": segments}))
+        try:
+            balance_config = BALANCE.for_output(plan, output)
+        except ValueError as error:
+            errors.append(f"{pid}:{error}")
+            balance_config = {}
+        errors.extend(f"{pid}:{error}" for error in frame_gate.validate_plan_value({"segments": segments, "audio_balance": balance_config}))
         for segment in segments:
             source = source_map.get(segment.get("source_sha256"))
             if source is None or str(Path(segment.get("source_path", "")).resolve()) != source["source"]["path"]:
@@ -1050,6 +1056,11 @@ def require_audio_approval(value: dict) -> None:
 
 
 def audio_render_check(value: dict, plan_id: str, rendered: dict) -> None:
+    if rendered.get("audio_balance", {}).get("enabled"):
+        if (rendered.get("checks", {}).get("audio_balance") is not True or not rendered.get("segments")
+                or any(s.get("audio_balance", {}).get("output_verification", {}).get("decision") != "pass"
+                       for s in rendered["segments"])):
+            raise ValueError(f"{plan_id}: rendered audio balance verification failed")
     if not value.get("audio_cleanup_policy"):
         return
     authorization = read(require_ref(value["audio_cleanup_authorization"], "audio cleanup authorization"))
@@ -1451,7 +1462,8 @@ def render_clean(args) -> None:
         unit = job / f"attempt-{value['repair_round'] + 1:02d}" / "plans" / f"{pid}.json"
         segments = [{**s, **({"audio_cleanup": audio_by_key[(pid, i)]} if audio_by_key else {})}
                     for i, s in enumerate(output["segments"], 1)]
-        write(unit, {"segments": segments, "transitions": output.get("transitions", [])})
+        write(unit, {"segments": segments, "transitions": output.get("transitions", []),
+                     "audio_balance": BALANCE.for_output(plan, output)})
         if value.get("delivery_layout") == "chinese/v1":
             packager = module("autonomous_layout", "scripts/packaging/scripts/package_video.py")
             packager.ensure_delivery_layout(processing_dir(value))
@@ -1582,6 +1594,9 @@ def clean_qc(args) -> None:
             failures.append(f"{row['plan_id']}: clean ASR/clipping/cut PCM mismatch")
         rows.append({"plan_id": row["plan_id"], "output": row["output"], "asr": asr,
                      **({"audio_cleanup": cleanup_proof} if cleanup_proof is not None else {}),
+                     **({"audio_balance": {**rendered_audio["audio_balance"], "segments": [
+                         s.get("audio_balance") for s in rendered_audio["segments"]]}}
+                        if "audio_balance" in rendered_audio else {}),
                      "timing_asr": timing_asr,
                      "metrics": metrics, "cut_pcm": cut_metrics, "expected_text": row["expected_text"],
                      "asr_exact": exact, "whole_asr_match": match, "text_match": shot_match,

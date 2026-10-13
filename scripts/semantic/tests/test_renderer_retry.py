@@ -23,7 +23,7 @@ class RendererRetryTests(unittest.TestCase):
             source = root / "source.mp4"
             source.write_bytes(b"source")
             plan = root / "plan.json"
-            plan.write_text(json.dumps({"segments": [{"source_path": str(source), "source_sha256": renderer.sha256(source),
+            plan.write_text(json.dumps({"audio_balance": {"enabled": False}, "segments": [{"source_path": str(source), "source_sha256": renderer.sha256(source),
                                                        "source_in_frame": 0, "speech_end_frame": 1,
                                                        "source_out_frame_exclusive": 2,
                                                        "source_fps_num": 60, "source_fps_den": 1}]}), encoding="utf-8")
