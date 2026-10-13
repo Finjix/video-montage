@@ -8,7 +8,7 @@
 
 - 底片按原速选取，60 fps 渲染后须为 **1296–2160 帧（21.6–36 秒）**；最后统一 1.2 倍速，实际交付须为 **1080–1800 帧（18–30 秒）**。计划与渲染共用同源区间合并和帧数舍入规则，编码后核验实测帧数。21.5 秒底片无法保证加速后达到 18 秒，不通过。
 - 每条至少四个实际视觉镜头，不限制最多镜头数。原片内部真实机位、角度或景别变化可计数；连续镜头拆分台词、ID 或范围不能重复计数。镜头表完整覆盖合并后的渲染时间轴，不能有空隙或重复覆盖。最长与最短镜头相差不超过 3 秒；不足 0.8 秒的闪帧、微镜头不计为有效镜头。
-- 每条指定一个经实际画面确认的 `person:<stable-id>` 主角，整批可以制作不同主角。每个选取区间只能有该主角可见，禁止其他人物同框、单独出镜或身份不明。允许语义相关的画外问话、对白；说话者与可见人物分开记录。
+- 绑定[多明星策略](selected-celebrities.md)的任务每条可选择一位或多位已登记明星；v3允许群演在所选明星旁边陪衬同框，但所选明星必须是画面主体，不能出现群演独立占镜或成为主体的区间。实际人物集合必须与所选明星及群演声明一致，逐片段、逐镜及整片检查主体关系。历史人物策略保持原合同。允许语义相关的画外问话、对白；说话者与可见人物分开记录。
 - 时长不足只能补完整且语义相连的素材；超长须重新组片。禁止停帧、慢放、重复源帧、截半句话或无关内容凑数。
 
 ## 计划接口
@@ -19,8 +19,8 @@
 
 逐成片字段：
 
-- `protagonist_id`：规范主角 ID，不得按文件名、服装猜身份。
-- `segments`：保留源 SHA-256、原生帧界、精确原声 `text`，`speed: 1`；增加 `visible_person_ids: [protagonist_id]` 与 `purpose_contract`。
+- 多明星策略使用 `protagonist_ids`、`cast_policy`、逐段 `speaker_id` 和人物审核字段，详见[接口合同](selected-celebrities.md)；以下 `protagonist_id` 与单主角审核字段仅适用于历史未绑定人物策略的任务。不得按文件名、服装猜身份。
+- `segments`：保留源 SHA-256、原生帧界、精确原声 `text`，`speed: 1`；增加完整 `visible_person_ids` 与 `purpose_contract`。v3有群演时必须填写 `primary_person_ids`，接口和逐层主体审核见[人物合同](selected-celebrities.md)；历史单主角字段保留原规则。
 - `purpose_contract`：非空 `function`、本条内不重复的非空 `new_claim_ids`、`non_redundant: true`、非负整数 `narrative_stage`。最后一段增加 `closing_payoff: true` 和出自原声的 `closing_quote`，使用结果、收益、证明、剧情收束或相关 CTA 等有用结尾功能。
 - 结果先行的 `hook` 如需返回机制，首个 `hook_response` 要引用后段原声中的 `content_evidence.how_why_quote`，包含如何、为什么或因为等明确桥接。
 - `scenario_bound: true` 标注不能任意碎片化的场景依赖表演；承接此类素材时，转场 `content_evidence.scenario_continuity` 说明真实场景连续性。

@@ -121,7 +121,7 @@ class InstallationTests(unittest.TestCase):
                     "references/workflows/autonomous-workflow.md", "agents/openai.yaml",
                     "scripts/packaging/scripts/design_renderer.py", "scripts/packaging/scripts/reference_animation.py",
                     "scripts/packaging/scripts/animation_shader.py", "references/packaging/design.md",
-                    "assets/packaging/design/catalog.json", "assets/packaging/design/previews/bounce_up.png",
+                    "assets/packaging/design/catalog.json", "scripts/autonomous/scripts/cast_policy.py",
                     "assets/packaging/animations/parameters/static.json", "assets/packaging/animations/parameters/shout-light-00.npz")
         for name in (*excluded, *required):
             path = self.source / name

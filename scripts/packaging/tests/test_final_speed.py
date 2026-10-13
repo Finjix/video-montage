@@ -68,6 +68,37 @@ class FinalSpeedTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "separate"):
             packager.speed_clean(self.source, self.source)
 
+    def test_legacy_two_nameplates_switch_at_the_actual_sped_up_frame(self):
+        subtitles = self.root / "nameplate-subtitle.txt"
+        subtitles.write_text("1\n00:00:00,000 --> 00:00:02,000\n两位明星讲解\n", encoding="utf-8")
+        layers = []
+        for index, color in enumerate(((255, 0, 0, 255), (0, 255, 0, 255))):
+            path = self.root / f"nameplate-{index}.png"
+            pixels = Image.new("RGBA", (90, 160), (0, 0, 0, 0))
+            from PIL import ImageDraw
+            ImageDraw.Draw(pixels).rectangle((10, 10, 25, 45), fill=color)
+            pixels.save(path)
+            layers.append({"person_id": f"person:star-{index}", "path": str(path),
+                           "sha256": packager.sha(path), "start_frame": index * 60,
+                           "end_frame_exclusive": (index + 1) * 60})
+        config = self.root / "nameplates.json"
+        packager.atomic(config, {"schema": packager.SCHEMA, "outputs": [{"plan_id": "STARS",
+            "input_path": str(self.source), "subtitle_txt": str(subtitles),
+            "subtitle_design": presentation(subtitles), "nameplates": layers}]})
+        prepared = packager.prepared_rows(config)[0]
+        row = packager.render_one(prepared, self.root / "nameplates")
+        self.assertEqual(layers, row["nameplates"])
+        self.assertEqual(100, row["output_spec"]["frames"])
+        result = subprocess.run([str(packager.FFMPEG), "-v", "error", "-i", row["output_path"],
+            "-vf", "crop=32:32:240:280,scale=1:1", "-pix_fmt", "rgb24", "-f", "rawvideo", "pipe:1"],
+            check=True, capture_output=True)
+        colors = np.frombuffer(result.stdout, dtype=np.uint8).reshape(-1, 3)
+        self.assertEqual(100, len(colors))
+        self.assertTrue(np.all(colors[:50, 0] > 220))
+        self.assertTrue(np.all(colors[:50, 1] < 30))
+        self.assertTrue(np.all(colors[50:, 1] > 220))
+        self.assertTrue(np.all(colors[50:, 0] < 30))
+
     def test_packaged_subtitle_tail_and_looped_music_follow_final_timeline(self):
         subtitles = self.root / "subtitle.txt"
         subtitles.write_text("1\n00:00:01,200 --> 00:00:01,800\n测试字幕\n", encoding="utf-8")
@@ -92,6 +123,49 @@ class FinalSpeedTests(unittest.TestCase):
             self.assertEqual(visible, bool(yellow.any()))
         proof = auto.delivery_mix_evidence(auto.pcm(Path(row["output_path"])), row)
         self.assertEqual("pass", proof["decision"], proof)
+
+    def test_nameplate_blank_gap_survives_actual_encoding_and_speed_up(self):
+        source = self.root / 'gap-source.mp4'
+        subprocess.run([str(packager.FFMPEG), '-v', 'error', '-y', '-f', 'lavfi', '-i',
+                        'color=c=black:s=1440x2560:r=60:d=3', '-f', 'lavfi', '-i',
+                        'sine=frequency=440:sample_rate=48000:duration=3', '-af', 'volume=0.08',
+                        '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
+                        '-c:a', 'aac', str(source)], check=True, capture_output=True)
+        output = {'cast_policy': auto.CAST.POLICY, 'protagonist_ids': ['person:alpha', 'person:beta']}
+        shots = [{'visible_person_ids': ['person:alpha'], 'output_in_frame': 0, 'output_out_frame_exclusive': 80},
+                 {'visible_person_ids': ['person:beta'], 'output_in_frame': 80, 'output_out_frame_exclusive': 180}]
+        windows = auto.CAST.nameplate_windows(output, shots)
+        celebrities, layers = [], []
+        from PIL import ImageDraw
+        for window, color in zip(windows, ((255, 0, 0, 255), (0, 255, 0, 255))):
+            path = self.root / (window['person_id'].split(':')[1] + '.png')
+            pixels = Image.new('RGBA', (90, 160), (0, 0, 0, 0))
+            ImageDraw.Draw(pixels).rectangle((10, 10, 25, 45), fill=color)
+            pixels.save(path)
+            asset = {'path': str(path), 'sha256': packager.sha(path)}
+            celebrities.append({'person_id': window['person_id'], 'nameplate': asset})
+            layers.append({**window, **asset})
+        auto.CAST.verify_nameplates(output, shots, layers, celebrities)
+        seamless = [dict(layers[0], end_frame_exclusive=80), layers[1]]
+        with self.assertRaisesRegex(ValueError, 'interval mismatch'):
+            auto.CAST.verify_nameplates(output, shots, seamless, celebrities)
+        subtitles = self.root / 'gap-subtitle.txt'
+        subtitles.write_text('1\n00:00:00,000 --> 00:00:02,000\n两位明星讲解\n', encoding='utf-8')
+        config = self.root / 'gap-config.json'
+        packager.atomic(config, {'schema': packager.SCHEMA, 'outputs': [{'plan_id': 'GAP',
+            'input_path': str(source), 'subtitle_txt': str(subtitles),
+            'subtitle_design': presentation(subtitles), 'nameplates': layers}]})
+        row = packager.render_one(packager.prepared_rows(config)[0], self.root / 'gap-final')
+        result = subprocess.run([str(packager.FFMPEG), '-v', 'error', '-i', row['output_path'],
+            '-vf', 'crop=32:32:240:280,scale=1:1', '-pix_fmt', 'rgb24', '-f', 'rawvideo', 'pipe:1'],
+            check=True, capture_output=True)
+        colors = np.frombuffer(result.stdout, dtype=np.uint8).reshape(-1, 3)
+        self.assertEqual(150, len(colors))
+        self.assertTrue(np.all(colors[:49, 0] > 220))
+        self.assertTrue(np.all(colors[:49, 1:] < 30))
+        self.assertTrue(np.all(colors[49:67] < 30))  # All 18 final frames have no plate.
+        self.assertTrue(np.all(colors[67:, 1] > 220))
+        self.assertTrue(np.all(colors[67:, [0, 2]] < 30))
 
     def test_fractional_output_frame_count_keeps_audio_and_video_aligned(self):
         for count in (61, 119):

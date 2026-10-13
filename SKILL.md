@@ -40,13 +40,34 @@ For new autonomous edits and full-edit repairs, read
 [semantic-first planning](references/autonomous/semantic-planning.md). Restore
 complete source-context analysis, grounded adjacent relations and whole-edit
 narrative review. Require a 21.6–36 second natural-speed clean input, an 18–30
-second final delivery, at least four real visual shots, and one declared visible
-protagonist per output. No other character may appear even alongside the lead;
-offscreen dialogue is allowed. Inspect every selected native frame and final
+second final delivery, at least four real visual shots, and a declared selected-celebrity cast per output. New cast-policy jobs may select
+one or more registered celebrities. Supporting actors may appear beside them,
+provided selected celebrities remain the visual subjects; no supporting-only or
+supporting-led shots are allowed. Declare supporting identities separately and
+review subject prominence in actual continuous frames. Unselected celebrities
+cannot be relabeled as supporting actors. Offscreen
+dialogue is allowed. Historical jobs without the cast policy keep one protagonist. Inspect every selected native frame and final
 encoded frame. Do not split one continuous shot to inflate counts or shuffle
 dependent speech for diversity. New plans bind `semantic-continuity/v2` and need
 per-transition, per-shot and whole-edit findings; the diversity selector is removed.
 Historical completions and subtitle-only reburns keep their original contract.
+For new batches, aim for approximately 80% single-celebrity and 20% multi-celebrity
+outputs (two or more selected celebrities). Count finished videos, not shots or
+screen time. This is a planning target, not a fixed quota: Codex may adjust it
+slightly for available source material and coherent narratives. A 40-video batch
+normally targets 32 single-celebrity and 8 multi-celebrity videos. Allocate individual
+celebrities according to usable material. Record actual counts and any adjustment
+reason in the whole-batch review; retain all semantic, reuse and quality gates.
+New cast-policy jobs use `selected-celebrities/v3`: allow declared supporting
+actors, require per-segment, per-shot and whole-video primary-subject review, and
+leave at least 18 completely
+nameplate-free final frames (0.3 seconds at 60 fps) between different celebrities'
+nameplates. End the earlier plate sooner while keeping the next plate at its first
+appearance; reselect an introduction if its display falls below 0.8 final seconds.
+Review the disappearance, complete blank interval and next appearance in actual
+encoded frames. Supporting actors receive no celebrity nameplate and do not count
+toward the single/multi-celebrity ratio. Historical v1/v2 jobs retain their bound
+visibility and timeline contracts for subtitle reburn.
 Every transition must cite retained prior speech in `content_evidence.premise_refs`.
 When a topic change needs a bridge, cite retained adjacent speech in `bridge_ref`.
 Discovery/ad-entry or audience-size claims do not directly establish gameplay
@@ -111,7 +132,18 @@ Honor the current user's packaging request. Do not add music, captions, overlays
 or extra audio without that request. Packaging uses a validated clean video to
 create a separate output and preserves the clean video. Read the
 [packaging workflow](references/packaging/workflow.md) for configuration and
-reburn commands. Subtitles burn into the picture only. Each new packaging task
+reburn commands. Subtitles burn into the picture only.
+Every fully packaged video must include content-appropriate, verified text pins.
+Default to coverage from the first through the last frame; segmented changes must
+leave no gaps or overlapping pins. A text pin is a separate overlay, not a spoken
+subtitle, nameplate or disclaimer. Bind `text_pin_policy: required-full-coverage/v1`
+to the work order, state and packaging configuration. Reject missing, unreadable
+or obscured pins; inspect actual encoded frames and record the pin asset, copy and
+coverage in final review. Select suitable existing assets and preserve their
+hashes; never silently omit pins because selection requires additional work.
+For a completed batch, use autonomous reburn with `--require-text-pins`, then
+perform fresh packaging and final review.
+Each new packaging task
 uses a Codex-authored design for each video: choose its main font from WenYue
 W8 (新青年体) or FangTang (方糖体), keep ordinary text primarily yellow
 with white support, and use complete flower text for every actual game name.
@@ -152,7 +184,7 @@ surrounding phrases; never create isolated fillers such as 玩. Require at least
 flower text at size 9, prefer ice_drift, and default to a 200ms entrance on the
 unaccelerated timeline. If those conditions fail, retain readable mixed text.
 After subtitle review, read [AI packaging design](references/packaging/design.md),
-inspect the effect catalog and relevant previews, then write `subtitle_design`
+inspect the effect catalog and actual encoded packaging, then write `subtitle_design`
 with `graphic_layers` omitted or empty. Select only existing installed library
 resources. Codex judges suitability, emphasis and effect density; it must not
 create temporary effects, animations, shaders, flower styles or decorative assets.
@@ -186,8 +218,9 @@ New deliveries use `work/自动化混剪_YYYYMMDD_HHMMSS` in Beijing time. Refus
 - `临时文件/`: minimal job state and work order needed to restart repairs.
 
 All subdirectories inside `临时文件/` use English names. Generate logs, evidence,
-reviews and reports during processing and QC, then remove them after successful
-completion. Preserve only files necessary for subsequent editing, reburn and repair.
+reviews and reports during processing and QC, then remove disposable material after
+successful completion. Preserve the completion receipt and its bound final findings,
+plus files necessary for subsequent editing, reburn and repair.
 The project `work/` root contains batch delivery directories only, never loose
 files or temporary utility directories. This applies to Codex-created helper
 scripts, request/work-order JSON, preview images, contact sheets, scans, logs and
@@ -217,3 +250,5 @@ errors roll back previous replacements. Packaging finishes every encoder before
 publishing any delivered file.
 Use the selected workflow's repair and reburn commands and stopping conditions.
 Never report a partial batch as complete or invent approvals.
+
+新多明星任务执行[所选明星与首次出场铭牌合同](references/autonomous/selected-celebrities.md)。工作单登记可扩展明星与铭牌哈希，逐输出使用 `protagonist_ids`；允许群演陪衬同框，但所选明星必须是画面主体，群演另行声明且不计明星人数、不展示明星铭牌。每位明星首次出场显示一次铭牌，切换说话人须审核独立主体关系。历史任务保留原人物合同。

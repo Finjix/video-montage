@@ -25,6 +25,7 @@ def load(name: str, relative: str):
 
 renderer = load("planning_frame_renderer", "scripts/semantic/scripts/portable_frame_renderer.py")
 semantic = load("planning_semantics", "scripts/semantic/scripts/v15_content_gate.py")
+CAST = load("planning_cast_policy", "scripts/autonomous/scripts/cast_policy.py")
 
 
 def frame_errors(count: int, *, final: bool = False) -> list[str]:
@@ -72,8 +73,20 @@ def shot_timeline(output: dict) -> tuple[list[dict], list[str]]:
             errors.append(f"shot:{index + 1}:REAL_SHOT_BOUNDARY_REQUIRED:{expected_kind}")
         if previous and (previous.get("source_sha256"), previous.get("source_visual_shot_id")) == (shot.get("source_sha256"), shot_id):
             errors.append(f"shot:{index + 1}:CONTINUOUS_SHOT_SPLIT")
-        if shot.get("visible_person_ids") != [output.get("protagonist_id")]:
+        if (not CAST.valid_visible(output, shot) if CAST.enabled(output)
+                else shot.get("visible_person_ids") != [output.get("protagonist_id")]):
             errors.append(f"shot:{index + 1}:OTHER_OR_UNKNOWN_VISIBLE_PERSON")
+        if CAST.enabled(output):
+            covered = [segment for segment_index, segment in enumerate(output["segments"], 1)
+                       if segment_index in group.get("_source_segment_indexes", [])
+                       and segment["source_in_frame"] < end and start < segment["source_out_frame_exclusive"]]
+            if not covered or any(not set(shot.get("visible_person_ids", [])).issubset(segment["visible_person_ids"])
+                                  for segment in covered):
+                errors.append(f"shot:{index + 1}:SOURCE_SEGMENT_CAST_MISMATCH")
+            if output.get("cast_policy") == CAST.POLICY and any(
+                    not set(CAST.primary_people(output, shot)).issubset(CAST.primary_people(output, segment))
+                    for segment in covered):
+                errors.append(f"shot:{index + 1}:SOURCE_SEGMENT_PRIMARY_PERSON_MISMATCH")
         scale = Fraction(60 * group["source_fps_den"], group["source_fps_num"])
         left = group["output_in_frame"] + round(float((start - group["source_in_frame"]) * scale))
         right = (group["output_out_frame_exclusive"] if end == group["source_out_frame_exclusive"]
@@ -94,19 +107,26 @@ def shot_timeline(output: dict) -> tuple[list[dict], list[str]]:
         errors.append("AT_LEAST_FOUR_REAL_VISUAL_SHOTS_REQUIRED")
     if mapped and max(shot["output_frames"] for shot in mapped) - min(shot["output_frames"] for shot in mapped) > 180:
         errors.append("VISUAL_SHOT_DURATION_IMBALANCE:spread exceeds 3 seconds")
+    if CAST.enabled(output) and not errors:
+        try:
+            CAST.nameplate_windows(output, mapped)
+        except ValueError as exc:
+            errors.append(f"FIRST_APPEARANCE_TIMELINE_INVALID:{exc}")
     return mapped, errors
 
 
 def audit_output(output: dict, policy: str = POLICY) -> list[str]:
     errors = []
     protagonist = output.get("protagonist_id")
-    if not person_id(protagonist):
+    if CAST.enabled(output):
+        errors.extend(CAST.output_errors(output))
+    elif not person_id(protagonist):
         errors.append("CANONICAL_PROTAGONIST_REQUIRED")
     segments = output["segments"]
     for index, segment in enumerate(segments, 1):
         if float(segment.get("speed", 1.0)) != 1.0:
             errors.append(f"segment:{index}:NATURAL_SOURCE_SPEED_REQUIRED")
-        if segment.get("visible_person_ids") != [protagonist]:
+        if not CAST.enabled(output) and segment.get("visible_person_ids") != [protagonist]:
             errors.append(f"segment:{index}:OTHER_OR_UNKNOWN_VISIBLE_PERSON")
     timeline = renderer.planned_timeline(segments)
     errors.extend(frame_errors(timeline[-1]["output_out_frame_exclusive"]))
@@ -120,6 +140,8 @@ def audit_output(output: dict, policy: str = POLICY) -> list[str]:
         errors.extend(grounded_transition_errors(output))
     elif policy != LEGACY_POLICY:
         errors.append("UNKNOWN_PLANNING_POLICY")
+    if CAST.enabled(output):
+        errors.extend(CAST.speaker_change_errors(output))
     return errors
 
 
@@ -188,7 +210,11 @@ def summary(output: dict) -> dict:
     shots, errors = shot_timeline(output)
     if errors:
         raise ValueError("; ".join(errors))
-    return {"plan_id": output["plan_id"], "protagonist_id": output["protagonist_id"],
+    return {"plan_id": output["plan_id"],
+            **({"cast_policy": output["cast_policy"], "protagonist_ids": CAST.selected(output),
+                **({"supporting_person_ids": CAST.supporting(output)} if output["cast_policy"] == CAST.POLICY else {}),
+                "nameplate_windows": CAST.nameplate_windows(output, shots)} if CAST.enabled(output)
+               else {"protagonist_id": output["protagonist_id"]}),
             "clean_frames": timeline[-1]["output_out_frame_exclusive"],
             "visual_shot_count": len(shots), "visual_shots": shots}
 
@@ -226,11 +252,11 @@ def indexed_findings(rows, expected: set, key) -> tuple[dict, list[str]]:
 
 
 def output_review_errors(output: dict, finding: dict, policy: str = POLICY) -> list[str]:
-    required = ("semantic_pass", "protagonist_only_pass", "visual_shots_pass")
-    reasons = ("semantic_reason", "protagonist_reason", "shot_reason")
+    required = ("semantic_pass", "visual_shots_pass")
+    reasons = ("semantic_reason", "cast_reason" if CAST.enabled(output) else "protagonist_reason", "shot_reason")
     if (any(finding.get(key) is not True for key in required)
             or any(not isinstance(finding.get(key), str) or not finding[key].strip() for key in reasons)
-            or finding.get("protagonist_id") != output["protagonist_id"]
+            or not CAST.review_cast(output, finding)
             or type(finding.get("visual_shot_count")) is not int
             or finding["visual_shot_count"] != len(output["visual_shots"])):
         return [f"{output['plan_id']}:WHOLE_EDIT_SEMANTIC_CAST_SHOT_REVIEW_REQUIRED"]
@@ -255,6 +281,12 @@ def transition_review_errors(plan: dict, review: dict, evidence: dict | None = N
         if current and (finding.get("relation_supported") is not True or finding.get("missing_premise") is not False
                         or not specific_reason(finding.get("reason"))):
             errors.append(f"{pid}:transition:{index}:RELATION_AND_PREMISE_REVIEW_REQUIRED")
+        if CAST.enabled(outputs[pid]):
+            left, right = outputs[pid]["segments"][index - 1:index + 1]
+            if left.get("speaker_id") != right.get("speaker_id") and (
+                    finding.get("speaker_change_pass") is not True
+                    or not specific_reason(finding.get("speaker_change_reason"))):
+                errors.append(f"{pid}:transition:{index}:SPEAKER_CHANGE_REVIEW_REQUIRED")
         if current and evidence is not None:
             row = final_rows.get(pid, {})
             expected = final_transition_evidence(outputs[pid], row)
@@ -287,8 +319,9 @@ def plan_review_errors(plan: dict, evidence: dict, review: dict) -> list[str]:
                                              lambda row: (row.get("plan_id"), row.get("shot_index")))
     errors.extend(scope_errors)
     for (pid, index), finding in findings.items():
-        if (finding.get("shot_pass") is not True or finding.get("protagonist_only_pass") is not True
-                or finding.get("visible_person_ids") != [outputs[pid]["protagonist_id"]]
+        if (finding.get("shot_pass") is not True
+                or not CAST.review_cast(outputs[pid], finding, shots[(pid, index)]["visible_person_ids"],
+                                        CAST.primary_people(outputs[pid], shots[(pid, index)]))
                 or finding.get("source_visual_shot_id") != shots[(pid, index)]["source_visual_shot_id"]
                 or any(not isinstance(finding.get(key), str) or not finding[key].strip() for key in ("reason", "boundary_reason"))):
             errors.append(f"{pid}:shot:{index}:REAL_SHOT_AND_CAST_REVIEW_REQUIRED")
@@ -304,10 +337,12 @@ def plan_review_errors(plan: dict, evidence: dict, review: dict) -> list[str]:
     errors.extend(scope_errors)
     for (pid, index), finding in findings.items():
         candidate = candidates[(pid, index)]
-        if (finding.get("protagonist_only_pass") is not True
-                or finding.get("visible_person_ids") != [outputs[pid]["protagonist_id"]]
+        segment = outputs[pid]["segments"][index - 1]
+        cast_reason = "cast_reason" if CAST.enabled(outputs[pid]) else "protagonist_reason"
+        if (not CAST.review_cast(outputs[pid], finding, segment["visible_person_ids"],
+                                 CAST.primary_people(outputs[pid], segment))
                 or not candidate.get("continuous_visual")
                 or finding.get("continuous_visual_sha256") != candidate.get("continuous_visual", {}).get("sha256")
-                or not isinstance(finding.get("protagonist_reason"), str) or not finding["protagonist_reason"].strip()):
+                or not isinstance(finding.get(cast_reason), str) or not finding[cast_reason].strip()):
             errors.append(f"{pid}:segment:{index}:FULL_INTERVAL_CAST_REVIEW_REQUIRED")
     return errors

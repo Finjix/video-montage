@@ -35,6 +35,7 @@ REQUIRED = (
     "assets/packaging/animations/parameters/ice_drift.json",
     "scripts/executor/scripts/three_suite_ff.py",
     "scripts/autonomous/scripts/autonomous_montage.py",
+    "scripts/autonomous/scripts/cast_policy.py",
 )
 
 
@@ -57,10 +58,6 @@ def packaging_resources() -> list[str]:
         if isinstance(item, dict):
             if item.get("table_file"):
                 check(base / item["table_file"], item.get("table_sha256"))
-            if isinstance(item.get("preview"), dict):
-                check(base / item["preview"]["path"], item["preview"].get("sha256"))
-            if isinstance(item.get("motion_preview"), dict):
-                check(base / item["motion_preview"]["path"], item["motion_preview"].get("sha256"))
             for child in item.values():
                 visit(child, base)
         elif isinstance(item, list):

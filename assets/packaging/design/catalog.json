@@ -13,14 +13,6 @@
       "label": "静态阅读",
       "intensity": "quiet",
       "use": "叙述、解释、密集信息",
-      "preview": {
-        "path": "previews/none.png",
-        "sha256": "7acc346e3d91d6f142ce71da1285dbf45442b69c791d61d9b6e34a798eb6c508"
-      },
-      "motion_preview": {
-        "path": "previews/none.webp",
-        "sha256": "3fbdb1e5b462692833fff2fab61a7c6e59db553642c25cf41d266b1ec2f9f70c"
-      },
       "fonts": [
         "w8",
         "fangtang"
@@ -35,14 +27,6 @@
       "intensity": "medium",
       "use": "短重点、积极卖点",
       "parameters": "../animations/parameters/bounce_up.json",
-      "preview": {
-        "path": "previews/bounce_up.png",
-        "sha256": "d17ada6e614958cad51f8b157bcf9487f8bcd3ff841d5d2c2431350b84a9a31a"
-      },
-      "motion_preview": {
-        "path": "previews/bounce_up.webp",
-        "sha256": "194e0b9a8415edd2767f992fdc9274c3de6b414889bfdafd4e83143186663b05"
-      },
       "fonts": [
         "w8",
         "fangtang"
@@ -58,14 +42,6 @@
       "intensity": "strong",
       "use": "情绪爆点、反问、强提醒",
       "parameters": "../animations/parameters/shout_wave.json",
-      "preview": {
-        "path": "previews/shout_wave.png",
-        "sha256": "b3be4d7b226e40e9730a4c929ed4ad4aafe3c8e919933dc67efba6fc6b640c58"
-      },
-      "motion_preview": {
-        "path": "previews/shout_wave.webp",
-        "sha256": "e1327cc0be0acc7ef3bfef4441dfb66e725491293de9dfbd3a4df9711c7def6c"
-      },
       "fonts": [
         "w8",
         "fangtang"
@@ -81,14 +57,6 @@
       "intensity": "medium",
       "use": "冰雪主题、游戏名、氛围重点",
       "parameters": "../animations/parameters/ice_drift.json",
-      "preview": {
-        "path": "previews/ice_drift.png",
-        "sha256": "b1544db32e9c923078a7fd53de5f01a8dccc29860a20be9c56f6dc00f5e9c2ff"
-      },
-      "motion_preview": {
-        "path": "previews/ice_drift.webp",
-        "sha256": "73964198b0d2434b5c445b4fccc7f5f81a3dca6e37eacb6cd3713613f3b3d1ad"
-      },
       "fonts": [
         "w8",
         "fangtang"

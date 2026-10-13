@@ -30,11 +30,68 @@ FFPROBE = ROOT / "assets/dependencies/ffmpeg/bin/ffprobe.exe"
 MODEL_ROOT = ROOT / "assets/dependencies/models"
 SCHEMA = "video-montage-packaging/v1"
 FINAL_SPEED = 1.2
+TEXT_PIN_POLICY = "required-full-coverage/v1"
+_cast_spec = importlib.util.spec_from_file_location("packaging_cast_policy", ROOT / "scripts/autonomous/scripts/cast_policy.py")
+CAST = importlib.util.module_from_spec(_cast_spec)
+_cast_spec.loader.exec_module(CAST)
+
+
+def nameplate_layers(row: dict) -> list[dict]:
+    if row.get("nameplates") and row.get("nameplate"):
+        raise ValueError("nameplate and nameplates cannot both be supplied")
+    return row.get("nameplates", []) or ([row["nameplate"]] if row.get("nameplate") else [])
+
+
+def prepare_nameplates(row: dict, base: Path, frames: int) -> list[dict]:
+    if "nameplate" in row and "nameplates" in row:
+        raise ValueError("nameplate and nameplates cannot both be supplied")
+    items = row.get("nameplates", [])
+    if not isinstance(items, list):
+        raise ValueError("nameplates must be a list")
+    result, seen, previous_end = [], set(), 0
+    for item in items:
+        if not isinstance(item, dict) or not CAST.person_id(item.get("person_id")) or item["person_id"] in seen:
+            raise ValueError("one nameplate per unique canonical celebrity required")
+        if any(key not in item for key in ("start_frame", "end_frame_exclusive", "sha256")):
+            raise ValueError("nameplate identity, hash and integer frame interval required")
+        start, end = frame_window(item, frames)
+        if start < previous_end:
+            raise ValueError("first-appearance nameplates must be chronological and must not overlap")
+        if final_frames(end) - final_frames(start) < CAST.MIN_FINAL_NAMEPLATE_FRAMES:
+            raise ValueError("nameplate display must last at least 0.8 final seconds")
+        asset = resolve_overlay(base, item.get("path"), item.get("sha256"))
+        result.append({**asset, "person_id": item["person_id"], "start_frame": start, "end_frame_exclusive": end})
+        seen.add(item["person_id"])
+        previous_end = end
+    return result
 
 
 def final_frames(input_frames: int) -> int:
     # Round up to a complete output frame so the last source frame is retained.
     return (input_frames * 5 + 5) // 6
+
+
+def text_pin_coverage(layers: list[dict], frames: int) -> dict:
+    """Required pins cover every clean frame, with readable, hash-bound assets."""
+    if not isinstance(layers, list) or not layers:
+        raise ValueError("every packaged video requires text pins")
+    cursor = 0
+    for layer in layers:
+        if (not isinstance(layer, dict) or type(layer.get("start_frame")) is not int
+                or type(layer.get("end_frame_exclusive")) is not int
+                or not isinstance(layer.get("path"), str) or not layer["path"]
+                or not re.fullmatch(r"[0-9a-f]{64}", str(layer.get("sha256", "")))):
+            raise ValueError("text pins require an asset hash and integer frame interval")
+        start, end = layer["start_frame"], layer["end_frame_exclusive"]
+        if start != cursor or not start < end <= frames:
+            raise ValueError("text pins must cover the full video without gaps or overlap")
+        if final_frames(end) - final_frames(start) < 48:
+            raise ValueError("each text pin must remain readable for at least 0.8 final seconds")
+        cursor = end
+    if cursor != frames:
+        raise ValueError("text pins must cover the video through its final frame")
+    return {"policy": TEXT_PIN_POLICY, "decision": "pass", "input_frames": frames,
+            "final_frames": final_frames(frames), "layers": layers}
 
 
 def delivery_speed(row: dict) -> float:
@@ -174,6 +231,8 @@ def relocated_config(config_path: Path, rows: list[dict], snapshots: list[Path],
         for key in ("nameplate", "disclaimer", "bgm"):
             if prepared[key]:
                 original[key]["path"] = prepared[key]["path"]
+        for item, resolved in zip(original.get("nameplates", []), prepared.get("nameplates", [])):
+            item["path"] = resolved["path"]
         for item, resolved in zip(original.get("text_pins", []), prepared["text_pins"]):
             item["path"] = resolved["path"]
     return config
@@ -585,6 +644,9 @@ def require_design_config(config: dict) -> None:
 def prepared_rows(config_path: Path, expected_inputs: dict[str, str] | None = None) -> list[dict]:
     config = read(config_path)
     require_design_config(config)
+    pin_policy = config.get("text_pin_policy")
+    if pin_policy not in {None, TEXT_PIN_POLICY}:
+        raise ValueError("unknown text pin policy")
     base = config_path.resolve().parent
     rows = []
     for row in config["outputs"]:
@@ -609,7 +671,8 @@ def prepared_rows(config_path: Path, expected_inputs: dict[str, str] | None = No
                     "subtitle_flower_seed": seed,
                     "subtitle_style": style, "subtitle_design": design,
                     "graphic_layers": design["graphic_layers"],
-                    "nameplate": None, "text_pins": [], "disclaimer": None, "bgm": None}
+                    "nameplate": None, "nameplates": prepare_nameplates(row, base, spec["frames"]),
+                    "text_pins": [], "disclaimer": None, "bgm": None}
         if row.get("nameplate"):
             item = row["nameplate"]
             start, end = frame_window(item, spec["frames"], default_end=min(192, spec["frames"]))
@@ -619,6 +682,10 @@ def prepared_rows(config_path: Path, expected_inputs: dict[str, str] | None = No
                 raise ValueError("text pin interval is required")
             start, end = frame_window(item, spec["frames"])
             prepared["text_pins"].append({**resolve_overlay(base, item.get("path"), item.get("sha256")), "start_frame": start, "end_frame_exclusive": end})
+        if pin_policy:
+            text_pin_coverage(row.get("text_pins", []), spec["frames"])
+            text_pin_coverage(prepared["text_pins"], spec["frames"])
+            prepared["text_pin_policy"] = pin_policy
         if row.get("disclaimer"):
             item = row["disclaimer"]
             prepared["disclaimer"] = resolve_overlay(base, item.get("path"), item.get("sha256"))
@@ -659,7 +726,7 @@ def render_one(row: dict, output_dir: Path) -> dict:
             filters = []
             current = "[0:v]"
             index = 1
-            layers = ([row["nameplate"]] if row["nameplate"] else []) + row["text_pins"] + ([row["disclaimer"]] if row["disclaimer"] else [])
+            layers = nameplate_layers(row) + row["text_pins"] + ([row["disclaimer"]] if row["disclaimer"] else [])
             for layer in layers:
                 command += ["-loop", "1", "-framerate", "60", "-i", layer["path"]]
                 label = f"v{index}"
@@ -701,9 +768,11 @@ def render_one(row: dict, output_dir: Path) -> dict:
         partial.unlink(missing_ok=True)
         raise
     return {"plan_id": plan_id, "input": row["input"], "input_frames": row["spec"]["frames"],
+            **({"text_pin_policy": row["text_pin_policy"]} if row.get("text_pin_policy") else {}),
             "final_speed": FINAL_SPEED, "output_frames": frames, "output_path": str(output.resolve()),
             "output_sha256": sha(output), "output_spec": spec, "subtitles": row["subtitles"],
-            "nameplate": row["nameplate"], "text_pins": row["text_pins"], "disclaimer": row["disclaimer"], "bgm": row["bgm"],
+            "nameplate": row["nameplate"], "nameplates": row.get("nameplates", []),
+            "text_pins": row["text_pins"], "disclaimer": row["disclaimer"], "bgm": row["bgm"],
             "subtitle_flower_seed": row["subtitle_flower_seed"], "flower_choices": track.get("choices", []) if track else [],
             "subtitle_style": row["subtitle_style"],
             "design": track["record"],
@@ -894,12 +963,16 @@ def reburn(previous_manifest_path: Path, plan_id: str, subtitle_txt: Path, outpu
         for key in ("nameplate", "disclaimer", "bgm"):
             if old.get(key):
                 row[key] = old[key]
+        if old.get("nameplates"):
+            row["nameplates"] = old["nameplates"]
         if old.get("text_pins"):
             row["text_pins"] = old["text_pins"]
         rows.append(row)
     output_dir.mkdir(parents=True, exist_ok=True)
     config_path = delivery_category(output_dir, "config") / "reburn_config.json"
     config = {"schema": SCHEMA, "outputs": rows}
+    if old_config.get("text_pin_policy"):
+        config["text_pin_policy"] = old_config["text_pin_policy"]
     atomic(config_path, config)
     delivery = Path(previous["clean_delivery_path"]) if previous.get("clean_delivery_path") else None
     controller = Path(previous["controller_validation_path"]) if previous.get("controller_validation_path") else None
@@ -1119,6 +1192,12 @@ def validate(manifest_path: Path, report_path: Path, review_path: Path | None = 
                   or clean_report.get("manifest_sha256") != manifest.get("clean_delivery_sha256")):
                 failures.append("controller_validation_binding")
     checks = []
+    snapshot_rows = {}
+    snapshot_pin_policy = None
+    if config_snapshot.is_file() and sha(config_snapshot) == manifest.get("config_snapshot_sha256"):
+        snapshot = read(config_snapshot)
+        snapshot_rows = {item.get("plan_id"): item for item in snapshot.get("outputs", [])}
+        snapshot_pin_policy = snapshot.get("text_pin_policy")
     results = manifest.get("results", [])
     ids = [row.get("plan_id") for row in results]
     if (manifest.get("output_count") != len(results) or not results
@@ -1140,6 +1219,31 @@ def validate(manifest_path: Path, report_path: Path, review_path: Path | None = 
             path = Path(item["path"])
             if not path.is_file() or sha(path) != item["sha256"]:
                 changes.append("text_pin_changed")
+        if snapshot_pin_policy or row.get("text_pin_policy"):
+            try:
+                if snapshot_pin_policy != TEXT_PIN_POLICY or row.get("text_pin_policy") != snapshot_pin_policy:
+                    raise ValueError("text pin policy binding changed")
+                raw = snapshot_rows[plan_id].get("text_pins", [])
+                text_pin_coverage(raw, row["input_frames"])
+                expected = [{**resolve_overlay(config_snapshot.parent, item['path'], item['sha256']),
+                             'start_frame': item['start_frame'], 'end_frame_exclusive': item['end_frame_exclusive']}
+                            for item in raw]
+                if row.get("text_pins") != expected:
+                    raise ValueError("text pin timeline changed")
+                text_pin_coverage(row["text_pins"], row["input_frames"])
+            except (ValueError, TypeError, KeyError, OSError):
+                changes.append("required_text_pin_coverage_changed")
+        if row.get("nameplates") or snapshot_rows.get(plan_id, {}).get("nameplates"):
+            try:
+                expected = prepare_nameplates(snapshot_rows.get(plan_id, {}), config_snapshot.parent, row["input_frames"])
+                if row.get("nameplate") or row.get("nameplates") != expected:
+                    changes.append("nameplate_timeline_changed")
+                for item in row.get("nameplates", []):
+                    path = Path(item["path"])
+                    if not path.is_file() or sha(path) != item["sha256"]:
+                        changes.append("nameplate_changed")
+            except (KeyError, TypeError, ValueError, OSError):
+                changes.append("nameplate_timeline_changed")
         output = Path(row["output_path"])
         if not output.is_file() or sha(output) != row.get("output_sha256"):
             changes.append("output_changed")
@@ -1176,7 +1280,8 @@ def validate(manifest_path: Path, report_path: Path, review_path: Path | None = 
             changes.append("independent_review")
         checks.append({"plan_id": plan_id, "decision": "pass" if not changes else "reject", "failures": changes,
                        "audio": audio if output.is_file() and "output_changed" not in changes else None,
-                       "visual_review": {"subtitle_cues": row["subtitles"]["cue_count"], "nameplate": bool(row.get("nameplate")),
+                       "visual_review": {"subtitle_cues": row["subtitles"]["cue_count"], "nameplate": bool(nameplate_layers(row)),
+                                         "nameplate_count": len(nameplate_layers(row)),
                                          "text_pins": len(row.get("text_pins", [])), "disclaimer": bool(row.get("disclaimer")),
                                          "status": "pass" if finding and finding.get("visual_pass") is True else "pending_review"},
                        "sound_review": {"bgm": bool(row.get("bgm")), "status": "pass" if automatic is not None and not any(f.startswith(f"autonomous_review:{plan_id}") for f in failures) else "pass" if finding and finding.get("audio_pass") is True else "pending_review"}})

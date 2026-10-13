@@ -21,6 +21,43 @@ REFERENCE_FONT_SHA256 = packaging.SUBTITLE_FONT_SHA256
 
 
 class PackagingContractTests(unittest.TestCase):
+    def test_required_text_pins_cover_every_frame_and_cannot_be_silently_omitted(self):
+        layer = {'path': str(self.pin), 'sha256': packaging.sha(self.pin),
+                 'start_frame': 0, 'end_frame_exclusive': 120}
+        self.assertEqual('pass', packaging.text_pin_coverage([layer], 120)['decision'])
+        invalid = [[], [dict(layer, start_frame=1)], [dict(layer, end_frame_exclusive=119)],
+                   [dict(layer, end_frame_exclusive=60), dict(layer, start_frame=61)],
+                   [dict(layer, end_frame_exclusive=61), dict(layer, start_frame=60)],
+                   [dict(layer, end_frame_exclusive=56), dict(layer, start_frame=56)],
+                   [dict(layer, start_frame=False)], [dict(layer, sha256='')]]
+        for layers in invalid:
+            with self.subTest(layers=layers), self.assertRaises(ValueError):
+                packaging.text_pin_coverage(layers, 120)
+        self.write_config()
+        config = packaging.read(self.config)
+        config['text_pin_policy'] = packaging.TEXT_PIN_POLICY
+        config['outputs'][0]['text_pins'] = []
+        packaging.atomic(self.config, config)
+        with patch.object(packaging, 'video_spec', return_value=self.spec), self.assertRaisesRegex(ValueError, 'requires text pins'):
+            packaging.prepared_rows(self.config)
+
+    def test_plural_nameplates_require_id_hash_frames_and_no_duplicate_or_overlap(self):
+        layer = {"person_id": "person:alpha", "path": str(self.pin), "sha256": packaging.sha(self.pin),
+                 "start_frame": 0, "end_frame_exclusive": 60}
+        self.assertEqual([layer], packaging.prepare_nameplates({"nameplates": [layer]}, self.root, 240))
+        invalid = [{"nameplate": None, "nameplates": [layer]}, {"nameplates": [layer, layer]},
+                   {"nameplates": [layer, dict(layer, person_id="person:beta", start_frame=30, end_frame_exclusive=90)]},
+                   {"nameplates": [dict(layer, end_frame_exclusive=56)]},
+                   {"nameplates": [dict(layer, person_id="person:unknown")]},
+                   {"nameplates": [dict(layer, sha256="0" * 64)]}]
+        for row in invalid:
+            with self.subTest(row=row), self.assertRaises(ValueError):
+                packaging.prepare_nameplates(row, self.root, 240)
+        for key in ("person_id", "sha256", "start_frame", "end_frame_exclusive"):
+            row = dict(layer); row.pop(key)
+            with self.assertRaises(ValueError):
+                packaging.prepare_nameplates({"nameplates": [row]}, self.root, 240)
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)

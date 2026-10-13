@@ -31,11 +31,92 @@ class AutonomousContractTests(unittest.TestCase):
         with patch.object(auto.sys, 'stdin', io.StringIO(json.dumps(order))), patch('builtins.print'):
             auto.init(SimpleNamespace(work_order=Path('-'), job_dir=job))
         self.assertEqual(auto.state(job)['phase'], 'initialized')
+        self.assertEqual(auto.TEXT_PIN_POLICY, auto.state(job)['text_pin_policy'])
+        self.assertEqual(auto.TEXT_PIN_POLICY, auto.read(job / 'work_order.json')['text_pin_policy'])
         self.assertEqual(auto.read(job / 'work_order.json')['sources'], order['sources'])
         self.assertEqual(list(parent.iterdir()), [job.parent])
         with patch.object(auto.sys, 'stdin', io.StringIO(json.dumps(order))):
             with self.assertRaises(FileExistsError):
                 auto.init(SimpleNamespace(work_order=Path('-'), job_dir=job))
+
+    def test_required_text_pin_policy_cannot_be_removed_from_bound_state(self):
+        job = self.root / 'pin-job'; job.mkdir()
+        order = job / 'order.json'
+        auto.write(order, {'schema': auto.ORDER_SCHEMA, 'text_pin_policy': auto.TEXT_PIN_POLICY})
+        value = {'schema': auto.STATE_SCHEMA, 'review_mode': 'codex_asr_pcm',
+                 'work_order': auto.ref(order), 'text_pin_policy': auto.TEXT_PIN_POLICY}
+        auto.write(job / 'autonomous_state.json', value)
+        self.assertEqual(auto.TEXT_PIN_POLICY, auto.state(job)['text_pin_policy'])
+        value.pop('text_pin_policy')
+        auto.write(job / 'autonomous_state.json', value)
+        with self.assertRaisesRegex(ValueError, 'text pin'):
+            auto.state(job)
+
+    def test_overlay_reburn_missing_unused_original_keeps_inventory_but_used_missing_rejected(self):
+        original = self.root / 'used.mp4'; original.write_bytes(b'original bytes')
+        unused = self.root / 'unused.mp4'; unused.write_bytes(b'unused bytes')
+        asr_a = self.root / 'used-asr.json'; auto.write(asr_a, {'text': 'used speech'})
+        asr_b = self.root / 'unused-asr.json'; auto.write(asr_b, {'text': 'unused speech'})
+        index = {'sources': [{'source': auto.ref(original), 'asr': auto.ref(asr_a)},
+                             {'source': auto.ref(unused), 'asr': auto.ref(asr_b)}]}
+        plan = {'outputs': [{'segments': [{'source_sha256': auto.sha(original)}]}]}
+        unused.unlink()
+        audit = auto.audit_original_sources(index, plan, reburn_only=True)
+        self.assertEqual(1, audit['verified_source_count'])
+        self.assertEqual([index['sources'][1]['source']], audit['unavailable_unused_sources'])
+        with self.assertRaisesRegex(ValueError, 'original source'):
+            auto.audit_original_sources(index, plan, reburn_only=False)
+        selected_missing = {'outputs': [{'segments': [{'source_sha256': index['sources'][1]['source']['sha256']}]}]}
+        with self.assertRaisesRegex(ValueError, 'original source'):
+            auto.audit_original_sources(index, selected_missing, reburn_only=True)
+        unused.write_bytes(b'changed unused bytes')
+        with self.assertRaisesRegex(ValueError, 'original source'):
+            auto.audit_original_sources(index, plan, reburn_only=True)
+        unused.unlink(); auto.write(asr_b, {'text': 'tampered historical speech'})
+        with self.assertRaisesRegex(ValueError, 'original source ASR'):
+            auto.audit_original_sources(index, plan, reburn_only=True)
+
+    def test_completion_retry_rejects_evidence_for_different_packaged_delivery(self):
+        job = self.root / 'retry-job'; job.mkdir()
+        order = job / 'order.json'; auto.write(order, {'schema': auto.ORDER_SCHEMA})
+        package = job / 'package.json'; auto.write(package, {'fixture': 'current delivery'})
+        evidence = job / 'final.json'
+        auto.write(evidence, {'decision': 'pass', 'manifest': {'path': str(package), 'sha256': '0' * 64}})
+        review = job / 'review.json'
+        auto.write(review, {'schema': auto.REVIEW_SCHEMA, 'stage': 'final', 'reviewer_role': 'codex',
+                           'evidence_sha256': auto.sha(evidence)})
+        auto.write(job / 'autonomous_state.json', {'schema': auto.STATE_SCHEMA, 'review_mode': 'codex_asr_pcm',
+                   'phase': 'repair_required', 'work_order': auto.ref(order),
+                   'final_evidence': auto.ref(evidence), 'packaging_delivery': auto.ref(package)})
+        with self.assertRaisesRegex(ValueError, 'unchanged packaged delivery'):
+            auto.complete(SimpleNamespace(job_dir=job, review=review))
+
+    def test_full_repair_can_invalidate_an_edited_old_plan_without_authorizing_it(self):
+        source = self.root / 'source.mp4'; source.write_bytes(b'source fixture')
+        assets = self.root / 'assets'; assets.mkdir()
+        job = self.root / 'work' / '自动化混剪_20261010_120000' / '临时文件'
+        order = {'schema': auto.ORDER_SCHEMA, 'requested_outputs': 1,
+                 'sources': [{'path': str(source)}], 'asset_root': str(assets),
+                 'output_root': str(job.parent.parent)}
+        with patch.object(auto.sys, 'stdin', io.StringIO(json.dumps(order))), patch('builtins.print'):
+            auto.init(SimpleNamespace(work_order=Path('-'), job_dir=job))
+        value = auto.state(job)
+        plan = job / 'config' / 'plan.json'
+        auto.write(plan, {'planning_policy': value['planning_policy'],
+                          'batch_review_policy': value['batch_review_policy'],
+                          'audio_cleanup_policy': value['audio_cleanup_policy']})
+        value.update(plan=auto.ref(plan), plan_review={'path': 'old-approval', 'sha256': 'stale'}, phase='repair_required')
+        auto.write(job / 'autonomous_state.json', value)
+        auto.write(plan, {'outputs': []})
+        with self.assertRaisesRegex(ValueError, 'changed or missing'):
+            auto.state(job)
+        with patch('builtins.print'):
+            auto.repair(SimpleNamespace(job_dir=job, reason='replace rejected cuts', continue_until_complete=False))
+        repaired = auto.state(job)
+        self.assertNotIn('plan', repaired)
+        self.assertNotIn('plan_review', repaired)
+        self.assertEqual('repair_required', repaired['phase'])
+        self.assertEqual(auto.AUDIO.POLICY, repaired['audio_cleanup_policy'])
 
     def test_rendered_shot_proof_requires_complete_bound_audio_and_speech(self):
         audio = self.root / 'shot.wav'; audio.write_bytes(b'actual encoded shot audio')
@@ -199,6 +280,9 @@ class AutonomousContractTests(unittest.TestCase):
         package = job / "packaging.json"
         auto.write(package, {"results": [{"plan_id": "P1", "final_speed": 1.2}]})
         value["packaging_delivery"] = auto.ref(package)
+        auto.write(evidence, {"decision": "pass", "manifest": auto.ref(package),
+                            "results": [{"plan_id": "P1", "output": auto.ref(media), "frames": []}]})
+        reviewed = auto.read(review); reviewed["evidence_sha256"] = auto.sha(evidence); auto.write(review, reviewed)
         value.update({"schema": auto.STATE_SCHEMA, "review_mode": "codex_asr_pcm", "phase": "final_evidenced",
                      "output_root": str(output), "delivery_layout": "chinese/v1", "final_evidence": auto.ref(evidence)})
         auto.write(job / "autonomous_state.json", value)
@@ -208,12 +292,17 @@ class AutonomousContractTests(unittest.TestCase):
         with patch.object(auto, "audit_provenance"), patch.object(auto, "module", return_value=packager), \
              patch.object(packager, "validate", side_effect=validate):
             auto.complete(SimpleNamespace(job_dir=job, review=review))
+            # A previously failed signing step may retry the same bound media;
+            # it still runs the audit, review and technical checks again.
+            value["phase"] = "repair_required"
+            auto.write(job / "autonomous_state.json", value)
+            auto.complete(SimpleNamespace(job_dir=job, review=review))
         self.assertTrue((job / "video_montage_autonomous_completion.json").is_file())
         self.assertTrue((output / "临时文件" / "config").is_dir())
         self.assertEqual(job, output / "临时文件")
         self.assertFalse(list((output / "成片").glob("*.json")))
 
-    def test_compact_delivery_removes_audit_and_preserves_reburn_gate(self):
+    def test_compact_delivery_keeps_completion_and_preserves_reburn_gate(self):
         output = self.root / "work" / "自动化混剪_20261008_120000"
         job = output / "临时文件"
         order = job / "work_order.json"
@@ -228,13 +317,25 @@ class AutonomousContractTests(unittest.TestCase):
                    "controller_validation_sha256": auto.sha(qc)})
         auto.write(job / "config" / "packaging.json", {})
         auto.write(job / "evidence" / "frames.json", {})
-        auto.write(job / "video_montage_autonomous_completion.json", {})
+        final_evidence = job / "reports" / "final_evidence.json"
+        auto.write(final_evidence, {"decision": "pass"})
+        final_review = job / "reviews" / "final_review.json"
+        auto.write(final_review, {"stage": "final", "reviewer_role": "codex"})
+        technical = job / "reports" / "packaging_technical.json"
+        auto.write(technical, {"decision": "pass"})
+        completion = job / "video_montage_autonomous_completion.json"
+        auto.write(completion, {"decision": "pass", "final_evidence": auto.ref(final_evidence),
+                               "final_review": auto.ref(final_review), "packaging_technical": auto.ref(technical)})
         value = {"schema": auto.STATE_SCHEMA, "review_mode": "codex_asr_pcm",
                  "work_order": auto.ref(order), "packaging_delivery": auto.ref(manifest),
+                 "completion": auto.ref(completion),
                  "output_root": str(output), "delivery_directory": str(output), "repair_round": 0}
         auto.compact_delivery(job, value)
-        self.assertEqual({"config", "manifests"}, {p.name for p in job.iterdir() if p.is_dir()})
-        self.assertFalse((job / "video_montage_autonomous_completion.json").exists())
+        self.assertEqual({"config", "manifests", "reports", "reviews"}, {p.name for p in job.iterdir() if p.is_dir()})
+        self.assertEqual(completion, auto.require_ref(auto.state(job)["completion"], "completion"))
+        for retained in (final_evidence, final_review, technical):
+            self.assertTrue(retained.is_file())
+        self.assertFalse((job / "evidence" / "frames.json").exists())
         updated = auto.read(manifest)
         copied = Path(updated["controller_validation_path"])
         self.assertEqual(job / "manifests" / "clean_validation.json", copied)
@@ -243,6 +344,7 @@ class AutonomousContractTests(unittest.TestCase):
         auto.repair(SimpleNamespace(job_dir=job, reason="redo cut", continue_until_complete=False))
         self.assertEqual("repair_required", auto.state(job)["phase"])
         self.assertNotIn("compact_delivery", auto.state(job))
+        self.assertFalse(completion.exists())
 
     def test_completed_job_repair_pins_actual_delivery_and_invalidates_completion(self):
         job = self.root / "job"; job.mkdir()
@@ -382,6 +484,44 @@ class AutonomousContractTests(unittest.TestCase):
         self.assertFalse(auto.context_corroborates_asr("无尽冬日欢迎", "无尽冬日", assets))
         self.assertFalse(auto.context_corroborates_asr("欢迎无尽冬日啊", "欢迎无尽度日啊", None))
         self.assertTrue(auto.context_corroborates_asr("欢迎无尽冬日啊", "欢迎无尽度日啊", assets))
+
+    def test_delivery_tempo_retry_preserves_trials_and_rescales_actual_word_times(self):
+        audio = self.root / 'actual.wav'; audio.write_bytes(b'actual audio fixture')
+        expected = '我是无尽冬日明星玩家吴岳我在无尽冬日等你'
+        bad = expected.replace('明星', '明信').replace('吴岳', '吴越')
+        good = expected.replace('明星', '明信')
+        observations = iter([bad, bad, bad, good])
+        prompts = []
+        def recognize(model, path, language, **kwargs):
+            prompts.append(kwargs['initial_prompt'])
+            text = next(observations)
+            return {'text': text, 'segments': [{'start': .2, 'end': 1., 'text': text,
+                'words': [{'word': text, 'start': .2, 'end': 1.}]}]}, {}
+        def encode(command, **kwargs):
+            Path(command[-1]).write_bytes(b'time augmentation fixture')
+        assets = {'assets': [{'text': '无尽冬日 明星玩家 吴樾'}]}
+        with patch.object(auto, 'module', return_value=SimpleNamespace(transcribe=recognize)), patch.object(auto, 'run', side_effect=encode):
+            result = auto.transcribe(object(), audio, expected, assets, auto.EDITING.POLICY)
+        self.assertEqual(result['recognition_tempo'], 1.2)
+        self.assertEqual([r['tempo'] for r in result['recognition_trials']], [1., 1.1, 1.3, 1.2])
+        self.assertEqual(result['recognition_trials'][0]['text'], bad)
+        self.assertEqual(result['segments'][0]['words'][0]['start'], .24)
+        self.assertEqual(result['segments'][0]['words'][0]['end'], 1.2)
+        self.assertEqual(set(prompts), {'以下是简体中文口播。'})
+
+    def test_delivery_tempo_retry_cannot_turn_truncated_speech_into_a_match(self):
+        audio = self.root / 'actual.wav'; audio.write_bytes(b'actual audio fixture')
+        expected = '我是无尽冬日明星玩家吴岳我在无尽冬日等你'
+        missing = expected[1:]
+        def recognize(*args, **kwargs):
+            return {'text': missing, 'segments': []}, {}
+        def encode(command, **kwargs):
+            Path(command[-1]).write_bytes(b'time augmentation fixture')
+        with patch.object(auto, 'module', return_value=SimpleNamespace(transcribe=recognize)), patch.object(auto, 'run', side_effect=encode):
+            result = auto.transcribe(object(), audio, expected, {'assets': [{'text': '无尽冬日 明星玩家 吴樾'}]}, auto.EDITING.POLICY)
+        self.assertEqual(result['text'], missing)
+        self.assertNotIn('recognition_tempo', result)
+        self.assertFalse(auto.context_corroborates_asr(expected, result['text'], {'assets': [{'text': expected}]}, auto.EDITING.POLICY))
 
     def test_subtitle_early_asr_edge_clamps_to_bound_shot(self):
         auto.validate_subtitle_timing(2817, 4120, (2560, 3020), (3920, 4120), (2817, 9667))

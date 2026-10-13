@@ -36,6 +36,7 @@ STATE_SCHEMA = "video-montage-autonomous-state/v260929"
 ORDER_SCHEMA = "video-montage-autonomous-work-order/v260929"
 PLAN_SCHEMA = "video-montage-autonomous-plan/v260929"
 REVIEW_SCHEMA = "video-montage-codex-review/v260929"
+TEXT_PIN_POLICY = "required-full-coverage/v1"
 MAX_ROUNDS = None  # Repair until the complete delivery passes; no retry ceiling.
 
 
@@ -49,6 +50,7 @@ def module(name: str, relative: str):
 
 SOURCE_TIMING = module("autonomous_source_timing", "scripts/semantic/scripts/source_timing.py")
 EDITING = module("autonomous_editing_policy", "scripts/autonomous/scripts/planning_policy.py")
+CAST = EDITING.CAST
 BATCH = module("autonomous_batch_review", "scripts/autonomous/scripts/batch_review.py")
 AUDIO = module("autonomous_audio_cleanup", "scripts/semantic/scripts/audio_cleanup.py")
 
@@ -501,7 +503,9 @@ def transcribe(model, path: Path, expected: str | None = None, asset_copy: dict 
         # Preserve both actual recognitions and scale word times back to the
         # candidate clock. This never changes the render or relaxes its gates.
         trials = [{"tempo": 1.0, "text": asr["text"]}]
-        for tempo in (1.1, 1.3):
+        # Also test the delivery tempo. A proper name can be decoded differently
+        # after AAC; this adds an independent recognition, not a spelling waiver.
+        for tempo in (1.1, 1.3, 1.2, 1.05, .8):
             probe = path.with_name(path.stem + f".asr-tempo{round(tempo * 100)}.wav")
             run([str(FFMPEG), "-v", "error", "-i", str(path), "-af", f"atempo={tempo}", "-y", str(probe)])
             alternative, _ = module("autonomous_asr_retry", "scripts/semantic/scripts/v9_source_asr.py").transcribe(
@@ -524,11 +528,17 @@ def load_model():
     return asr.build_model("large-v3-turbo", MODEL_ROOT, "auto", "int8", "float16")[0]
 
 
-def state(job: Path) -> dict:
+def state(job: Path, *, discarding_plan: bool = False) -> dict:
     value = read(job / "autonomous_state.json")
     if value.get("schema") != STATE_SCHEMA or value.get("review_mode") != "codex_asr_pcm":
         raise ValueError("not a new autonomous job; legacy state cannot be migrated")
     order = read(require_ref(value["work_order"], "work order"))
+    if (value.get("cast_policy") != order.get("cast_policy")
+            or (order.get("cast_policy") and value.get("celebrities") != CAST.registry(order))):
+        raise ValueError("work-order cast policy or celebrity registry changed in state")
+    if (value.get("text_pin_policy") != order.get("text_pin_policy")
+            or value.get("text_pin_policy") not in {None, TEXT_PIN_POLICY}):
+        raise ValueError("work-order text pin policy changed or missing in state")
     policy = order.get("planning_policy")
     if policy not in {None, *EDITING.SUPPORTED_POLICIES} or value.get("planning_policy") != policy:
         raise ValueError("work-order planning policy changed or missing in state")
@@ -539,9 +549,9 @@ def state(job: Path) -> dict:
     if (order.get("audio_cleanup_policy") != value.get("audio_cleanup_policy")
             or value.get("audio_cleanup_policy") not in {None, AUDIO.POLICY}):
         raise ValueError("work-order audio cleanup policy changed or missing in state")
-    if value.get("plan") and read(require_ref(value["plan"], "audio cleanup plan policy")).get("audio_cleanup_policy") != value.get("audio_cleanup_policy"):
+    if not discarding_plan and value.get("plan") and read(require_ref(value["plan"], "audio cleanup plan policy")).get("audio_cleanup_policy") != value.get("audio_cleanup_policy"):
         raise ValueError("plan cannot lose its audio cleanup policy")
-    if value.get("plan"):
+    if value.get("plan") and not discarding_plan:
         plan = read(require_ref(value["plan"], "plan policy"))
         if plan.get("planning_policy") != policy:
             raise ValueError("plan cannot lose or downgrade its job planning policy")
@@ -583,13 +593,19 @@ def fail_round(job: Path, value: dict, phase: str, reasons: list[str]) -> None:
 
 
 def repair(args) -> None:
-    job = args.job_dir.resolve(); value = state(job)
+    # A full repair invalidates the old plan and every downstream approval.
+    # Missing/edited old plan bytes must not prevent that invalidation; normal
+    # rendering and approval paths still require the exact pinned plan hash.
+    job = args.job_dir.resolve(); value = state(job, discarding_plan=True)
     bind_existing_delivery(value)
     value.pop("pending_delivery_directory", None)
     value.pop("reburn_only", None)
     value["planning_policy"] = EDITING.POLICY
     order = read(require_ref(value["work_order"], "work order"))
     upgraded_order = job / "config" / "full_repair_work_order.json"
+    if CAST.enabled(order):
+        order = {**order, "cast_policy": CAST.POLICY}
+        value["cast_policy"] = CAST.POLICY
     write(upgraded_order, {**order, "planning_policy": EDITING.POLICY, "batch_review_policy": BATCH.POLICY})
     value["work_order"] = ref(upgraded_order)
     value["batch_review_policy"] = BATCH.POLICY
@@ -623,6 +639,9 @@ def repair(args) -> None:
 
 def init(args) -> None:
     order = json.load(sys.stdin) if str(args.work_order) == "-" else read(args.work_order)
+    celebrities = CAST.registry(order)
+    cast_fields = {"cast_policy": CAST.POLICY, "celebrities": celebrities} if celebrities else {}
+    order.update(cast_fields)
     BATCH.reuse_limits(order)
     sources = order.get("sources")
     if order.get("schema") != ORDER_SCHEMA or not isinstance(sources, list) or not sources or int(order.get("requested_outputs", 0)) < 1:
@@ -668,17 +687,19 @@ def init(args) -> None:
     packager.ensure_delivery_layout(output)
     order_snapshot = job / "work_order.json"
     write(order_snapshot, {**order, "planning_policy": EDITING.POLICY, "batch_review_policy": BATCH.POLICY,
-                           "audio_cleanup_policy": AUDIO.POLICY})
+                           "audio_cleanup_policy": AUDIO.POLICY, "text_pin_policy": TEXT_PIN_POLICY})
     save(job, {"schema": STATE_SCHEMA, "review_mode": "codex_asr_pcm", "work_order": ref(order_snapshot),
                "source_hashes": {str(Path(row["path"]).resolve()): sha(Path(row["path"])) for row in sources},
                "asset_root": str(asset), "output_root": str(output), "delivery_directory": str(output),
                "repair_delivery_policy": "overwrite", "delivery_layout": "chinese/v1", "records_policy": "delivery-temporary/v1",
                "temporary_root": str(output / "临时文件"), "repair_round": 0,
                "packaging_design_policy": "codex/v1",
+               "text_pin_policy": TEXT_PIN_POLICY,
                "subtitle_segmentation_policy": "semantic-reading/v1",
                "planning_policy": EDITING.POLICY,
                "batch_review_policy": BATCH.POLICY,
                "audio_cleanup_policy": AUDIO.POLICY,
+               **cast_fields,
                "max_repair_rounds": MAX_ROUNDS, "continue_until_complete": True}, "initialized")
     print(json.dumps({"job_dir": str(job), "delivery_directory": str(output)}, ensure_ascii=False))
 
@@ -719,6 +740,8 @@ def prepare(args) -> None:
     BATCH.reuse_limits(order, value.get("batch_review_policy") or BATCH.LEGACY_POLICY)
     write(index_path, {"schema": "video-montage-autonomous-source-index/v260929", "sources": source_rows,
                        "asset_copy_sources": ref(asset_path),
+                       **({"cast_policy": value["cast_policy"], "celebrities": CAST.registry(order)}
+                          if value.get("cast_policy") else {}),
                        **({"planning_policy": value["planning_policy"], "batch_review_policy": value.get("batch_review_policy")}
                           if value.get("planning_policy") == EDITING.POLICY else {}),
                        **({"batch_reuse_authorization": order["batch_reuse_authorization"]}
@@ -754,6 +777,40 @@ def check_plan(plan: dict, source_index: dict, count: int, policy: str | None = 
     if plan.get("schema") != PLAN_SCHEMA or len(plan.get("outputs", [])) != count:
         return ["plan schema or complete output scope"]
     source_map = {row["source"]["sha256"]: row for row in source_index["sources"]}
+    cast_policy = source_index.get("cast_policy")
+    if plan.get("cast_policy") != cast_policy or cast_policy not in {None, *CAST.SUPPORTED_POLICIES}:
+        errors.append("CAST_POLICY_BINDING_REQUIRED")
+    if cast_policy:
+        try:
+            celebrities = CAST.registry(source_index)
+            if plan.get("celebrities") != celebrities:
+                errors.append("CELEBRITY_REGISTRY_BINDING_REQUIRED")
+            registered = {row["person_id"] for row in celebrities}
+            for output in plan.get("outputs", []):
+                if output.get("cast_policy") != cast_policy or not CAST.valid_people(output.get("protagonist_ids"), list(registered)):
+                    errors.append("REGISTERED_SELECTED_CAST_REQUIRED")
+                extras = CAST.supporting(output)
+                if isinstance(extras, list) and any(person in registered for person in extras):
+                    errors.append("REGISTERED_CELEBRITY_CANNOT_BE_SUPPORTING_ACTOR")
+            inventories = {source.get("source_sha256"): source.get("candidates", [])
+                           for source in plan.get("batch_analysis", {}).get("sources", [])}
+            for output in plan.get("outputs", []):
+                for segment in output.get("segments", []):
+                    matches = [candidate for candidate in inventories.get(segment.get("source_sha256"), [])
+                               if (candidate.get("source_in_frame"), candidate.get("source_out_frame_exclusive"), normalized(candidate.get("text", "")))
+                               == (segment.get("source_in_frame"), segment.get("source_out_frame_exclusive"), normalized(segment.get("text", "")))]
+                    cast_fields = ("speaker_id", "visible_person_ids")
+                    if cast_policy == CAST.POLICY:
+                        cast_fields += ("primary_person_ids",)
+                    if len(matches) != 1 or any(matches[0].get(key) != segment.get(key) for key in cast_fields):
+                        errors.append("SOURCE_CANDIDATE_CAST_AND_SPEAKER_BINDING_REQUIRED")
+            for source in plan.get("batch_analysis", {}).get("sources", []):
+                if any(not CAST.person_id(turn.get("speaker_id")) for turn in source.get("spoken_turns", [])):
+                    errors.append("COMPLETE_SPOKEN_TURN_SPEAKER_REQUIRED")
+        except (ValueError, TypeError, OSError) as exc:
+            errors.append(f"CELEBRITY_REGISTRY_INVALID:{exc}")
+    elif any(output.get("cast_policy") or "protagonist_ids" in output for output in plan.get("outputs", [])):
+        errors.append("CAST_POLICY_BINDING_REQUIRED")
     ids = []
     rejected = read(ROOT / "references/semantic/wuzimu-v20-invalid-intervals.json")["entries"]
     rejection_gate = module("autonomous_rejected_intervals", "scripts/semantic/scripts/v20_fail_closed.py")
@@ -1008,6 +1065,7 @@ def require_editing_approval(value: dict) -> None:
         return
     plan_path = require_ref(value["plan"], "semantic-first plan")
     plan = read(plan_path)
+    require_cast_binding(value, plan)
     errors = check_plan(plan, read(require_ref(value["source_index"], "source index")),
                         int(read(require_ref(value["work_order"], "work order"))["requested_outputs"]), value.get("planning_policy"),
                         value.get("batch_review_policy"))
@@ -1027,6 +1085,7 @@ def require_editing_approval(value: dict) -> None:
     evidence_path = require_ref(value["plan_evidence"], "semantic-first plan evidence")
     evidence = read(evidence_path)
     review = read(require_ref(value["plan_review"], "semantic-first plan review"))
+    require_cast_binding(value, plan, evidence, review)
     if (evidence.get("planning_policy") != value.get("planning_policy") or evidence.get("plan") != value["plan"]
             or evidence.get("source_index") != value["source_index"]
             or review.get("schema") != REVIEW_SCHEMA or review.get("stage") != "plan"
@@ -1061,6 +1120,23 @@ def require_editing_approval(value: dict) -> None:
         raise ValueError("semantic-first editorial approval rejected: " + "; ".join(errors))
 
 
+def require_cast_binding(value: dict, plan: dict, *documents: dict) -> dict:
+    order = read(require_ref(value["work_order"], "cast work order"))
+    policy = order.get("cast_policy")
+    if value.get("cast_policy") != policy or plan.get("cast_policy") != policy:
+        raise ValueError("cast policy cannot be lost or changed")
+    if policy is None:
+        if any(document.get("cast_policy") for document in documents):
+            raise ValueError("legacy cast policy cannot be upgraded by a review")
+        return {}
+    celebrities = CAST.registry(order)
+    index = read(require_ref(value["source_index"], "cast source index"))
+    if any(document.get("cast_policy") != policy or document.get("celebrities") != celebrities
+           for document in (value, index, plan, *documents)):
+        raise ValueError("selected celebrity registry or review binding changed")
+    return {"cast_policy": policy, "celebrities": celebrities}
+
+
 def batch_fields(value: dict, plan: dict | None = None, index: dict | None = None) -> dict:
     if not value.get("batch_review_policy"):
         return {}
@@ -1069,6 +1145,7 @@ def batch_fields(value: dict, plan: dict | None = None, index: dict | None = Non
     if source_index.get("batch_reuse_authorization") != order.get("batch_reuse_authorization"):
         raise ValueError("batch reuse authorization must match the bound user work order")
     plan = plan or read(require_ref(value["plan"], "batch plan"))
+    cast_fields = require_cast_binding(value, plan) if value.get("cast_policy") else {}
     if plan.get("batch_review_policy") != value["batch_review_policy"]:
         raise ValueError("bound batch policy cannot be lost or downgraded")
     if value["batch_review_policy"] == BATCH.POLICY and source_index.get("batch_review_policy") != BATCH.POLICY:
@@ -1076,7 +1153,7 @@ def batch_fields(value: dict, plan: dict | None = None, index: dict | None = Non
     report = BATCH.audit(plan, source_index, int(order["requested_outputs"]))
     if report["decision"] != "pass":
         raise ValueError("whole-batch plan rejected: " + "; ".join(row["code"] for row in report["failures"]))
-    return {"batch_review_policy": value.get("batch_review_policy"), "batch_review_report": report}
+    return {"batch_review_policy": value.get("batch_review_policy"), "batch_review_report": report, **cast_fields}
 
 
 def batch_review_errors(value: dict, evidence: dict, review: dict) -> list[str]:
@@ -1306,6 +1383,7 @@ def approve_plan(args) -> None:
         if evidence.get("planning_policy") != value.get("planning_policy") or review.get("planning_policy") != value.get("planning_policy"):
             raise ValueError("semantic-first review required; legacy approval cannot authorize this edit")
         plan = read(require_ref(value["plan"], "plan"))
+        require_cast_binding(value, plan, evidence, review)
         policy_errors = check_plan(plan, read(require_ref(value["source_index"], "source index")),
                                   int(read(require_ref(value["work_order"], "work order"))["requested_outputs"]), value.get("planning_policy"),
                                   value.get("batch_review_policy"))
@@ -1686,6 +1764,8 @@ def package(args) -> None:
         require_clean_qc(value)
     review = read(require_ref(value["subtitle_review"], "subtitle review"))
     config = read(args.config)
+    if value.get("text_pin_policy") and config.get("text_pin_policy") != value["text_pin_policy"]:
+        raise ValueError("packaging cannot omit the required text pin policy")
     by_id = {row["plan_id"]: row for row in review["results"]}
     if {row.get("plan_id") for row in config.get("outputs", [])} != set(by_id):
         raise ValueError("packaging config scope mismatch")
@@ -1706,6 +1786,11 @@ def package(args) -> None:
     asset_copy = read(require_ref(value["asset_copy"], "verified asset copy"))
     order = read(require_ref(value["work_order"], "work order"))
     for prepared in packager.prepared_rows(args.config.resolve()):
+        if value.get("cast_policy"):
+            plan = read(require_ref(value["plan"], "cast packaging plan"))
+            require_cast_binding(value, plan)
+            output = next(output for output in plan["outputs"] if output["plan_id"] == prepared["plan_id"])
+            CAST.verify_nameplates(output, EDITING.summary(output)["visual_shots"], prepared["nameplates"], value["celebrities"])
         if prepared.get("subtitle_design"):
             packager.packaging_design.verify_sources(prepared["subtitle_design"], prepared["cues"], asset_copy,
                 clean_by_id[prepared["plan_id"]]["expected_text"], json.dumps(order.get("packaging_request", ""), ensure_ascii=False))
@@ -1745,6 +1830,14 @@ def final_evidence(args) -> None:
     copy_value = read(require_ref(value["asset_copy"], "asset copy"))
     for row in manifest["results"]:
         pid = row["plan_id"]; output = Path(row["output_path"])
+        pin_coverage = {}
+        if value.get("text_pin_policy"):
+            if row.get("text_pin_policy") != value["text_pin_policy"]:
+                raise ValueError("final output lost its required text pin policy")
+            pin_coverage = packager.text_pin_coverage(row.get("text_pins", []), row["input_frames"])
+        if value.get("cast_policy"):
+            CAST.verify_nameplates(plan_by_id[pid], EDITING.summary(plan_by_id[pid])["visual_shots"],
+                                   row.get("nameplates", []), value["celebrities"])
         if not output.is_file() or sha(output) != row["output_sha256"]:
             failures.append(f"{pid}: packaged output changed"); continue
         if row.get("input", {}).get("sha256") != clean_by_id[pid]["output"]["sha256"]:
@@ -1797,7 +1890,7 @@ def final_evidence(args) -> None:
             frame_numbers.extend([max(0, start_frame - 1), start_frame,
                                   min(output_frames - 1, end_frame - 1),
                                   min(output_frames - 1, end_frame)])
-        for layer in [row.get("nameplate"), *row.get("text_pins", [])]:
+        for layer in [*packager.nameplate_layers(row), *row.get("text_pins", [])]:
             if layer:
                 start = min(output_frames - 1, math.ceil(layer["start_frame"] / speed))
                 end = min(output_frames - 1, math.ceil(layer["end_frame_exclusive"] / speed))
@@ -1826,6 +1919,7 @@ def final_evidence(args) -> None:
                      "metrics": metrics, "cut_pcm": cut_metrics, "voice_over_bgm_db": bgm_db, "frames": visual,
                      "subtitle_cue_count": len(cues), "subtitle_timing_pass": subtitle_timing_pass,
                      "design_required": bool(row.get("design")),
+                     **({"text_pin_coverage": pin_coverage} if pin_coverage else {}),
                      **({"design": row["design"]} if row.get("design") else {}),
                      "decision": "pass" if decision else "reject"})
     if value.get("planning_policy") == EDITING.POLICY:
@@ -1833,6 +1927,7 @@ def final_evidence(args) -> None:
             result["transitions"] = EDITING.final_transition_evidence(plan_by_id[result["plan_id"]], result)
     report = job / "reports" / "final_evidence.json"
     write(report, {"schema": "video-montage-autonomous-final-evidence/v260929", "manifest": ref(manifest_path),
+                   **({"text_pin_policy": value["text_pin_policy"]} if value.get("text_pin_policy") else {}),
                    "subtitle_review": value["subtitle_review"], "results": rows,
                    **({"planning_policy": value.get("planning_policy"), "plan": value["plan"]} if semantic_first(value) else {}),
                    **batch_fields(value),
@@ -2001,8 +2096,12 @@ def reburn(args) -> None:
     packager.ensure_delivery_layout(pending)
     by_id = {row["plan_id"]: row for row in clean["results"]}
     drafts = []
+    plan_by_id = {row["plan_id"]: row for row in read(require_ref(value["plan"], "reburn cast plan"))["outputs"]} if value.get("cast_policy") else {}
     for row in previous["results"]:
         pid = row["plan_id"]
+        if value.get("cast_policy"):
+            CAST.verify_nameplates(plan_by_id[pid], EDITING.summary(plan_by_id[pid])["visual_shots"],
+                                   row.get("nameplates", []), value["celebrities"])
         source = edits[pid] if pid in edits else require_ref(row["subtitle_snapshot"], "unchanged subtitle")
         duration = round(packager.video_spec(require_ref(by_id[pid]["output"], "clean output"))["duration"] * 1000)
         packager.parse_srt(source, duration)
@@ -2020,6 +2119,13 @@ def reburn(args) -> None:
     if sha(Path(previous["config_snapshot_path"])) != previous["config_snapshot_sha256"]:
         raise ValueError("reburn configuration changed")
     config_path = pending / "临时文件" / "config" / "reburn_config.json"
+    if getattr(args, "require_text_pins", False):
+        order = read(require_ref(value["work_order"], "text pin work order"))
+        order_path = job / "config" / "text_pin_work_order.json"
+        write(order_path, {**order, "text_pin_policy": TEXT_PIN_POLICY})
+        value["work_order"] = ref(order_path)
+        value["text_pin_policy"] = TEXT_PIN_POLICY
+        config["text_pin_policy"] = TEXT_PIN_POLICY
     write(config_path, config)
     value["reburn_config"] = ref(config_path)
     (job / "video_montage_autonomous_completion.json").unlink(missing_ok=True)
@@ -2142,6 +2248,25 @@ def publish_delivery(job: Path, value: dict) -> list[dict]:
     return outputs
 
 
+def audit_original_sources(index: dict, plan: dict, *, reburn_only: bool = False) -> dict:
+    """An overlay reburn needs used originals; retain unavailable unused inventory."""
+    selected = {item.get("source_sha256") for output in plan.get("outputs", [])
+                for key in ("segments", "visual_shots") for item in output.get(key, [])}
+    unavailable = []
+    verified = 0
+    for row in index["sources"]:
+        source = row["source"]
+        if reburn_only and source["sha256"] not in selected and not Path(source["path"]).exists():
+            unavailable.append(source)
+        else:
+            require_ref(source, "original source")
+            verified += 1
+        # Historical inventory remains immutable, even for an unused missing file.
+        require_ref(row["asr"], "original source ASR")
+    return {"reburn_only": reburn_only, "inventory_source_count": len(index["sources"]),
+            "verified_source_count": verified, "unavailable_unused_sources": unavailable}
+
+
 def audit_provenance(value: dict) -> None:
     """Rehash every source, candidate, review and delivered artifact at completion."""
     names = ["work_order", "source_index", "asset_copy", "plan", "clean_delivery", "clean_qc", "final_evidence"]
@@ -2156,9 +2281,9 @@ def audit_provenance(value: dict) -> None:
     assets = read(require_ref(index["asset_copy_sources"], "asset copy sources"))
     for row in assets["assets"]:
         require_ref(row, "source asset")
-    for row in index["sources"]:
-        require_ref(row["source"], "original source")
-        require_ref(row["asr"], "original source ASR")
+    value["source_provenance_audit"] = audit_original_sources(
+        index, read(require_ref(value["plan"], "source dependency plan")),
+        reburn_only=bool(value.get("reburn_only")))
     if value.get("reburn_only"):
         require_clean_qc(value)
         errors = check_plan(read(require_ref(value["plan"], "reburn plan")), index,
@@ -2188,15 +2313,23 @@ def audit_provenance(value: dict) -> None:
 
 def complete(args) -> None:
     job = args.job_dir.resolve(); value = state(job)
-    if value["phase"] != "final_evidenced":
+    if value["phase"] not in {"final_evidenced", "repair_required"} or not value.get("final_evidence"):
         raise ValueError("final evidence required")
     evidence_path = require_ref(value["final_evidence"], "final evidence")
     evidence = read(evidence_path); review = read(args.review)
+    if value.get("cast_policy"):
+        require_cast_binding(value, read(require_ref(value["plan"], "final cast plan")), evidence, review)
     if (review.get("schema") != REVIEW_SCHEMA or review.get("stage") != "final"
             or review.get("reviewer_role") != "codex" or review.get("evidence_sha256") != sha(evidence_path)):
         raise ValueError("Codex final visual review binding invalid")
     if evidence.get("decision", "pass") != "pass":
         raise ValueError("passing final evidence required")
+    if value["phase"] == "repair_required" and value.get("delivery_mode") != "clean" and evidence.get("manifest") != value.get("packaging_delivery"):
+        raise ValueError("retry completion requires evidence for the unchanged packaged delivery")
+    if value.get("text_pin_policy") and value.get("delivery_mode") != "clean":
+        if (evidence.get("text_pin_policy") != value["text_pin_policy"]
+                or review.get("text_pin_policy") != value["text_pin_policy"]):
+            raise ValueError("final text pin policy review binding invalid")
     batch_errors = batch_review_errors(value, evidence, review)
     if batch_errors:
         fail_round(job, value, "codex_final_batch_review", batch_errors)
@@ -2217,6 +2350,14 @@ def complete(args) -> None:
         raise ValueError("final review scope mismatch")
     for row in evidence["results"]:
         finding = by_id[row["plan_id"]]
+        if value.get("text_pin_policy") and value.get("delivery_mode") != "clean":
+            if (row.get("text_pin_coverage", {}).get("decision") != "pass"
+                    or finding.get("text_pins_pass") is not True
+                    or not EDITING.specific_reason(finding.get("text_pin_reason"))):
+                fail_round(job, value, "final_text_pin_review", [f"{row['plan_id']}: actual full-duration text pin review required"])
+        if value.get("cast_policy") and value.get("delivery_mode") != "clean" and (finding.get("nameplates_pass") is not True
+                                        or not EDITING.specific_reason(finding.get("nameplate_reason"))):
+            fail_round(job, value, "final_nameplate_review", [f"{row['plan_id']}: first-appearance nameplate review required"])
         if value.get("audio_cleanup_policy") and row.get("mix_evidence", {}).get("audio_cleanup", {}).get("decision") != "pass":
             fail_round(job, value, "final_audio_cleanup", [f"{row['plan_id']}: final audio cleanup proof missing or failed"])
         if semantic_first(value):
@@ -2293,6 +2434,8 @@ def complete(args) -> None:
     published_outputs = publish_delivery(job, value)
     receipt = job / "video_montage_autonomous_completion.json"
     write(receipt, {"schema": "video-montage-autonomous-completion/v260929", "decision": "pass",
+                    **({"text_pin_policy": value["text_pin_policy"]} if value.get("text_pin_policy") else {}),
+                    **({"cast_policy": value["cast_policy"], "celebrities": value["celebrities"]} if value.get("cast_policy") else {}),
                     **({"planning_policy": value.get("planning_policy")} if semantic_first(value) else {}),
                     **({"batch_review_policy": value.get("batch_review_policy")} if value.get("batch_review_policy") else {}),
                     "repair_round_count": value.get("repair_round", 0),
@@ -2302,6 +2445,7 @@ def complete(args) -> None:
                     "source_index": value["source_index"], "asset_copy": value["asset_copy"],
                     "plan": value["plan"], "delivery_mode": value.get("delivery_mode", "packaged"),
                     "reburn_only": value.get("reburn_only", False),
+                    **({"source_provenance_audit": value["source_provenance_audit"]} if value.get("source_provenance_audit") else {}),
                     **{key: value[key] for key in ("plan_evidence", "plan_review", "subtitle_review", "packaging_delivery", "published_delivery") if value.get(key)},
                     **({"batch_diversity": value["batch_diversity"]} if value.get("batch_diversity") else {}),
                     "clean_delivery": value["clean_delivery"],
@@ -2319,9 +2463,16 @@ def complete(args) -> None:
 
 
 def compact_delivery(job: Path, value: dict) -> None:
-    """Retain only inputs needed for reburn or restarting a full repair."""
+    """Retain reburn inputs and the signed completion record with final findings."""
     root = job.resolve()
     keep = {root / "autonomous_state.json", require_ref(value["work_order"], "work order")}
+    if value.get("completion"):
+        completion_path = require_ref(value["completion"], "completion receipt")
+        keep.add(completion_path.resolve())
+        completion = read(completion_path)
+        for key in ("final_evidence", "final_review", "packaging_technical"):
+            if completion.get(key):
+                keep.add(require_ref(completion[key], key).resolve())
     for folder in (root / "config", root / "manifests"):
         if folder.exists():
             keep.update(path.resolve() for path in folder.rglob("*") if path.is_file())
@@ -2354,8 +2505,8 @@ def compact_delivery(job: Path, value: dict) -> None:
         "schema", "review_mode", "work_order", "source_hashes", "asset_root", "output_root",
         "delivery_directory", "repair_delivery_policy", "delivery_layout", "records_policy",
         "temporary_root", "repair_round", "max_repair_rounds", "continue_until_complete", "packaging_design_policy",
-        "continuation_authorization", "planning_policy", "batch_review_policy", "audio_cleanup_policy",
-        "subtitle_segmentation_policy") if key in value}
+        "continuation_authorization", "planning_policy", "batch_review_policy", "audio_cleanup_policy", "cast_policy", "celebrities",
+        "subtitle_segmentation_policy", "text_pin_policy", "completion") if key in value}
     retained.update(phase="complete", compact_delivery=True)
     retained["delivery_mode"] = value.get("delivery_mode", "packaged")
     inputs = {}
@@ -2447,6 +2598,7 @@ def main() -> None:
         if name == "subtitle-draft":
             action.add_argument("--subtitle-dir", type=Path, help="complete reviewed resegmentation batch; refresh draft snapshots before review")
         if name == "reburn":
+            action.add_argument("--require-text-pins", action="store_true", help="bind mandatory full-duration text pins for an existing delivery")
             action.add_argument("--plan-id")
             action.add_argument("--subtitle-txt", type=Path)
             action.add_argument("--subtitle-dir", type=Path, help="complete batch of subtitle-<plan_id>.txt files")

@@ -19,8 +19,8 @@ full-edit repairs bind `semantic-continuity/v2`. Analyze complete source turns,
 scene context, identities and propositions before composing an edit; require
 grounded adjacent relations and an earned close. Select at natural speed for a
 21.6–36 second clean input and enforce 18–30 seconds after the final 1.2x speed-up.
-Require at least four real visual shots and only the declared protagonist in
-every selected frame; other characters' offscreen dialogue is allowed. Camera
+Require at least four real visual shots and only the declared selected celebrities in
+every selected frame (historical jobs without the cast policy keep one protagonist); other characters' offscreen dialogue is allowed. Camera
 changes inside a source count when proved by native frames; splitting one
 continuous shot does not. Inspect full-interval frame evidence and submit
 per-transition, per-shot and whole-edit reviews. There is no diversification
@@ -49,7 +49,7 @@ never break coherence or exceed four to fill the count. Retain v1 behavior and
 hash-bound report formats for older jobs and their subtitle-only reburns.
 
 For requested packaging, after subtitle review read [AI packaging design](../packaging/design.md).
-Choose a main font for each video, write a hash-bound subtitle design without decorative cards, inspect catalog previews, then package. New jobs require these explicit
+Choose a main font for each video, write a hash-bound subtitle design without decorative cards, inspect the catalog and actual encoded packaging, then package. New jobs require these explicit
 decisions; final review also requires `design_pass` and a concrete `design_reason`.
 Retain subtitle choices and timing with the configuration for reburn.
 

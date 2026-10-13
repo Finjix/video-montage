@@ -567,12 +567,14 @@ class RecognitionEvidenceTests(unittest.TestCase):
             source.write_bytes(b"audio")
             recognizer = SimpleNamespace(transcribe=unittest.mock.Mock(side_effect=[
                 ({"text": "原始错误", "segments": []}, None), ({"text": "另一错误", "segments": []}, None),
-                ({"text": "仍然错误", "segments": []}, None)]))
+                ({"text": "仍然错误", "segments": []}, None), ({"text": "倍速仍错", "segments": []}, None),
+                ({"text": "近速仍错", "segments": []}, None), ({"text": "慢速仍错", "segments": []}, None)]))
             with patch.object(auto, "module", return_value=recognizer), patch.object(auto, "run", side_effect=lambda command: Path(command[-1]).write_bytes(b"tempo audio")):
                 result = auto.transcribe(None, source, "正确台词", {})
             self.assertEqual("原始错误", result["text"])
             self.assertNotIn("recognition_tempo", result)
-            self.assertEqual(3, len(result["recognition_trials"]))
+            self.assertEqual([1., 1.1, 1.3, 1.2, 1.05, .8],
+                             [trial["tempo"] for trial in result["recognition_trials"]])
 
 
 if __name__ == "__main__":
