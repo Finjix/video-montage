@@ -20,30 +20,26 @@
 
 新自主任务还执行[Codex 台词审校](references/autonomous/speech-review.md)：保留原始 ASR，AI 核实完整原片语境后单独保存修正台词和逐词时间，再规划剪辑。候选及底片实际渲染镜头都须有绑定音频的审校记录，识别差异不再要求通过反复模型重试消除；有据修正和技术检查通过后才进入字幕包装。现有 v2 自主任务可在返修后、规划前启用，历史字幕重烧保留已绑定契约。
 
+新任务使用[固定文字库](references/autonomous/text-library.md)，初始收录游戏名“无尽冬日”和明星名“吴樾、林子聪、许君聪”。编辑 `assets/text-library.json` 可增加游戏名、人名及常用词。AI结合实际原片语境确认词条后统一台词和字幕写法，保留原始识别结果；字幕完整保留固定词。每个任务绑定独立词库快照，更新只影响后续新任务，旧任务及重烧沿用原契约或原快照。
+
 用户明确允许为满足数量进行合理复用时，将实际授权绑定到工作单和计划，按[整批审核的合理复用规则](references/autonomous/batch-review.md)适度放宽复用上限，同时避免大量重复。整条复制和仅靠字幕、字体或BGM变化凑数仍被拒绝；未授权的任务保留原有严格上限。
 
-## 安装
+## 技能包结构与使用位置
 
-项目根目录和安装后的技能目录使用相同的组织结构：
+ZIP 采用 OpenAI 技能包的单一顶层目录结构，目录名与 `SKILL.md` 中的 `name` 一致：
 
 ```text
 video-montage/
-├── SKILL.md                 # 唯一技能入口
+├── SKILL.md                 # 唯一技能入口，包含 name 和 description
 ├── agents/openai.yaml       # 技能元数据
 ├── scripts/                 # 工作流脚本与运行校验
 ├── references/              # 工作流说明、审核合同与配置模板
 └── assets/                  # 字体、Python、FFmpeg 和模型等运行资源
 ```
 
-源包额外保留 `docs/`、`tools/` 和安装/卸载/打包 CMD，供维护与分发使用；这些文件不进入 Codex 技能目录。
+在 64 位 Windows 上，将 ZIP 中的 `video-montage/` 完整解压到 Codex 技能目录 `%CODEX_HOME%\skills\`；未设置 `CODEX_HOME` 时使用 `%USERPROFILE%\.codex\skills\`。最终入口为 `skills/video-montage/SKILL.md`，无需运行安装脚本。解压后重新打开 Codex。
 
-在 64 位 Windows 上完整解压项目，双击 `install.cmd`。安装器先检查随包依赖并在源包中运行发布回归，再复制必要文件到临时安装副本，检查其运行环境和执行器预检；通过后安装到 `%CODEX_HOME%\skills\video-montage`（未设置 `CODEX_HOME` 时为 `%USERPROFILE%\.codex\skills\video-montage`）。安装目录仅保留技能入口与元数据、工作流说明、组件脚本及所需合同/素材、随包依赖，以及运行环境和技能校验脚本；不安装 `docs/`、Git 文件、根目录 README、CMD 脚本、测试、任务记录或发布工具。重新安装会替换本项目已有安装，清除上次安装中的多余文件。完成或失败后会显示结果并等待按键；脚本调用可加 `-NoPause`。
-
-如果检测到 `%USERPROFILE%\video-montage` 中已有本项目安装，安装器会清理该目录及其中的全部文件，并移除其技能连接。安装后彻底退出并重新打开 Codex。
-
-只检查源包而不改动安装目录：`install.cmd -PreflightOnly`。
-
-卸载：从源包运行 `uninstall.cmd`，删除 Codex 技能目录中的 `video-montage` 安装；安装目录不再包含 CMD 脚本。双击运行时会显示结果并等待按键，命令返回实际结果。自动化调用可使用 `uninstall.cmd -NoPause`。
+源码目录额外保留 `README.md`、`docs/`、`tools/` 和 `package.cmd` 供维护与打包使用；这些文件不进入技能 ZIP。包内不含 Git 文件、项目测试、任务记录、缓存或已有发布包。
 
 ## 使用
 
@@ -81,7 +77,9 @@ video-montage/
 
 ## 打包分发
 
-运行 `package.cmd`，在项目的 `release/` 目录生成 `video-montage-v261010.zip`，解压后顶层文件夹为 `video-montage-v261010`。可传入压缩包文件名版本，例如 `package.cmd v261011` 会生成 `release/video-montage-v261011.zip`，但包内顶层文件夹仍按当前项目版本命名。完成或失败后会显示结果并等待按键；脚本调用可加 `-NoPause`。
+运行 `package.cmd`，在项目的 `release/` 目录生成 `video-montage-v261010.zip`（默认版本读取 `SKILL.md`）。可传入压缩包文件名版本，例如 `package.cmd v261011` 会生成 `release/video-montage-v261011.zip`。无论文件名版本如何，包内顶层目录始终为 `video-montage/`，其中仅有一个 `SKILL.md`，保留完整运行依赖。打包前检查技能入口及随包运行环境。完成或失败后显示结果并等待按键；脚本调用可加 `-NoPause`。
+
+目录布局依据 [OpenAI Skills 官方文档](https://developers.openai.com/api/docs/guides/tools-skills)，用于内部完整技能分发，不限制包大小或文件数量。
 
 
 所有新任务的交付目录放在项目 `work/`，时间戳使用北京时间（`YYYYMMDD_HHMMSS`），同秒重名拒绝覆盖：

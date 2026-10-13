@@ -11,6 +11,7 @@ import re
 from PIL import ImageFont
 
 import subtitle_fonts
+import text_library
 
 FINAL_SPEED = 1.2
 MIN_READ_MS = 800
@@ -111,7 +112,8 @@ def _shot_stream(shot: dict):
     return "".join(letters), times, spaces, punctuation, word_edges
 
 
-def split_shot(shot: dict, *, names: tuple[str, ...] = GAME_NAMES, font: str | None = None) -> list[dict]:
+def split_shot(shot: dict, *, names: tuple[str, ...] = GAME_NAMES, font: str | None = None,
+               protected_terms: tuple[str, ...] = ()) -> list[dict]:
     text, times, spaces, punctuation, word_edges = _shot_stream(shot)
     if not text:
         return []
@@ -126,6 +128,9 @@ def split_shot(shot: dict, *, names: tuple[str, ...] = GAME_NAMES, font: str | N
     # Genuine punctuation remains available even when a phrase dictionary match
     # accidentally spans two utterances.
     forbidden.difference_update(punctuation)
+    for phrase in protected_terms:
+        for match in re.finditer(re.escape(phrase), text):
+            forbidden.update(range(match.start() + 1, match.end()))
     heads = {m.start() for phrase in CLAUSE_HEADS for m in re.finditer(re.escape(phrase), text)}
     strong = sorted({0, len(text), *(i for i, kind in punctuation.items() if kind == "strong")})
 
@@ -171,13 +176,16 @@ def split_shot(shot: dict, *, names: tuple[str, ...] = GAME_NAMES, font: str | N
 
 
 def caption_rows(asr: dict, *, names: tuple[str, ...] = GAME_NAMES, font: str | None = None) -> list[dict]:
+    protected = text_library.protected_terms(asr.get("text_library"))
     observations = asr.get("shot_observations") or [{"output_in_frame": 0, "asr": asr}]
     if asr.get("review_basis") == "codex-speech-review/v1":
         if any(not isinstance(shot.get("reviewed_asr"), dict) for shot in observations):
             raise ValueError("reviewed caption timing requires every shot's reviewed speech")
         # Keep original recognition in QC; captions use the approved text/times.
         observations = [{**shot, "asr": shot["reviewed_asr"]} for shot in observations]
-    return [row for shot in observations for row in split_shot(shot, names=names, font=font)]
+    result = [row for shot in observations for row in split_shot(shot, names=names, font=font, protected_terms=protected)]
+    text_library.require_complete_terms(result, protected, lambda text: "".join(TOKEN.findall(text)))
+    return result
 
 
 def reading_issues(cues: list[dict], *, speed: float = FINAL_SPEED) -> list[dict]:

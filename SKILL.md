@@ -24,6 +24,11 @@ containing this file in both the source project and the installed skill. Resolve
   keep raw ASR immutable and separately bind reviewed text and word times to
   actual source audio/context. Correct verified errors, omissions and hallucinations
   with individual reasons and evidence; never replace real speech with ad copy.
+  For jobs with `text_library`, read [fixed text library](references/autonomous/text-library.md).
+  Use the task snapshot for canonical game/person/term spellings, repeat its reference
+  in the plan, and bind its hash in source/candidate/clean speech reviews. Corrections
+  affecting these terms cite their IDs and actual audio ranges. Preserve raw ASR and
+  keep fixed words complete in subtitles; the library does not establish spoken content.
   Plan from reviewed native source ranges. Review each candidate in approve-plan;
   after clean-qc, run clean-speech-review for every actual rendered shot before
   subtitles or packaging. Do not repeatedly retry ASR merely to match expected

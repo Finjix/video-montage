@@ -12,7 +12,7 @@ if not exist "%ROOT%assets\dependencies\python\python.exe" (
   )
   exit /b 2
 )
-echo Packaging started. Large model files may take several minutes.
+echo Packaging OpenAI skill ZIP. Bundled model files may take several minutes.
 "%ROOT%assets\dependencies\python\python.exe" -X utf8 -B "%ROOT%tools\package_release.py" %*
 set "EXIT_CODE=%errorlevel%"
 if "%EXIT_CODE%"=="0" (

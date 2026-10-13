@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import difflib
 import math
+import re
 
 POLICY = "codex-speech-review/v1"
 SCHEMA = "video-montage-codex-speech-review/v1"
@@ -58,8 +59,8 @@ def valid_time(start, end, duration):
             and math.isfinite(start) and math.isfinite(end) and 0 <= start < end <= duration + .001)
 
 
-def context(a, index, asset_ref):
-    """Only actual source observations/reviews and verified visible copy are evidence."""
+def context(a, index, asset_ref, library_ref=None):
+    """Actual source observations/reviews and copy, plus optional fixed spellings."""
     texts = {}
     for row in index["sources"]:
         raw = a.read(a.require_ref(row["asr"], "speech context ASR"))
@@ -71,6 +72,9 @@ def context(a, index, asset_ref):
     for row in copy.get("assets", []):
         a.require_ref(row, "speech context copy asset")
         texts[("asset_copy", row["sha256"])] = a.normalized(row.get("text", ""))
+    if library_ref is not None:
+        library = a.text_library.load(library_ref)
+        texts[("text_library", library_ref["sha256"])] = {row["id"]: row["text"] for row in library["entries"]}
     return texts
 
 
@@ -86,6 +90,7 @@ def validate(a, finding, observation, audio_ref, duration, texts, *, expected=No
     if expected is not None and a.normalized(reviewed["text"]) != a.normalized(expected):
         raise ValueError("reviewed speech differs from source-bound plan; repair the plan")
     required = changes(observation["text"], reviewed["text"], a.normalized)
+    libraries = {digest: entries for (kind, digest), entries in texts.items() if kind == "text_library"}
     supplied = finding.get("corrections", [])
     if not isinstance(supplied, list) or len(supplied) != len(required):
         raise ValueError("every ASR change needs an individual correction record")
@@ -104,7 +109,23 @@ def validate(a, finding, observation, audio_ref, duration, texts, *, expected=No
         evidence = actual.get("evidence")
         if not isinstance(evidence, list) or not evidence:
             raise ValueError("ASR correction needs hash-bound source/context/copy evidence")
+        affected, cited = set(), set()
+        reviewed_text = a.normalized(reviewed["text"])
+        for digest, entries in libraries.items():
+            for identity, canonical in entries.items():
+                for match in re.finditer(re.escape(a.normalized(canonical)), reviewed_text):
+                    left, right = change["after_start"], change["after_end"]
+                    if (left < match.end() and right > match.start()) or (left == right and match.start() < left < match.end()):
+                        affected.add((digest, identity))
         for item in evidence:
+            if isinstance(item, dict) and item.get("kind") == "text_library":
+                digest, identity = item.get("sha256"), item.get("term_id")
+                if (not isinstance(digest, str) or not isinstance(identity, str)
+                        or (digest, identity) not in affected
+                        or item.get("text") != libraries.get(digest, {}).get(identity)):
+                    raise ValueError("text library correction term/hash/text or reviewed span invalid")
+                cited.add((digest, identity))
+                continue
             if isinstance(item, dict) and item.get("kind") == "source_audio":
                 if (item.get("sha256") != audio_ref["sha256"] or item.get("start_ms") != start or item.get("end_ms") != end):
                     raise ValueError("correction source-audio hash/range changed")
@@ -112,6 +133,10 @@ def validate(a, finding, observation, audio_ref, duration, texts, *, expected=No
             quote = a.normalized(item.get("text", "")) if isinstance(item, dict) else ""
             if not quote or quote not in texts.get((item.get("kind"), item.get("sha256")), ""):
                 raise ValueError("ASR correction evidence changed, missing or invented")
+        if affected - cited:
+            raise ValueError("fixed spelling correction needs its text library term reference")
+        if cited and not any(isinstance(item, dict) and item.get("kind") == "source_audio" for item in evidence):
+            raise ValueError("text library spelling alone cannot prove speech; bound source-audio evidence required")
     return reviewed
 
 
@@ -125,7 +150,9 @@ def source_asr(a, row):
     if (artifact.get("policy") != POLICY or artifact.get("source") != row["source"]
             or artifact.get("raw_asr") != row["asr"] or artifact.get("video") != row["video"]):
         raise ValueError("reviewed source speech provenance changed")
-    header(review, "source", artifact["evidence"], artifact["asset_copy"])
+    library_ref = artifact.get("text_library")
+    a.text_library.require_binding(library_ref, artifact, evidence, row)
+    header(review, "source", artifact["evidence"], artifact["asset_copy"], library_ref)
     if evidence.get("policy") != POLICY or evidence.get("asset_copy") != artifact["asset_copy"]:
         raise ValueError("source speech evidence policy/copy changed")
     observations = {r["source"]["sha256"]: r for r in evidence["sources"]}
@@ -140,17 +167,23 @@ def source_asr(a, row):
     index = {"sources": [{"source": r["source"], "asr": r["asr"]} for r in evidence["sources"]]}
     result = validate(a, findings[row["source"]["sha256"]], raw.get("asr", raw), obs["audio"],
                       row["video"]["frames"] * row["video"]["fps_den"] / row["video"]["fps_num"],
-                      context(a, index, artifact["asset_copy"]), allow_empty=True)
+                      context(a, index, artifact["asset_copy"], library_ref), allow_empty=True)
     if result != artifact.get("asr"):
         raise ValueError("compiled source speech differs from its reviewed text/times")
     return result
 
 
-def header(review, stage, evidence_ref, asset_ref):
+def header(review, stage, evidence_ref, asset_ref, library_ref=None):
     if (review.get("schema") != SCHEMA or review.get("reviewer_role") != "codex"
             or review.get("stage") != stage or review.get("evidence_sha256") != evidence_ref["sha256"]
             or review.get("asset_copy_sha256") != asset_ref["sha256"]):
         raise ValueError("speech review stage/evidence/copy binding invalid")
+    library_header(review, library_ref)
+
+
+def library_header(review, library_ref):
+    if review.get("text_library_sha256") != (library_ref["sha256"] if library_ref is not None else None):
+        raise ValueError("speech review text library hash binding invalid")
 
 
 def range_text(a, asr, segment):

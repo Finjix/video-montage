@@ -12,10 +12,13 @@ import zipfile
 from pathlib import Path
 from typing import Callable
 
+import yaml
+
 
 ROOT = Path(__file__).resolve().parent.parent
-DIRS = ("agents", "scripts", "references", "assets", "docs", "tools")
-FILES = ("SKILL.md", "README.md", "install.cmd", "uninstall.cmd", "package.cmd")
+SKILL_NAME = "video-montage"
+DIRS = ("agents", "scripts", "references", "assets")
+FILES = ("SKILL.md",)
 SKIP_DIRS = {".git", ".manifests", ".runtime", ".pytest_cache", "__pycache__", "artifacts", "records", "results", "output", "outputs", "work", "cache", "test"}
 SKIP_FILES = {"Thumbs.db", ".DS_Store"}
 
@@ -23,10 +26,28 @@ SKIP_FILES = {"Thumbs.db", ".DS_Store"}
 def release_version(root: Path) -> str:
     skill = root / "SKILL.md"
     text = skill.read_text(encoding="utf-8-sig")
-    match = re.search(r'^  version: "(v\d{6})"$', text, flags=re.MULTILINE)
+    match = re.match(r"\A---\r?\n(.*?)\r?\n---(?:\r?\n|\Z)", text, re.DOTALL)
     if not match:
+        raise RuntimeError(f"Missing YAML frontmatter: {skill}")
+    try:
+        metadata = yaml.safe_load(match.group(1))
+    except yaml.YAMLError as exc:
+        raise RuntimeError(f"Invalid YAML frontmatter: {skill}") from exc
+    if not isinstance(metadata, dict) or metadata.get("name") != SKILL_NAME:
+        raise RuntimeError(f"Skill name must be {SKILL_NAME}: {skill}")
+    description = metadata.get("description")
+    if not isinstance(description, str) or not description.strip() or len(description) > 1024:
+        raise RuntimeError(f"Invalid skill description: {skill}")
+    details = metadata.get("metadata")
+    version = details.get("version") if isinstance(details, dict) else None
+    if not isinstance(version, str) or not re.fullmatch(r"v\d{6}", version):
         raise RuntimeError(f"Cannot read release version from {skill}")
-    return match.group(1)
+    return version
+
+
+def validate_archive_version(version: str) -> None:
+    if not re.fullmatch(r"v\d{6}", version):
+        raise ValueError("Archive version must look like v260929")
 
 
 def package_files(root: Path) -> list[Path]:
@@ -36,15 +57,16 @@ def package_files(root: Path) -> list[Path]:
         if not path.is_file() or path.is_symlink():
             raise RuntimeError(f"Missing or linked release file: {path}")
         files.append(path)
-    for name in DIRS:
-        directory = root / name
+    for directory_name in DIRS:
+        directory = root / directory_name
         if not directory.is_dir() or directory.is_symlink() or directory.is_junction():
             raise RuntimeError(f"Missing or linked release directory: {directory}")
         for current, folders, names in os.walk(directory, followlinks=False):
             current_path = Path(current)
             kept = []
             for folder in sorted(folders):
-                if folder in SKIP_DIRS or folder.startswith(".cache"):
+                if (folder in SKIP_DIRS or folder.startswith(".cache")
+                        or (directory_name in {"scripts", "references"} and folder == "tests")):
                     continue
                 path = current_path / folder
                 if path.is_symlink() or path.is_junction():
@@ -58,6 +80,9 @@ def package_files(root: Path) -> list[Path]:
                 if path.is_symlink():
                     raise RuntimeError(f"Linked file in release: {path}")
                 files.append(path)
+    manifests = [path for path in files if path.name.casefold() == "skill.md"]
+    if manifests != [root / "SKILL.md"]:
+        raise RuntimeError("A skill ZIP must contain exactly one SKILL.md at the skill root")
     return sorted(files, key=lambda path: path.relative_to(root).as_posix())
 
 
@@ -66,8 +91,7 @@ def build_archive(root: Path, archive_version: str | None = None,
     root = root.resolve()
     project_version = release_version(root)
     archive_version = archive_version or project_version
-    if not re.fullmatch(r"v\d{6}", archive_version):
-        raise ValueError("Archive version must look like v260929")
+    validate_archive_version(archive_version)
     if progress:
         progress("正在扫描文件...")
     entries = package_files(root)
@@ -75,7 +99,7 @@ def build_archive(root: Path, archive_version: str | None = None,
     release_dir.mkdir(exist_ok=True)
     output = release_dir / f"video-montage-{archive_version}.zip"
     temporary = release_dir / f".video-montage-{archive_version}.{uuid.uuid4().hex}.zip"
-    prefix = f"video-montage-{project_version}"
+    prefix = SKILL_NAME
     state = {"completed": 0, "current": ""}
     stopped = threading.Event()
     started = time.monotonic()
@@ -106,21 +130,24 @@ def build_archive(root: Path, archive_version: str | None = None,
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Build a clean, portable video-montage ZIP.")
+    parser = argparse.ArgumentParser(description="Build a video-montage skill ZIP with the OpenAI folder layout.")
     parser.add_argument("archive_version", nargs="?", help="Optional ZIP filename version, such as v260929")
     parser.add_argument("-NoPause", "--NoPause", action="store_true")
     args = parser.parse_args()
+    if args.archive_version:
+        validate_archive_version(args.archive_version)
     def progress(message: str) -> None:
         print(f"[打包中] {message}", flush=True)
 
     progress("正在检查随包运行环境...")
+    runpy.run_path(str(ROOT / "scripts/validate_skill.py"))["validate"](ROOT)
     verify = runpy.run_path(str(ROOT / "scripts/verify_runtime.py"))["verify"]
     report = verify()
     if report["decision"] != "pass":
         raise RuntimeError(f"Runtime check failed: {report['failures']}")
     output, count = build_archive(ROOT, args.archive_version, progress=progress)
     print(f"Created: {output}")
-    print(f"Top-level folder: video-montage-{release_version(ROOT)}")
+    print(f"Top-level folder: {SKILL_NAME}")
     print(f"Files: {count}")
     return 0
 

@@ -164,6 +164,39 @@ class DeliveryLifecycleTests(unittest.TestCase):
         self.assertEqual(value["audio_cleanup_authorization"], value["reburn_inputs"]["audio_cleanup_authorization"])
         auto.require_audio_approval(value)
 
+    def test_text_library_snapshot_survives_packaged_compaction_and_reburn(self):
+        original_fixture = self.fixture
+        def library_fixture():
+            result = original_fixture()
+            job = result[0]
+            value = auto.state(job)
+            path = job / "config/text_library.json"
+            auto.write(path, auto.read(auto.ROOT / "assets/text-library.json"))
+            value["text_library"] = auto.ref(path)
+            for key in ("work_order", "plan", "source_index"):
+                target = Path(value[key]["path"])
+                document = auto.read(target)
+                document.update(auto.text_library_fields(value))
+                if key == "source_index":
+                    for row in document["sources"]:
+                        row.update(auto.text_library_fields(value))
+                auto.write(target, document)
+                value[key] = auto.ref(target)
+            auto.save(job, value, "clean_validated")
+            return result
+        with patch.object(self, "fixture", side_effect=library_fixture):
+            self.test_compacted_packaged_job_reburns_and_completes_with_fresh_reviews()
+        job = self.root / "work/自动化混剪_20261008_120000/临时文件"
+        value = auto.state(job)
+        self.assertTrue(value["compact_delivery"])
+        self.assertEqual(4, len(auto.TEXT_LIBRARY.load(value["text_library"])["entries"]))
+        self.assertEqual(value["text_library"], auto.read(Path(value["reburn_inputs"]["plan"]["path"]))["text_library"])
+        edited = self.root / "unspoken-name.txt"
+        edited.write_text("1\n00:00:00,100 --> 00:00:00,800\n口播吴樾\n", encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "spelling differs"):
+            auto.reburn(SimpleNamespace(job_dir=job, plan_id="P1", subtitle_txt=edited))
+        self.assertEqual("complete", auto.state(job)["phase"])
+
     def approve_subtitle(self, job):
         value = auto.state(job)
         draft = auto.read(Path(value["subtitle_draft"]["path"]))["results"][0]
@@ -265,7 +298,7 @@ class DeliveryLifecycleTests(unittest.TestCase):
         draft = job / "reports" / "subtitle_draft.json"
         value = auto.state(job)
         clean_row = auto.read(Path(value["clean_delivery"]["path"]))["results"][0]
-        auto.write(draft, {"results": [{"plan_id": "P1", "input_path": clean_row["output"]["path"],
+        auto.write(draft, {**auto.text_library_fields(value), "results": [{"plan_id": "P1", "input_path": clean_row["output"]["path"],
             "subtitle_txt_path": str(snapshot), "subtitle_txt_sha256": auto.sha(snapshot)}]})
         value["subtitle_draft"] = auto.ref(draft)
         auto.save(job, value, "subtitle_drafted")
