@@ -24,6 +24,7 @@ import tempfile
 from datetime import datetime, timezone, timedelta
 from fractions import Fraction
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 from PIL import Image, ImageDraw
@@ -54,6 +55,7 @@ CAST = EDITING.CAST
 BATCH = module("autonomous_batch_review", "scripts/autonomous/scripts/batch_review.py")
 AUDIO = module("autonomous_audio_cleanup", "scripts/semantic/scripts/audio_cleanup.py")
 BALANCE = module("autonomous_audio_balance", "scripts/semantic/scripts/audio_balance.py")
+SPEECH = module("autonomous_speech_review", "scripts/autonomous/scripts/speech_review.py")
 
 
 def read(path: Path) -> dict:
@@ -135,10 +137,37 @@ def normalized(text: str) -> str:
     return "".join(re.findall(r"[0-9A-Za-z\u4e00-\u9fff]+", text)).casefold()
 
 
+def speech_api():
+    return SimpleNamespace(read=read, require_ref=require_ref, normalized=normalized,
+                           character_times=character_times)
+
+
+def source_speech(row: dict) -> dict:
+    return SPEECH.source_asr(speech_api(), row)
+
+
+def require_speech_policy(value: dict, index: dict, plan: dict | None = None) -> None:
+    policy = value.get("speech_review_policy")
+    if policy not in {None, SPEECH.POLICY} or index.get("speech_review_policy") != policy:
+        raise ValueError("source speech review policy cannot be lost or changed")
+    if plan is not None and plan.get("speech_review_policy") != policy:
+        raise ValueError("plan speech review policy cannot be lost or changed")
+    if policy is None and any(row.get("reviewed_speech") for row in index["sources"]):
+        raise ValueError("reviewed source speech cannot be used without its bound policy")
+    if policy:
+        for row in index["sources"]:
+            if not row.get("reviewed_speech"):
+                raise ValueError("Codex source speech review required before planning")
+            if value.get("asset_copy") and read(require_ref(row["reviewed_speech"], "reviewed source speech")).get("asset_copy", {}).get("sha256") != value["asset_copy"]["sha256"]:
+                raise ValueError("source speech review asset-copy binding changed")
+            source_speech(row)
+
+
 def subtitle_spelling(text: str) -> str:
     """Canonical spelling of a reviewed colloquial ASR phrase, not fuzzy matching.
 
-    The raw source/clean/final ASR gates remain exact. Subtitle edits still need
+    Historical unreviewed ASR gates remain exact; new jobs review source speech
+    separately. Subtitle edits still need
     hash-bound source evidence and keep every character and timestamp accounted for.
     """
     return (normalized(text).replace("真呆劲", "真带劲")
@@ -388,6 +417,8 @@ def subtitle_change_supported(change: dict, asset_copy: dict, source_index: dict
     for source in source_index["sources"]:
         asr_path = require_ref(source["asr"], "source ASR")
         texts[("source_asr", sha(asr_path))] = normalized(read(asr_path)["asr"]["text"])
+        if source.get("reviewed_speech"):
+            texts[("source_speech", source["reviewed_speech"]["sha256"])] = normalized(source_speech(source)["text"])
     texts[("plan_speech", sha(Path(plan["path"]))) ] = normalized("".join(
         segment["text"] for output in read(Path(plan["path"]))["outputs"] for segment in output["segments"]))
     for item in evidence:
@@ -550,6 +581,9 @@ def state(job: Path, *, discarding_plan: bool = False) -> dict:
     if (order.get("audio_cleanup_policy") != value.get("audio_cleanup_policy")
             or value.get("audio_cleanup_policy") not in {None, AUDIO.POLICY}):
         raise ValueError("work-order audio cleanup policy changed or missing in state")
+    if (order.get("speech_review_policy") != value.get("speech_review_policy")
+            or value.get("speech_review_policy") not in {None, SPEECH.POLICY}):
+        raise ValueError("work-order speech review policy changed or missing in state")
     if not discarding_plan and value.get("plan") and read(require_ref(value["plan"], "audio cleanup plan policy")).get("audio_cleanup_policy") != value.get("audio_cleanup_policy"):
         raise ValueError("plan cannot lose its audio cleanup policy")
     if value.get("plan") and not discarding_plan:
@@ -558,6 +592,8 @@ def state(job: Path, *, discarding_plan: bool = False) -> dict:
             raise ValueError("plan cannot lose or downgrade its job planning policy")
         if plan.get("batch_review_policy") != value.get("batch_review_policy"):
             raise ValueError("whole-batch plan cannot lose or downgrade its job review policy")
+        if plan.get("speech_review_policy") != value.get("speech_review_policy"):
+            raise ValueError("plan cannot lose its speech review policy")
     return value
 
 
@@ -610,9 +646,10 @@ def repair(args) -> None:
     write(upgraded_order, {**order, "planning_policy": EDITING.POLICY, "batch_review_policy": BATCH.POLICY})
     value["work_order"] = ref(upgraded_order)
     value["batch_review_policy"] = BATCH.POLICY
+    value.pop("source_speech_evidence", None)
     for key in ("plan", "plan_evidence", "plan_review", "editing_context", "batch_diversity", "diversity_selection",
                 "clean_delivery", "clean_qc", "subtitle_draft", "subtitle_review", "packaging_delivery", "packaging_config",
-                "audio_cleanup_authorization"):
+                "audio_cleanup_authorization", "clean_speech_evidence"):
         value.pop(key, None)
     if value.pop("compact_delivery", False):
         for key in ("source_index", "asset_copy", "plan", "plan_evidence", "plan_review",
@@ -653,6 +690,8 @@ def init(args) -> None:
         raise ValueError("new jobs require semantic-batch-review/v2")
     if order.get("audio_cleanup_policy", AUDIO.POLICY) != AUDIO.POLICY:
         raise ValueError("new jobs require spoken-audio-cleanup/v1")
+    if order.get("speech_review_policy", SPEECH.POLICY) != SPEECH.POLICY:
+        raise ValueError("new jobs require codex-speech-review/v1")
     seen = set()
     for row in sources:
         path = Path(row["path"]).resolve()
@@ -688,7 +727,8 @@ def init(args) -> None:
     packager.ensure_delivery_layout(output)
     order_snapshot = job / "work_order.json"
     write(order_snapshot, {**order, "planning_policy": EDITING.POLICY, "batch_review_policy": BATCH.POLICY,
-                           "audio_cleanup_policy": AUDIO.POLICY, "text_pin_policy": TEXT_PIN_POLICY})
+                           "audio_cleanup_policy": AUDIO.POLICY, "text_pin_policy": TEXT_PIN_POLICY,
+                           "speech_review_policy": SPEECH.POLICY})
     save(job, {"schema": STATE_SCHEMA, "review_mode": "codex_asr_pcm", "work_order": ref(order_snapshot),
                "source_hashes": {str(Path(row["path"]).resolve()): sha(Path(row["path"])) for row in sources},
                "asset_root": str(asset), "output_root": str(output), "delivery_directory": str(output),
@@ -700,6 +740,7 @@ def init(args) -> None:
                "planning_policy": EDITING.POLICY,
                "batch_review_policy": BATCH.POLICY,
                "audio_cleanup_policy": AUDIO.POLICY,
+                "speech_review_policy": SPEECH.POLICY,
                **cast_fields,
                "max_repair_rounds": MAX_ROUNDS, "continue_until_complete": True}, "initialized")
     print(json.dumps({"job_dir": str(job), "delivery_directory": str(output)}, ensure_ascii=False))
@@ -734,12 +775,16 @@ def prepare(args) -> None:
             write(asr_path, {"schema": "video-montage-autonomous-asr/v260929", "source": ref(path),
                              "video": spec, "asr": transcribe(model, path)})
         result = read(asr_path)
-        if result.get("source", {}).get("sha256") != sha(path) or not result.get("asr", {}).get("segments"):
+        if (result.get("source", {}).get("sha256") != sha(path)
+                or not isinstance(result.get("asr", {}).get("text"), str)
+                or not isinstance(result.get("asr", {}).get("segments"), list)
+                or (not value.get("speech_review_policy") and not result["asr"]["segments"])):
             raise ValueError("source ASR invalid")
         source_rows.append({"source": ref(path), "asr": ref(asr_path), "video": spec})
     index_path = job / "evidence" / "source_index.json"
     BATCH.reuse_limits(order, value.get("batch_review_policy") or BATCH.LEGACY_POLICY)
     write(index_path, {"schema": "video-montage-autonomous-source-index/v260929", "sources": source_rows,
+                       **({"speech_review_policy": value["speech_review_policy"]} if value.get("speech_review_policy") else {}),
                        "asset_copy_sources": ref(asset_path),
                        **({"cast_policy": value["cast_policy"], "celebrities": CAST.registry(order)}
                           if value.get("cast_policy") else {}),
@@ -748,6 +793,7 @@ def prepare(args) -> None:
                        **({"batch_reuse_authorization": order["batch_reuse_authorization"]}
                           if "batch_reuse_authorization" in order else {})})
     value["source_index"] = ref(index_path)
+    value.pop("source_speech_evidence", None)
     save(job, value, "prepared")
 
 
@@ -772,12 +818,102 @@ def asset_copy(args) -> None:
     save(job, value, "copy_indexed")
 
 
+def source_speech_evidence(args) -> None:
+    job = args.job_dir.resolve(); value = state(job)
+    if value["phase"] not in {"prepared", "copy_indexed", "repair_required", "source_speech_evidenced"} or value.get("plan"):
+        raise ValueError("source speech evidence requires preparation before planning; repair first")
+    require_ref(value["asset_copy"], "verified asset copy")
+    index = read(require_ref(value["source_index"], "source index"))
+    if value.get("planning_policy") != EDITING.POLICY:
+        raise ValueError("source speech review requires current autonomous planning; legacy jobs remain unchanged")
+    if not value.get("speech_review_policy"):
+        order = read(require_ref(value["work_order"], "work order"))
+        path = job / "config" / f"speech_review_work_order_{value['repair_round'] + 1}.json"
+        write(path, {**order, "speech_review_policy": SPEECH.POLICY})
+        value.update(work_order=ref(path), speech_review_policy=SPEECH.POLICY)
+    index["speech_review_policy"] = SPEECH.POLICY
+    rows = []
+    for number, row in enumerate(index["sources"], 1):
+        source = require_ref(row["source"], "original speech source")
+        require_ref(row["asr"], "immutable source ASR")
+        target = job / "evidence" / "source_speech" / f"source_{number:03d}.wav"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        run([str(FFMPEG), "-v", "error", "-nostdin", "-i", str(source), "-vn", "-ac", "1", "-ar", "16000", "-y", str(target)])
+        rows.append({"source": row["source"], "asr": row["asr"], "video": row["video"], "audio": ref(target)})
+        row.pop("reviewed_speech", None)
+    target = job / "evidence" / f"source_speech_round_{value['repair_round'] + 1}.json"
+    write(target, {"schema": "video-montage-source-speech-evidence/v1", "policy": SPEECH.POLICY,
+                   "asset_copy": value["asset_copy"], "sources": rows})
+    index_path = job / "evidence" / "source_index.json"
+    write(index_path, index)
+    value.update(source_index=ref(index_path), source_speech_evidence=ref(target))
+    save(job, value, "source_speech_evidenced")
+    print(json.dumps({"evidence": value["source_speech_evidence"], "review_schema": SPEECH.SCHEMA}, ensure_ascii=False))
+
+
+def source_speech_review(args) -> None:
+    job = args.job_dir.resolve(); value = state(job)
+    if value["phase"] not in {"source_speech_evidenced", "repair_required"} or not value.get("source_speech_evidence") or value.get("plan"):
+        raise ValueError("source speech evidence required")
+    if value.get("speech_review_policy") != SPEECH.POLICY:
+        raise ValueError("source speech review policy required")
+    evidence = read(require_ref(value["source_speech_evidence"], "source speech evidence"))
+    index = read(require_ref(value["source_index"], "source index"))
+    require_ref(value["asset_copy"], "speech asset copy")
+    review = read(args.review)
+    SPEECH.header(review, "source", value["source_speech_evidence"], value["asset_copy"])
+    if evidence.get("asset_copy") != value["asset_copy"] or evidence.get("policy") != SPEECH.POLICY:
+        raise ValueError("source speech evidence policy/copy changed")
+    proposed = review.get("results", [])
+    findings = {r.get("source_sha256"): r for r in proposed}
+    expected = {r["source"]["sha256"] for r in index["sources"]}
+    if len(findings) != len(proposed) or set(findings) != expected:
+        raise ValueError("source speech review must cover every original exactly once")
+    observations = {r["source"]["sha256"]: r for r in evidence["sources"]}
+    if set(observations) != expected or len(observations) != len(evidence["sources"]):
+        raise ValueError("complete original-source speech evidence required")
+    texts = SPEECH.context(speech_api(), index, value["asset_copy"])
+    compiled = []
+    for row in index["sources"]:
+        identity = row["source"]["sha256"]; observation = observations[identity]
+        require_ref(row["source"], "reviewed original source")
+        if any(observation[k] != row[k] for k in ("source", "asr", "video")):
+            raise ValueError("source speech evidence source/ASR/frame bounds changed")
+        raw = read(require_ref(row["asr"], "immutable source ASR"))["asr"]
+        duration = row["video"]["frames"] * row["video"]["fps_den"] / row["video"]["fps_num"]
+        compiled.append(SPEECH.validate(speech_api(), findings[identity], raw, observation["audio"], duration, texts, allow_empty=True))
+    review_path = job / "reviews" / f"source_speech_{sha(args.review)}.json"
+    write(review_path, review)
+    for number, (row, asr) in enumerate(zip(index["sources"], compiled), 1):
+        target = job / "manifests" / "reviewed_speech" / f"source_{number:03d}_{sha(review_path)}.json"
+        write(target, {"policy": SPEECH.POLICY, "source": row["source"], "raw_asr": row["asr"], "video": row["video"],
+                       "evidence": value["source_speech_evidence"], "review": ref(review_path),
+                       "asset_copy": value["asset_copy"], "asr": asr})
+        row["reviewed_speech"] = ref(target)
+    index_path = job / "evidence" / "source_index.json"
+    write(index_path, index)
+    value["source_index"] = ref(index_path)
+    save(job, value, "copy_indexed")
+
+
 def check_plan(plan: dict, source_index: dict, count: int, policy: str | None = None,
                batch_policy: str | None = None) -> list[str]:
     errors = []
     if plan.get("schema") != PLAN_SCHEMA or len(plan.get("outputs", [])) != count:
         return ["plan schema or complete output scope"]
     source_map = {row["source"]["sha256"]: row for row in source_index["sources"]}
+    speech_policy = source_index.get("speech_review_policy")
+    if speech_policy not in {None, SPEECH.POLICY} or plan.get("speech_review_policy") != speech_policy:
+        errors.append("SPEECH_REVIEW_POLICY_BINDING_REQUIRED")
+    if speech_policy is None and any(row.get("reviewed_speech") for row in source_map.values()):
+        errors.append("SPEECH_REVIEW_POLICY_BINDING_REQUIRED")
+    reviewed_sources = {}
+    if speech_policy:
+        try:
+            require_speech_policy({"speech_review_policy": speech_policy}, source_index, plan)
+            reviewed_sources = {key: source_speech(row) for key, row in source_map.items()}
+        except (ValueError, KeyError, OSError, TypeError) as exc:
+            errors.append(f"SOURCE_SPEECH_REVIEW_REQUIRED:{exc}")
     cast_policy = source_index.get("cast_policy")
     if plan.get("cast_policy") != cast_policy or cast_policy not in {None, *CAST.SUPPORTED_POLICIES}:
         errors.append("CAST_POLICY_BINDING_REQUIRED")
@@ -843,6 +979,12 @@ def check_plan(plan: dict, source_index: dict, count: int, policy: str | None = 
                 errors.append(f"{pid}: source range beyond end")
             if not normalized(segment.get("text", "")):
                 errors.append(f"{pid}: empty exact speech")
+            if speech_policy and source["source"]["sha256"] in reviewed_sources:
+                try:
+                    if SPEECH.range_text(speech_api(), reviewed_sources[source["source"]["sha256"]], segment) != normalized(segment["text"]):
+                        errors.append(f"{pid}: speech differs from reviewed native source range")
+                except (ValueError, KeyError, TypeError, ZeroDivisionError) as exc:
+                    errors.append(f"{pid}: reviewed source speech range invalid: {exc}")
             if all(type(segment.get(key)) is int for key in ("source_in_frame", "source_out_frame_exclusive", "source_fps_num", "source_fps_den")) and segment["source_fps_num"] > 0 and segment["source_fps_den"] > 0:
                 candidate = {**segment, "source_in": segment["source_in_frame"] * segment["source_fps_den"] / segment["source_fps_num"],
                              "source_out": segment["source_out_frame_exclusive"] * segment["source_fps_den"] / segment["source_fps_num"]}
@@ -876,8 +1018,7 @@ def check_plan(plan: dict, source_index: dict, count: int, policy: str | None = 
             try:
                 transcripts = {}
                 for source in source_index["sources"]:
-                    transcript = read(require_ref(source["asr"], "complete spoken-turn source ASR"))
-                    transcripts[source["source"]["sha256"]] = normalized(transcript.get("asr", transcript)["text"])
+                    transcripts[source["source"]["sha256"]] = normalized(source_speech(source)["text"])
                 for source in plan.get("batch_analysis", {}).get("sources", []):
                     for turn in source.get("spoken_turns", []):
                         quote = normalized(turn.get("text", "")) if isinstance(turn, dict) else ""
@@ -1016,7 +1157,7 @@ def compile_audio_segments(value: dict, plan: dict, evidence: dict, review: dict
     if len(findings) != len(expected) or set(review_by_key) != expected or set(evidence_by_key) != expected:
         raise ValueError("audio cleanup review scope incomplete")
     index = read(require_ref(value["source_index"], "audio cleanup source index"))
-    source_asr = {r["source"]["sha256"]: read(require_ref(r["asr"], "audio cleanup source ASR"))["asr"] for r in index["sources"]}
+    source_asr = {r["source"]["sha256"]: source_speech(r) for r in index["sources"]}
     rows = []
     for output in plan["outputs"]:
         for i, segment in enumerate(output["segments"], 1):
@@ -1069,6 +1210,30 @@ def audio_render_check(value: dict, plan_id: str, rendered: dict) -> None:
         raise ValueError("render did not use the approved audio cleanup intervals")
 
 
+def require_candidate_speech(value: dict, evidence: dict, review: dict) -> None:
+    if not value.get("speech_review_policy"):
+        return
+    if evidence.get("speech_review_policy") != SPEECH.POLICY or review.get("speech_review_policy") != SPEECH.POLICY:
+        raise ValueError("candidate speech review policy binding required")
+    index = read(require_ref(value["source_index"], "reviewed speech sources"))
+    plan = read(require_ref(value["plan"], "reviewed speech plan"))
+    require_speech_policy(value, index, plan)
+    texts = SPEECH.context(speech_api(), index, value["asset_copy"])
+    findings = {(r.get("plan_id"), r.get("segment_index")): r for r in review.get("segments", [])}
+    segments = {(o["plan_id"], i): s for o in plan["outputs"] for i, s in enumerate(o["segments"], 1)}
+    rows = {(r["plan_id"], r["segment_index"]): r for r in evidence["results"]}
+    if (set(rows) != set(segments) or set(findings) != set(segments)
+            or len(findings) != len(review.get("segments", [])) or len(rows) != len(evidence["results"])):
+        raise ValueError("complete candidate speech reviews required")
+    for key, segment in segments.items():
+        row = rows[key]
+        if row.get("expected_text") != segment["text"] or row.get("source_text_match") is not True:
+            raise ValueError("candidate speech is not bound to reviewed source range")
+        duration = (segment["source_out_frame_exclusive"] - segment["source_in_frame"]) * segment["source_fps_den"] / segment["source_fps_num"]
+        SPEECH.validate(speech_api(), findings[key].get("speech_review"), row["asr"], row["pcm"], duration,
+                        texts, expected=segment["text"])
+
+
 def require_editing_approval(value: dict) -> None:
     """Recheck editorial approvals before rendering and publishing new edits."""
     require_audio_approval(value)
@@ -1076,6 +1241,7 @@ def require_editing_approval(value: dict) -> None:
         return
     plan_path = require_ref(value["plan"], "semantic-first plan")
     plan = read(plan_path)
+    require_speech_policy(value, read(require_ref(value["source_index"], "source speech index")), plan)
     require_cast_binding(value, plan)
     errors = check_plan(plan, read(require_ref(value["source_index"], "source index")),
                         int(read(require_ref(value["work_order"], "work order"))["requested_outputs"]), value.get("planning_policy"),
@@ -1105,6 +1271,7 @@ def require_editing_approval(value: dict) -> None:
         raise ValueError("semantic-first editorial approval binding invalid")
     errors = EDITING.plan_review_errors(plan, evidence, review)
     errors.extend(batch_review_errors(value, evidence, review))
+    require_candidate_speech(value, evidence, review)
     if errors:
         raise ValueError("semantic-first editorial approval rejected: " + "; ".join(errors))
     segments = {(output["plan_id"], index): segment for output in plan["outputs"]
@@ -1113,7 +1280,7 @@ def require_editing_approval(value: dict) -> None:
     verified_visuals = set()
     for row in evidence["results"]:
         segment = segments[(row["plan_id"], row["segment_index"])]
-        if row.get("decision") != "pass":
+        if row.get("decision") not in ({"pass", "pending_speech_review"} if value.get("speech_review_policy") else {"pass"}):
             errors.append("candidate evidence failed")
         source_path = str(Path(segment["source_path"]).resolve())
         if source_path not in verified_sources:
@@ -1283,6 +1450,7 @@ def plan_evidence(args) -> None:
     source_index = read(require_ref(value["source_index"], "source index"))
     order = read(require_ref(value["work_order"], "work order"))
     plan = read(args.plan)
+    require_speech_policy(value, source_index, plan)
     for key in ("plan_review", "final_review", "completion", "clean_delivery", "clean_qc", "subtitle_review",
                 "packaging_delivery", "final_evidence", "editing_context", "batch_diversity", "diversity_selection",
                 "audio_cleanup_authorization"):
@@ -1299,11 +1467,11 @@ def plan_evidence(args) -> None:
         fail_round(job, value, "plan", errors)
     model = load_model()
     asset_copy_value = read(require_ref(value["asset_copy"], "asset copy")) if value.get("asset_copy") else None
-    source_asr = {row["source"]["sha256"]: normalized(read(require_ref(row["asr"], "source ASR"))["asr"]["text"])
+    source_asr = {row["source"]["sha256"]: normalized(source_speech(row)["text"])
                   for row in source_index["sources"]}
     result = []
     candidate_cache = {}
-    source_asr_values = {row["source"]["sha256"]: read(require_ref(row["asr"], "source ASR"))["asr"]
+    source_asr_values = {row["source"]["sha256"]: source_speech(row)
                          for row in source_index["sources"]} if value.get("audio_cleanup_policy") else {}
     for output in plan["outputs"]:
         pid = output["plan_id"]
@@ -1327,7 +1495,8 @@ def plan_evidence(args) -> None:
                  "-vn", "-ac", "1", "-ar", "16000", "-y", str(target)])
             samples = pcm(target)
             metrics = audio_metrics(samples)
-            asr = transcribe(model, target, segment["text"], asset_copy_value, value.get("planning_policy"))
+            asr = (transcribe(model, target) if value.get("speech_review_policy") else
+                   transcribe(model, target, segment["text"], asset_copy_value, value.get("planning_policy")))
             cleanup_evidence = AUDIO.analyze(FFMPEG, source, segment, source_asr_values[segment["source_sha256"]],
                                              target.parent / "audio_cleanup") if value.get("audio_cleanup_policy") else None
             expected = normalized(segment["text"])
@@ -1358,7 +1527,8 @@ def plan_evidence(args) -> None:
                    "clean_gap": clean_gap, "visual_boundary": visual_boundary,
                    **({"audio_cleanup": cleanup_evidence} if cleanup_evidence else {}),
                    "audio_signal_pending_cleanup_review": bool(cleanup_evidence),
-                   "decision": "pass" if text_match and source_text_match and visual_boundary["decision"] == "pass"
+                   "decision": ("pending_speech_review" if value.get("speech_review_policy") else "pass")
+                   if (text_match or value.get("speech_review_policy")) and source_text_match and visual_boundary["decision"] == "pass"
                    and (cleanup_evidence is not None or (clean_gap and metrics["clipped_samples"] == 0 and transient_count == 0)) else "reject"}
             result.append(row)
             candidate_cache[cache_key] = row
@@ -1366,11 +1536,13 @@ def plan_evidence(args) -> None:
     write(evidence_path, {"schema": "video-montage-plan-evidence/v260929", "plan": ref(args.plan),
                           **({"audio_cleanup_policy": AUDIO.POLICY} if value.get("audio_cleanup_policy") else {}),
                           "source_index": value["source_index"], "planning_policy": value.get("planning_policy"),
+                           **({"speech_review_policy": SPEECH.POLICY} if value.get("speech_review_policy") else {}),
                           "outputs": [EDITING.summary(output) for output in plan["outputs"]],
                           **batch_fields(value, plan, source_index),
                           "results": result})
     value["plan"] = ref(args.plan); value["plan_evidence"] = ref(evidence_path)
-    failures = [f"{row['plan_id']}:{row['segment_index']}:ASR/PCM/visual boundary inconclusive" for row in result if row["decision"] != "pass"]
+    failures = [f"{row['plan_id']}:{row['segment_index']}:ASR/PCM/visual boundary inconclusive" for row in result
+                if row["decision"] not in {"pass", "pending_speech_review"}]
     if failures:
         fail_round(job, value, "candidate_evidence", failures)
     save(job, value, "plan_evidenced")
@@ -1419,7 +1591,10 @@ def approve_plan(args) -> None:
                 fail_round(job, value, "codex_plan_review", ["missing first/last frame sequence review"])
     asset_copy_value = read(require_ref(value["asset_copy"], "asset copy")) if value.get("asset_copy") else {}
     source_index = read(require_ref(value["source_index"], "source index"))
+    require_candidate_speech(value, evidence, review)
     for row in evidence["results"]:
+        if value.get("speech_review_policy"):
+            continue  # The explicit, audio-bound review above replaces ASR-equality approval.
         if row["asr_exact"]:
             continue
         correction = finding_by_key[(row["plan_id"], row["segment_index"])].get("asr_correction")
@@ -1488,7 +1663,8 @@ def render_clean(args) -> None:
 
 
 def rendered_shot_asr(model, output: Path, rendered: dict, planned: dict,
-                      copy_value: dict, directory: Path, planning_policy: str | None = None) -> dict:
+                      copy_value: dict, directory: Path, planning_policy: str | None = None,
+                      speech_review_policy: str | None = None) -> dict:
     """Recheck clean speech per rendered shot and anchor word times to that shot.
 
     Whole-video ASR may assign a new shot's first word to the previous shot's
@@ -1507,11 +1683,12 @@ def rendered_shot_asr(model, output: Path, rendered: dict, planned: dict,
         run([str(FFMPEG), "-v", "error", "-nostdin", "-i", str(output),
              "-af", f"atrim=start={cursor / 60:.9f}:end={end / 60:.9f},asetpts=PTS-STARTPTS",
              "-vn", "-ac", "1", "-ar", "16000", "-y", str(target)])
-        observed = transcribe(model, target, original["text"], copy_value, planning_policy)
+        observed = (transcribe(model, target) if speech_review_policy else
+                    transcribe(model, target, original["text"], copy_value, planning_policy))
         observations.append({"shot_index": index + 1, "audio": ref(target), "asr": observed,
                              "output_in_frame": cursor, "output_out_frame_exclusive": end,
                              "expected_text": original["text"]})
-        if (normalized(observed["text"]) != normalized(original["text"])
+        if (not speech_review_policy and normalized(observed["text"]) != normalized(original["text"])
                 and not context_corroborates_asr(original["text"], observed["text"], copy_value, planning_policy)):
             raise ValueError(f"shot {index + 1}: rendered speech differs from source plan")
         texts.append(observed["text"])
@@ -1529,10 +1706,69 @@ def rendered_shot_asr(model, output: Path, rendered: dict, planned: dict,
             "timing_basis": "verified_rendered_shot_asr", "output": ref(output)}
 
 
+def reviewed_shot_timing(observations: list[dict], findings: list[dict], texts: dict) -> dict:
+    by_id = {r.get("shot_index"): r for r in findings}
+    if len(by_id) != len(findings) or set(by_id) != {r["shot_index"] for r in observations}:
+        raise ValueError("speech review must cover every rendered shot exactly once")
+    segments = []; reviewed_observations = []; cursor = 0
+    for row in observations:
+        if row["output_in_frame"] != cursor or row["output_out_frame_exclusive"] <= cursor:
+            raise ValueError("speech observations do not cover consecutive output frames")
+        duration = (row["output_out_frame_exclusive"] - cursor) / 60
+        asr = SPEECH.validate(speech_api(), by_id[row["shot_index"]], row["asr"], row["audio"], duration,
+                              texts, expected=row["expected_text"])
+        reviewed_observations.append({**row, "reviewed_asr": asr})
+        for segment in asr["segments"]:
+            shifted = {**segment, "start": segment["start"] + cursor / 60, "end": segment["end"] + cursor / 60,
+                       "words": [{**w, "start": w["start"] + cursor / 60, "end": w["end"] + cursor / 60}
+                                 for w in segment["words"]]}
+            segments.append(shifted)
+        cursor = row["output_out_frame_exclusive"]
+    return {"text": " ".join(r["reviewed_asr"]["text"] for r in reviewed_observations),
+            "segments": segments, "shot_observations": reviewed_observations}
+
+
+def verify_reviewed_shots(timing: dict, output_ref: dict, planned: dict, rendered: dict) -> bool:
+    context = timing.get("review_context", {})
+    evidence = read(require_ref(context.get("evidence"), "clean speech review evidence"))
+    review = read(require_ref(context.get("review"), "clean speech review"))
+    SPEECH.header(review, "clean", context["evidence"], evidence["asset_copy"])
+    if evidence.get("policy") != SPEECH.POLICY:
+        raise ValueError("clean speech review evidence policy changed")
+    index = read(require_ref(evidence["source_index"], "clean speech sources"))
+    plan = read(require_ref(evidence["plan"], "clean speech plan"))
+    require_speech_policy({"speech_review_policy": SPEECH.POLICY}, index, plan)
+    if next((o for o in plan["outputs"] if o["plan_id"] == planned["plan_id"]), None) != planned:
+        raise ValueError("clean speech review describes another plan")
+    rows = {r["plan_id"]: r for r in evidence["results"]}
+    findings = {r["plan_id"]: r for r in review.get("results", [])}
+    if len(findings) != len(review.get("results", [])) or set(findings) != set(rows):
+        raise ValueError("complete clean speech review scope required")
+    row = rows[planned["plan_id"]]
+    if row["output_sha256"] != output_ref["sha256"] or row["actual_output_frames"] != rendered["actual_output_frames"]:
+        raise ValueError("clean speech review output hash/frame range changed")
+    result = reviewed_shot_timing(row["observations"], findings[planned["plan_id"]].get("shots", []),
+                                 SPEECH.context(speech_api(), index, evidence["asset_copy"]))
+    originals = rendered_plan_segments(planned, rendered)
+    observations = result["shot_observations"]
+    if len(observations) != len(originals):
+        return False
+    cursor = 0
+    for number, (shot, original, observed) in enumerate(zip(rendered["segments"], originals, observations), 1):
+        end = cursor + shot["expected_output_frames"]
+        if (observed["shot_index"] != number or observed["expected_text"] != original["text"]
+                or observed["output_in_frame"] != cursor or observed["output_out_frame_exclusive"] != end):
+            return False
+        cursor = end
+    return cursor == rendered["actual_output_frames"] and all(timing.get(k) == v for k, v in result.items())
+
+
 def verified_shot_speech(timing: dict, output_ref: dict, planned: dict, rendered: dict, copy_value: dict,
                          planning_policy: str | None = None) -> bool:
     if timing.get("output") != output_ref or timing.get("timing_basis") != "verified_rendered_shot_asr":
         return False
+    if timing.get("review_basis") == SPEECH.POLICY:
+        return verify_reviewed_shots(timing, output_ref, planned, rendered)
     originals = rendered_plan_segments(planned, rendered)
     observations = timing.get("shot_observations", [])
     if len(observations) != len(originals):
@@ -1587,10 +1823,11 @@ def clean_qc(args) -> None:
         match = exact or context_corroborates_asr(row["expected_text"], asr["text"], copy_value, value.get("planning_policy"))
         timing_asr = rendered_shot_asr(model, output,
             read(require_ref(row["render_evidence"], "render evidence")), plan_by_id[row["plan_id"]],
-            copy_value, job / "evidence" / "clean_shot_asr" / row["plan_id"], value.get("planning_policy"))
-        shot_match = verified_shot_speech(timing_asr, row["output"], plan_by_id[row["plan_id"]],
-            read(require_ref(row["render_evidence"], "render evidence")), copy_value, value.get("planning_policy"))
-        if not shot_match or metrics["clipped_samples"] or any(cut["decision"] != "pass" for cut in cut_metrics):
+            copy_value, job / "evidence" / "clean_shot_asr" / row["plan_id"], value.get("planning_policy"), value.get("speech_review_policy"))
+        shot_match = (False if value.get("speech_review_policy") else
+            verified_shot_speech(timing_asr, row["output"], plan_by_id[row["plan_id"]],
+                read(require_ref(row["render_evidence"], "render evidence")), copy_value, value.get("planning_policy")))
+        if (not shot_match and not value.get("speech_review_policy")) or metrics["clipped_samples"] or any(cut["decision"] != "pass" for cut in cut_metrics):
             failures.append(f"{row['plan_id']}: clean ASR/clipping/cut PCM mismatch")
         rows.append({"plan_id": row["plan_id"], "output": row["output"], "asr": asr,
                      **({"audio_cleanup": cleanup_proof} if cleanup_proof is not None else {}),
@@ -1610,10 +1847,66 @@ def clean_qc(args) -> None:
                         "clean_delivery": ref(clean_path), "results": rows,
                         **({"planning_policy": value.get("planning_policy"), "plan_sha256": value["plan"]["sha256"]} if semantic_first(value) else {}),
                         **({"batch_review_policy": value.get("batch_review_policy"), "batch_clean": batch_clean} if batch_clean else {}),
-                        "decision": "pass" if not failures else "reject", "failures": failures})
+                        "decision": ("pending_speech_review" if value.get("speech_review_policy") else "pass") if not failures else "reject",
+                        "failures": failures})
     value["clean_qc"] = ref(report_path)
     if failures:
         fail_round(job, value, "clean_qc", failures)
+    if value.get("speech_review_policy"):
+        evidence_path = job / "evidence" / f"clean_speech_round_{value['repair_round'] + 1}.json"
+        write(evidence_path, {"policy": SPEECH.POLICY, "plan": value["plan"], "source_index": value["source_index"],
+                              "asset_copy": value["asset_copy"], "results": [{"plan_id": r["plan_id"],
+                                  "output_sha256": r["output"]["sha256"],
+                                  "actual_output_frames": read(require_ref(c["render_evidence"], "clean render"))["actual_output_frames"],
+                                  "observations": r["timing_asr"]["shot_observations"]}
+                                  for r, c in zip(rows, clean["results"])]})
+        value["clean_speech_evidence"] = ref(evidence_path)
+        save(job, value, "clean_speech_pending")
+        print(json.dumps({"evidence": value["clean_speech_evidence"], "review_schema": SPEECH.SCHEMA}, ensure_ascii=False))
+    else:
+        save(job, value, "clean_validated")
+
+
+def clean_speech_review(args) -> None:
+    job = args.job_dir.resolve(); value = state(job)
+    if value["phase"] not in {"clean_speech_pending", "repair_required"} or value.get("speech_review_policy") != SPEECH.POLICY:
+        raise ValueError("clean speech evidence and explicit Codex review required")
+    require_editing_approval(value)
+    evidence = read(require_ref(value["clean_speech_evidence"], "clean speech evidence"))
+    if any(evidence.get(k) != value[k] for k in ("plan", "source_index", "asset_copy")):
+        raise ValueError("clean speech input bindings changed")
+    review = read(args.review)
+    SPEECH.header(review, "clean", value["clean_speech_evidence"], value["asset_copy"])
+    review_path = job / "reviews" / f"clean_speech_{sha(args.review)}.json"
+    write(review_path, review)
+    qc = read(require_ref(value["clean_qc"], "pending clean QC"))
+    if qc.get("decision") != "pending_speech_review" or qc.get("failures"):
+        raise ValueError("clean speech review cannot override failed technical QC")
+    clean = read(require_ref(value["clean_delivery"], "clean delivery"))
+    by_id = {r["plan_id"]: r for r in clean["results"]}
+    plans = {o["plan_id"]: o for o in read(require_ref(value["plan"], "plan"))["outputs"]}
+    findings = {r["plan_id"]: r for r in review.get("results", [])}
+    inputs = {r["plan_id"]: r for r in evidence["results"]}
+    if (set(findings) != set(by_id) or set(inputs) != set(by_id) or len(findings) != len(review.get("results", []))
+            or len(inputs) != len(evidence["results"]) or len(qc["results"]) != len(by_id)):
+        raise ValueError("clean speech review complete batch scope required")
+    texts = SPEECH.context(speech_api(), read(require_ref(value["source_index"], "speech sources")), value["asset_copy"])
+    for row in qc["results"]:
+        pid = row["plan_id"]; timing = row["timing_asr"]
+        if (row["output"] != by_id[pid]["output"] or timing["shot_observations"] != inputs[pid]["observations"]):
+            raise ValueError("clean speech observations changed")
+        require_ref(row["output"], "reviewed clean output")
+        timing.update(reviewed_shot_timing(inputs[pid]["observations"], findings[pid].get("shots", []), texts))
+        timing.update(review_basis=SPEECH.POLICY, review_context={"evidence": value["clean_speech_evidence"], "review": ref(review_path)})
+        if not verified_shot_speech(timing, row["output"], plans[pid],
+                read(require_ref(by_id[pid]["render_evidence"], "reviewed clean render")), {}, value.get("planning_policy")):
+            raise ValueError("incomplete reviewed shot speech proof")
+        row.update(text_match=True, text_match_basis="codex_reviewed_rendered_shots")
+    qc.update(decision="pass", speech_review_policy=SPEECH.POLICY, speech_review=ref(review_path),
+              speech_review_evidence=value["clean_speech_evidence"])
+    target = job / "reports" / f"clean_qc_reviewed_round_{value['repair_round'] + 1}.json"
+    write(target, qc)
+    value["clean_qc"] = ref(target)
     save(job, value, "clean_validated")
 
 
@@ -1623,7 +1916,7 @@ def subtitle_draft(args) -> None:
         raise ValueError("clean QC and Codex asset copy index required")
     if read(require_ref(value["clean_qc"], "clean QC")).get("decision") != "pass":
         raise ValueError("passing clean QC required")
-    if value.get("batch_review_policy"):
+    if value.get("speech_review_policy") or value.get("batch_review_policy"):
         require_clean_qc(value)
     clean = read(require_ref(value["clean_delivery"], "clean delivery"))
     packager = module("autonomous_packager", "scripts/packaging/scripts/package_video.py")
@@ -1970,6 +2263,8 @@ def require_clean_qc(value: dict) -> tuple[dict, dict]:
             raise ValueError("semantic-first clean QC binding invalid")
         plan_by_id = {row["plan_id"]: row for row in read(require_ref(value["plan"], "plan"))["outputs"]}
     require_clean_batch(value, clean, qc)
+    if value.get("speech_review_policy") and qc.get("speech_review_policy") != SPEECH.POLICY:
+        raise ValueError("Codex clean speech review required; ASR match alone cannot approve speech")
     for row in clean["results"]:
         measured = by_id[row["plan_id"]]
         require_ref(row["output"], "clean output")
@@ -1991,7 +2286,10 @@ def require_clean_qc(value: dict) -> tuple[dict, dict]:
                 or not isinstance(measured.get("cut_pcm"), list)
                 or any(cut.get("decision") != "pass" for cut in measured["cut_pcm"])):
             raise ValueError("clean QC does not authorize this output")
-        if measured.get("text_match_basis") == "verified_rendered_shots":
+        if value.get("speech_review_policy") and (measured.get("text_match_basis") != "codex_reviewed_rendered_shots"
+                or measured.get("timing_asr", {}).get("review_basis") != SPEECH.POLICY):
+            raise ValueError("complete Codex-reviewed shot speech proof required")
+        if measured.get("text_match_basis") in {"verified_rendered_shots", "codex_reviewed_rendered_shots"}:
             if not verified_shot_speech(measured.get("timing_asr", {}), row["output"],
                     plan_by_id[row["plan_id"]], read(Path(row["render_evidence"]["path"])),
                     read(require_ref(value["asset_copy"], "verified asset copy")), value.get("planning_policy")):
@@ -2278,6 +2576,8 @@ def audit_original_sources(index: dict, plan: dict, *, reburn_only: bool = False
             verified += 1
         # Historical inventory remains immutable, even for an unused missing file.
         require_ref(row["asr"], "original source ASR")
+        if row.get("reviewed_speech"):
+            source_speech(row)
     return {"reburn_only": reburn_only, "inventory_source_count": len(index["sources"]),
             "verified_source_count": verified, "unavailable_unused_sources": unavailable}
 
@@ -2521,7 +2821,7 @@ def compact_delivery(job: Path, value: dict) -> None:
         "delivery_directory", "repair_delivery_policy", "delivery_layout", "records_policy",
         "temporary_root", "repair_round", "max_repair_rounds", "continue_until_complete", "packaging_design_policy",
         "continuation_authorization", "planning_policy", "batch_review_policy", "audio_cleanup_policy", "cast_policy", "celebrities",
-        "subtitle_segmentation_policy", "text_pin_policy", "completion") if key in value}
+        "subtitle_segmentation_policy", "text_pin_policy", "speech_review_policy", "completion") if key in value}
     retained.update(phase="complete", compact_delivery=True)
     retained["delivery_mode"] = value.get("delivery_mode", "packaged")
     inputs = {}
@@ -2533,6 +2833,11 @@ def compact_delivery(job: Path, value: dict) -> None:
             if key == "source_index":
                 for index, row in enumerate(document["sources"], 1):
                     asr = require_ref(row["asr"], "source ASR")
+                    if row.get("reviewed_speech"):
+                        # Raw observations and their canonical review have immutable references.
+                        SPEECH.retain_refs(speech_api(), row["reviewed_speech"], root, keep)
+                        keep.add(asr.resolve())
+                        continue
                     destination = root / "manifests" / "source_asr" / f"source_{index:03d}.json"
                     destination.parent.mkdir(parents=True, exist_ok=True)
                     if asr != destination:
@@ -2583,6 +2888,8 @@ def compact_delivery(job: Path, value: dict) -> None:
     # Shot timing approvals bind actual WAV bytes; these are required for reburn.
     if inputs.get("clean_qc"):
         for row in read(require_ref(inputs["clean_qc"], "retained clean QC")).get("results", []):
+            if row.get("timing_asr", {}).get("review_basis") == SPEECH.POLICY:
+                SPEECH.retain_refs(speech_api(), row["timing_asr"]["review_context"], root, keep)
             for observation in row.get("timing_asr", {}).get("shot_observations", []):
                 keep.add(require_ref(observation["audio"], "retained rendered shot audio").resolve())
     if value.get("delivery_mode") != "clean" and all(key in inputs for key in ("plan", "source_index", "asset_copy", "clean_delivery", "clean_qc")):
@@ -2600,14 +2907,14 @@ def compact_delivery(job: Path, value: dict) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
-    for name in ("init", "prepare", "asset-copy", "plan-evidence", "approve-plan", "render-clean",
-                 "clean-qc", "subtitle-draft", "subtitle-review", "package", "final-evidence", "complete", "repair", "reburn", "status"):
+    for name in ("init", "prepare", "asset-copy", "source-speech-evidence", "source-speech-review", "plan-evidence", "approve-plan", "render-clean",
+                 "clean-qc", "clean-speech-review", "subtitle-draft", "subtitle-review", "package", "final-evidence", "complete", "repair", "reburn", "status"):
         action = sub.add_parser(name)
         action.add_argument("--job-dir", type=Path, required=name != "init")
         if name == "init": action.add_argument("--work-order", type=Path, required=True, help="work-order JSON path; use - to read JSON from stdin")
         if name == "asset-copy": action.add_argument("--copy-text", type=Path, required=True)
         if name == "plan-evidence": action.add_argument("--plan", type=Path, required=True)
-        if name in {"approve-plan", "subtitle-review", "complete"}: action.add_argument("--review", type=Path, required=True)
+        if name in {"approve-plan", "source-speech-review", "clean-speech-review", "subtitle-review", "complete"}: action.add_argument("--review", type=Path, required=True)
         if name == "package": action.add_argument("--config", type=Path, required=True)
         if name == "final-evidence": action.add_argument("--clean", action="store_true")
         if name == "subtitle-draft":
@@ -2623,8 +2930,9 @@ def main() -> None:
             action.add_argument("--authorization")
     args = parser.parse_args()
     actions = {"init": init, "prepare": prepare, "asset-copy": asset_copy,
+               "source-speech-evidence": source_speech_evidence, "source-speech-review": source_speech_review,
                "plan-evidence": plan_evidence,
-               "approve-plan": approve_plan, "render-clean": render_clean, "clean-qc": clean_qc,
+               "approve-plan": approve_plan, "render-clean": render_clean, "clean-qc": clean_qc, "clean-speech-review": clean_speech_review,
                "subtitle-draft": subtitle_draft, "subtitle-review": subtitle_review, "package": package,
                "final-evidence": final_evidence, "complete": complete, "repair": repair, "reburn": reburn}
     if args.command == "status":

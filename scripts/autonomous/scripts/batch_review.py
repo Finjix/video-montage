@@ -127,6 +127,7 @@ def audit(plan: dict, source_index: dict, requested_outputs: int | None = None) 
     for entry in inventory:
         source = sources.get(entry.get("source_sha256"))
         if (source is None or entry.get("source_asr_sha256") != source.get("asr", {}).get("sha256")
+                or (source_index.get("speech_review_policy") and entry.get("source_speech_sha256") != source.get("reviewed_speech", {}).get("sha256"))
                 or entry.get("extraction_status") != "exhausted" or not entry.get("reason")
                 or not isinstance(entry.get("candidates"), list)):
             fail("CANDIDATE_INVENTORY_INCOMPLETE", str(entry.get("source_sha256")),

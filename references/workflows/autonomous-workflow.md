@@ -14,6 +14,16 @@ receipts under `work/<delivery-name>/临时文件/`. Use the job_dir returned by
 Keep records there throughout the job, alongside necessary render/edit files and
 reusable packaging config; do not create a root-level `.runtime` for new jobs.
 
+Read [Codex speech review](../autonomous/speech-review.md). New jobs bind
+`codex-speech-review/v1`: prepare/asset-copy, source-speech-evidence,
+source-speech-review, then planning. Preserve raw ASR and separately review real
+source speech and timings. Each candidate needs a bound speech_review in plan
+approval. Clean QC gathers observations; clean-speech-review covers every actual
+rendered shot before subtitles. ASR mismatch alone is neither rejection nor
+approval. Verify the Codex judgment and audio/context hashes rather than retrying
+recognition until it happens to equal a target. Historical/reburn contracts remain
+unchanged. Existing current autonomous repairs may enable it before planning.
+
 Read [semantic-first planning](../autonomous/semantic-planning.md). New jobs and
 full-edit repairs bind `semantic-continuity/v2`. Analyze complete source turns,
 scene context, identities and propositions before composing an edit; require
@@ -65,7 +75,8 @@ candidate evidence and final packaged frame evidence. Submit honest,
 hash-bound `reviewer_role: codex` findings. Never claim an independent reviewer,
 human listening, or forced word alignment. Machine gates re-run ASR on source,
 candidate, clean and packaged media, inspect PCM, validate subtitles and
-recheck output hashes. Reject ambiguous speech, visuals or copy rather than
+recheck output hashes and the bound speech review. Review and correct recognition
+errors before deciding that actual speech is ambiguous. Reject ambiguous speech, visuals or copy rather than
 guessing. After every rejected round, adjust the edit, replace unsuitable footage,
 or rebuild and run the required checks again until complete delivery passes.
 There is no three-round stopping rule and no repeated continuation approval.

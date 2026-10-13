@@ -172,6 +172,11 @@ def split_shot(shot: dict, *, names: tuple[str, ...] = GAME_NAMES, font: str | N
 
 def caption_rows(asr: dict, *, names: tuple[str, ...] = GAME_NAMES, font: str | None = None) -> list[dict]:
     observations = asr.get("shot_observations") or [{"output_in_frame": 0, "asr": asr}]
+    if asr.get("review_basis") == "codex-speech-review/v1":
+        if any(not isinstance(shot.get("reviewed_asr"), dict) for shot in observations):
+            raise ValueError("reviewed caption timing requires every shot's reviewed speech")
+        # Keep original recognition in QC; captions use the approved text/times.
+        observations = [{**shot, "asr": shot["reviewed_asr"]} for shot in observations]
     return [row for shot in observations for row in split_shot(shot, names=names, font=font)]
 
 

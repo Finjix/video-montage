@@ -18,6 +18,19 @@ containing this file in both the source project and the installed skill. Resolve
   actual ASR, native frames, asset copy, candidate and final packaged evidence;
   machine gates check ASR, PCM, subtitles and hashes. Do not claim independent
   review, human listening or forced word alignment.
+  Read [Codex speech review](references/autonomous/speech-review.md). New jobs
+  bind `codex-speech-review/v1`: ASR is a draft, not the final speech judgment.
+  After prepare/asset-copy, run source-speech-evidence and source-speech-review;
+  keep raw ASR immutable and separately bind reviewed text and word times to
+  actual source audio/context. Correct verified errors, omissions and hallucinations
+  with individual reasons and evidence; never replace real speech with ad copy.
+  Plan from reviewed native source ranges. Review each candidate in approve-plan;
+  after clean-qc, run clean-speech-review for every actual rendered shot before
+  subtitles or packaging. Do not repeatedly retry ASR merely to match expected
+  words or stop production merely because a recognition differs. Unresolved
+  speech still requires stronger evidence or replacement footage. Historical
+  jobs/reburns preserve their bound contract; current autonomous full repairs can
+  enable this policy before planning. Preserve these dependencies for reburn.
   New jobs also bind `spoken-audio-cleanup/v1`; read
   [spoken audio cleanup](references/autonomous/audio-cleanup.md). Review source
   waveform, word context and VAD proposals before authorizing sample-bound mutes.
