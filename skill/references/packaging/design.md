@@ -1,70 +1,102 @@
-# AI 字幕包装设计
+# Packaging design
 
-字幕每行最多10个可见字符，数字和标点也计数，空白不计数。即使字体或布局能容纳更多文字，也不得超限；按语义拆为依次显示的单行字幕，不缩小字号、不改成两行。
+After the subtitle review, Codex writes one `subtitle_design` per video from the speech, shots,
+available space and rhythm, and judges it again on the actual packaged output. Codex only selects and
+combines existing library effects; it never creates or modifies effects, animations, flower styles,
+shaders or decorative assets, and the effect library is only extended on a separate explicit user
+request. When nothing fits, use static subtitles. The renderer runs the existing implementations and
+calls no model.
 
-字幕审核后，Codex 查看口播、镜头、现有效果目录及实际包装成片，为每条视频编写 `subtitle_design`。AI只根据内容、情绪、画面留白与节奏选择现成效果及合适的组合，不临时创作、生成或修改效果，也不制作新动画、花字、着色器或装饰素材。没有合适的效果时使用静态字幕。渲染器执行已有实现，不调用模型 API。
+## Library
 
-## 当前效果范围
+`assets/packaging/design/catalog.json` is the machine catalog. Summary:
 
-仅保留两种主字体（新青年体W8、方糖体）、既有冰1/冰2/火1花字，以及向上弹入、呐喊声波、冰雪飘动；普通叙述可使用静态；AI仅从这三种动画中挑选，不再使用淡入。已移除新增的快速放大落稳、橙色放射、重复文字排版、火焰情绪字、双层标题、信息卡片及新增两种花字。不要制作或添加装饰卡片，也不要用任务透明图片重新引入这些效果。
+| Kind | ID | Use |
+| --- | --- | --- |
+| font | `w8` (WenYue XinQingNian W8, 新青年体) | default, heavy strokes |
+| font | `fangtang` (WenYue FangTang, 方糖体) | rounder alternative |
+| flower | `ice1` | blue-white ice: icy themes, brand |
+| flower | `ice2` | white-cyan gradient with purple glow: brand, cool mood (default `game_flower`) |
+| flower | `fire1` | yellow-orange gradient with red edge: hot emotion, strong selling points |
+| entrance | `none` | quiet: narration, explanation, dense information |
+| entrance | `bounce_up` | medium: short highlights, positive hooks |
+| entrance | `shout_wave` | strong: emotional peaks, rhetorical questions, warnings |
+| entrance | `ice_drift` | medium: icy atmosphere, game names |
 
-`assets/packaging/design/catalog.json` 提供现有效果的适用场景、强度、字体兼容性与参数说明。
+There is no fade. Removed effects (pop-and-settle, orange burst, repeated-text layouts, fire emotion
+text, double-layer titles, info cards, two extra flowers and reference-derived text templates) must not
+be reintroduced, including through task-made transparent images. W8 with whole-word `ice2` uses the
+calibrated shader and motion; other fonts and mixed runs use the generic motion with the chosen glyphs
+and colours.
 
-现成效果只允许使用文档列明的控制项：核实文字、两种主字体、黄白配色、8/9号、布局与显示/入场时长；不提交自定义效果定义、资源路径、运动帧或着色器参数。效果库的扩充须由用户另行明确要求，包装任务不自动扩库。
+## Rules
 
-## 审美判断
+- **Font:** one main font per video; ordinary subtitles stay uniform.
+- **Colour:** ordinary text is primarily yellow `#FFDE00`; plain narration may be all yellow. White
+  `#FFFFFF` appears only together with yellow emphasis in the same cue (emphasized words yellow, the
+  rest white); never an all-white ordinary cue, and a blue game-name flower does not count as the
+  yellow partner.
+- **Game names:** list every real game name in `game_names` (verified in speech, asset copy or the
+  packaging request; `[]` for non-game videos). Every occurrence uses complete flower text at size 9
+  in its calibrated palette; never split a name across cues.
+- **Size:** only 8 and 9 (reference-calibrated). Ordinary text is 8. Game names are 9 and are the only
+  mixed size allowed inside a cue; other emphasis at 9 must be a separate cue of uniform size, never
+  enlarged words inside an 8 line. At 1440 px width, W8 is 108/122 px and FangTang 100/113 px.
+- **Outline:** ordinary yellow/white text uses the calibrated CapCut black outline 40 (text scale 164%,
+  12.3 px at 1440 width) for every font and size; flowers keep their own outline and glow.
+- **Motion:** narration is mostly static. Use entrances for the opening, key selling points and
+  emotional lines; avoid consecutive strong animations; never animate every cue or repeat text to
+  show an effect. Choose by meaning: `ice_drift` for icy/game-name atmosphere, `shout_wave` for
+  emotional emphasis, `bounce_up` for short positive hooks; never cycle blindly.
+- **Batch variety:** batches of three or more outputs use all three animations, two-output batches at
+  least two; once there are six or more animated cues, no single effect exceeds 70% of them. Check the
+  whole batch distribution before rendering.
+- **Standalone game name:** at most one cue per video may show only a game name, chosen by context so
+  the neighbouring cues stay meaningful (no orphan fillers like 玩). It needs ≥ 0.8 s final display and
+  ≥ 0.6 s settled reading, complete flower text at 9, preferably `ice_drift` with a 200 ms entrance
+  (unaccelerated). Otherwise keep the name inside mixed text.
+- **Layout:** avoid covering faces, mouths and on-screen game information.
 
-每条视频选一种主字体，普通字幕保持统一。字号按用户提供的三条参考视频校准，只保留8（常规）、9（强调）两档：普通字幕默认8号，游戏名和特别突出的文字用9号。黄色 `#FFDE00` 是主色，普通叙述可全黄；需要局部强调时，重点字词用黄色，其余文字用白色 `#FFFFFF`，在同一句中形成黄白搭配。白色不能单独使用，禁止整句普通字幕纯白，也不能只靠蓝色游戏名花字来搭配白色。核实真实游戏名，填写 `game_names`，所有游戏名使用完整花字并保持既有花字配色；不能拆成跨字幕的半个名字。非游戏视频可填空列表。
-
-普通黄白字幕统一使用已校准的剪映黑色描边40：文字缩放164%，从1920参考画布换算到1440成片后为12.3像素，不随8/9号或主字体改变。使用完整字形蒙版生成闭合描边，保留小数厚度与透明边缘。冰1/冰2/火1使用现成效果自带的描边、发光和层次，不附加普通字幕描边。
-
-普通叙述以静态为主。开场、关键卖点和情绪句可用已有入场动画，避免连续强动画。不要给每条字幕加动画，也不要为了展示效果而重复字幕文字。根据留白、人物位置和已有信息选择布局，避免遮脸、遮嘴或挡住正在讲解的游戏信息。根据最终成片调整。
-
-字幕采用 `semantic-reading/v1`。先查看完整句意、ASR 标点、停顿和逐词时间，再按实际字体及花字宽度切分；不能按固定字数均分。允许合并完整的相邻短语，禁止把上一分句的尾部与下一分句的部分开头混在同一条里。数量与量词、完整词语和游戏名不可拆开；依附前文的“的、了”等不放在开头，“的确、了解”等正常词语不受限制。普通字幕以最终1.2倍速后的1.2–2.5秒为阅读目标，低于0.8秒优先合并或重分句；确属无法合并的独立短句时，在字幕审核对应条目中写具体 `short_cue_reason`。
-
-每条视频最多择机突出一次独立游戏名。拆出名字后，前后字幕仍须自然完整，不能留下单独的“玩”等碎片；游戏名在最终倍速视频中显示至少0.8秒，入场后稳定阅读至少0.6秒。完整花字及9号字体沿用现有库，优先冰雪飘动，入场默认200毫秒（未加速时间轴）；条件不足保留混排。新设计填写 `reading_policy: "semantic-reading/v1"`，程序检查独立次数和阅读时间。已有未声明该策略的历史设计仍可读取，采用新规则的任务必须绑定此字段。
-
-包装效果必须有多样性，不能整批只重复同一种动画。三条及以上的批次覆盖向上弹入、呐喊声波、冰雪飘动三种现有效果；两条批次至少覆盖两种。动画总次数达到六次时，任一种不得超过动画次数的70%。按内容选择：冰雪主题或游戏名适合冰雪飘动，情绪爆点适合呐喊声波，短重点或积极开场适合向上弹入；不得机械轮换或为凑效果给普通叙述连续加动画。烧录前检查整批分布，最终逐条查看实际运动、稳定阅读和布局。
-
-## 配置
-
-沿用 `video-montage-packaging/v1`，每个 `outputs` 项保存已审核字幕文件及哈希，并填写：
+## `subtitle_design`
 
 ```json
 {
-  "subtitle_design": {
-    "subtitle_sha256": "实际审核后的字幕SHA-256",
-    "reading_policy": "semantic-reading/v1",
-    "font": "w8",
-    "game_names": ["无尽冬日"],
-    "game_flower": "ice2",
-    "game_font_size": 9,
-    "reason": "厚实字形适合口播，黄字为主，局部黄色重点搭配白色背景文字，游戏名冰字；关键短句入场后落稳。",
-    "cues": [
-      {"index": 1, "text": "来玩无尽冬日", "color": "yellow", "font_size": 8,
-       "layout": {"x": 0.5, "y": 0.69, "max_width": 0.9},
-       "entrance": {"effect": "bounce_up", "duration_ms": 250}},
-      {"index": 2, "text": "轻松解压", "color": "white",
-       "spans": [{"start": 2, "end": 4, "color": "yellow"}],
-       "entrance": {"effect": "none"}}
-    ]
-  },
-  "graphic_layers": []
+  "subtitle_sha256": "<reviewed subtitle sha256>",
+  "reading_policy": "semantic-reading/v1",
+  "font": "w8",
+  "game_names": ["无尽冬日"],
+  "game_flower": "ice2",
+  "game_font_size": 9,
+  "reason": "厚实字形适合口播，黄字为主，局部黄色重点配白色，游戏名冰字；关键短句入场后落稳。",
+  "protected_regions": [{"box": [0.1, 0.05, 0.9, 0.3], "start_frame": 0, "end_frame_exclusive": 180}],
+  "cues": [
+    {"index": 1, "text": "来玩无尽冬日", "color": "yellow", "font_size": 8,
+     "layout": {"x": 0.5, "y": 0.69, "max_width": 0.9}, "entrance": {"effect": "bounce_up", "duration_ms": 250}},
+    {"index": 2, "text": "轻松解压", "color": "white", "spans": [{"start": 2, "end": 4, "color": "yellow"}],
+     "entrance": {"effect": "none"}}
+  ]
 }
 ```
 
-`cues` 使用从1开始的字幕索引，按顺序覆盖全部已审核字幕，文字必须一致。游戏名花字范围自动补入快照。`spans` 支持同一句局部变色或已有花字，例如 `{"start":0,"end":2,"color":"white"}`；字符范围从0开始，结束不包含该字符。花字选项仅为 `ice1`、`ice2`、`fire1`，不能截断完整游戏名。
+- Allowed keys only: `subtitle_sha256`, `reading_policy`, `font`, `game_names`, `game_flower`,
+  `game_font_size`, `reason`, `cues`, `protected_regions` (plus `needs_design_review`, see below).
+- `cues` covers every reviewed cue in order with 1-based `index` and identical `text`.
+- `spans`: 0-based, end-exclusive character ranges with optional `color` (yellow/white), `flower`
+  (`ice1`/`ice2`/`fire1`, never cutting a game name) and `font_size`. Game-name flower spans are added
+  automatically. `line_breaks` must be absent or empty.
+- `layout`: normalized centre `x`/`y` (default 0.5/0.69, range 0.02–0.98) and `max_width` (default 0.9,
+  0.1–0.96). `layout.size` was removed. Text wider than one line is rejected: re-split the subtitles.
+- `entrance`: `none` (0 ms) or an effect with integer `duration_ms` ≥ 50 and at most half the cue
+  interval (default 350). `shout_wave` reserves 2.4× the text width for its motion, so a centred cue
+  fits only about 5 characters at size 8 (4 at size 9); use it on short cues.
+- `protected_regions`: normalized `[left, top, right, bottom]` boxes with unaccelerated 60 fps frame
+  ranges. Motion leaving the canvas or entering a protected region is rejected.
 
-`layout.x/y` 为归一化中心坐标，默认 `.5/.69`（1080×1920画面的字幕中心约在1325像素，贴近参考口播；带游戏插入画面的参考位置不套用于纯口播）；`max_width` 限制最大宽度，`layout.size` 已删除并拒绝读取。`cues.font_size` 默认8；同一条字幕的非游戏名文字必须统一字号，只有真实游戏名可局部9号。其他重点要用9号时必须整条字幕单独显示（`cues.font_size: 9`），不能在8号句子中放大个别词；`game_font_size` 默认9，仅允许9，完整游戏名必须保持同一字号。8/9两档在1440宽画布上对应W8的108/122像素、方糖体的100/113像素，常规实际字高约等于1080宽参考口播的75像素，强调比常规约大13%。每个时间点只显示一行字幕；禁止自动换行和非空 `cues.line_breaks`，长句超出单行宽度时渲染拒绝。Codex按语义重新分成先后显示的短句，并按口播词时间审核；不缩小字号，不能拆开游戏名或花字。TXT中的多行编辑文字仅用于分时显示，不能同屏堆叠。动画预留运动空间，越出画布或进入 `protected_regions` 时拒绝方案。保护区格式为 `{"box":[左,上,右,下],"start_frame":0,"end_frame_exclusive":180}`，坐标归一化，帧使用未加速60 fps时间轴。
+The final review adds `design_pass: true` and a concrete `design_reason` after inspecting the actual
+entrance frames, settled reading, cue starts/ends and overlaps with other layers. The manifest records
+the font, CapCut and pixel sizes, flowers, motion parameters, layout and resource hashes.
 
-`entrance.effect` 可为 `none`、`bounce_up`、`shout_wave`、`ice_drift`。非静态动画时长至少50毫秒，不得超过所属字幕区间的一半，保证稳定阅读。整词W8冰2使用完整校准着色与运动；其他字体或混排使用对应通用运动，并保留所选字形与配色。
-
-`graphic_layers` 可省略或填空列表，非空装饰图层会被拒绝。原有包装接口的人名条、免责、BGM和文字钉不属于新增装饰卡片。完整包装必须有文字钉，按实际内容选择核实过的素材、记录哈希和起止帧，默认全程覆盖；不能以字幕或铭牌代替。新增文字钉要核对顶部文案与人物、字幕、铭牌之间的遮挡关系。
-
-## 审核和重烧
-
-所有字幕及原有包装先在未加速时间轴合成，最终统一1.2倍速一次。取证覆盖连续入场帧、稳定阅读、字幕起止与原有叠加层同屏画面。增强字幕方案的最终审核要求 `design_pass: true` 与具体 `design_reason`，同时通过原有语义、音频、字幕和交付检查。
-
-清单逐视频记录实际字体、剪映字号、实际像素字号、局部字号范围、花字、动画参数、布局、资源哈希。重烧保留选择，仅改时间时重新校验区间；改文字或条数后标记 `needs_design_review`，Codex 核对字范围、时长和布局，更新方案并移除标记后重新包装。所有包装配置必须提供逐输出 `subtitle_design` 和 `subtitle_txt`，旧配置无设计字段直接拒绝。曾用已删除效果的试验配置须清空 `graphic_layers`，将花字和动画改为当前支持的选项。
-
-常驻 PNG/WebP 包装预览及其生成入口已删除；设计与审核查看实际包装成片。三种校准动画仍使用实验工具的0.95逐帧验收。
+On reburn, unchanged cues keep their decisions and only timing is re-validated. Changed text or cue
+count sets `needs_design_review: true`: review the spans, durations and layout, update `cues` and
+remove the flag before packaging. There are no persistent PNG/WebP previews; judge the actual
+packaged video.

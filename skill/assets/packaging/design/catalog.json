@@ -10,9 +10,9 @@
   },
   "entrances": {
     "none": {
-      "label": "静态阅读",
+      "label": "static reading",
       "intensity": "quiet",
-      "use": "叙述、解释、密集信息",
+      "use": "narration, explanation, dense information",
       "fonts": [
         "w8",
         "fangtang"
@@ -23,9 +23,9 @@
       }
     },
     "bounce_up": {
-      "label": "向上弹入",
+      "label": "bounce up",
       "intensity": "medium",
-      "use": "短重点、积极卖点",
+      "use": "short highlights, positive selling points",
       "parameters": "../animations/parameters/bounce_up.json",
       "fonts": [
         "w8",
@@ -38,9 +38,9 @@
       "precision": "w8 + full ice2: calibrated shader/motion; other fonts or mixed runs: generic motion with selected glyphs"
     },
     "shout_wave": {
-      "label": "呐喊声波",
+      "label": "shout wave",
       "intensity": "strong",
-      "use": "情绪爆点、反问、强提醒",
+      "use": "emotional peaks, rhetorical questions, strong reminders",
       "parameters": "../animations/parameters/shout_wave.json",
       "fonts": [
         "w8",
@@ -53,9 +53,9 @@
       "precision": "w8 + full ice2: calibrated shader/motion; other fonts or mixed runs: generic motion with selected glyphs"
     },
     "ice_drift": {
-      "label": "冰雪飘动",
+      "label": "ice drift",
       "intensity": "medium",
-      "use": "冰雪主题、游戏名、氛围重点",
+      "use": "icy themes, game names, atmospheric emphasis",
       "parameters": "../animations/parameters/ice_drift.json",
       "fonts": [
         "w8",
@@ -69,12 +69,12 @@
     }
   },
   "flowers": {
-    "ice1": "蓝白冰面，适合冰雪与品牌",
-    "ice2": "白青渐变与紫光，适合品牌与冷色氛围",
-    "fire1": "黄橙渐变与红边，适合热烈情绪和强卖点"
+    "ice1": "blue-white ice surface; icy themes and brand",
+    "ice2": "white-cyan gradient with purple glow; brand and cool atmosphere",
+    "fire1": "yellow-orange gradient with red edge; hot emotion and strong selling points"
   },
   "graphics": {},
-  "guidance": "普通字幕黄色为主；白色仅与同句黄色重点字词搭配，禁止纯白普通字幕。按内容搭配向上弹入、呐喊声波、冰雪飘动，整批禁止单一效果；叙述多数静态。不新增效果。",
+  "guidance": "Ordinary subtitles are mainly yellow; white only beside yellow emphasis in the same cue, never an all-white ordinary cue. Match bounce_up, shout_wave and ice_drift to the content and never use a single effect for the whole batch; keep most narration static. Do not add new effects.",
   "font_sizes": {
     "allowed": [
       8,

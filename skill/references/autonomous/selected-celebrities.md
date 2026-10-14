@@ -1,25 +1,68 @@
-# 多明星出镜与首次出场铭牌
+# Selected celebrities and first-appearance nameplates (`selected-celebrities/v3`)
 
-新人物策略为 `selected-celebrities/v3`，与 `semantic-continuity/v2`、整批审核和音频清理共同执行。人数不固定；允许群演在所选明星旁边陪衬出镜，但所选明星必须始终是画面主体。其他人物也可保留语义相关的画外对白。身份结论来自实际原片画面，不从目录名推断。历史 `selected-celebrities/v1`、`selected-celebrities/v2` 任务保留原有出镜及时间轴合同；未绑定人物策略的历史任务保留 `protagonist_id` 和单主角审核。字幕重烧不改变原任务人物合同，新建任务和完整剪辑返修使用v3。
+Every job binds this policy. Each output selects one or more registered celebrities. Supporting actors may appear beside them, but a selected celebrity must
+always be the visual subject. Other people may speak offscreen when it serves the meaning. Identity
+comes from actual frames, never folder names. The batch cast mix (about 80% single, 20% multi) is in [batch review](batch-review.md).
 
-主角是否为主体由 Codex 检查完整区间实际画面：所选明星应是构图、表演和叙事注意力的中心，清楚可见；群演可在旁边做反应或互动，但不能遮挡主角到难以辨认、抢占主体或独立占镜，不能出现只有群演的反打镜头。没有机械的画面面积百分比；审核须说明具体位置、景别、动作及主体关系。无法保持主体的区间仍应避开或重选，不能仅凭人物声明放行。
+## Subject rule
 
-批次默认按单明星约80%、多明星约20%规划；40条通常为约32条单明星、8条多明星。按每条实际出镜的所选明星人数计数，多明星包括两位或更多明星。AI可根据素材容量和语义连贯性围绕目标小幅调整，不强制精确比例，也不强制每位明星的单人成片数量相同。整批审核记录实际数量、比例及调整理由，详见[整批审核](batch-review.md)。
+Codex checks the whole interval: the selected celebrity is the centre of composition, performance and
+narrative attention and clearly visible. Supporting actors may react or interact beside them, but may
+not obscure them beyond recognition, take over the subject or hold the frame alone; no supporting-only
+reverse shots. There is no area threshold: state the actual position, shot size, action and subject
+relation. Avoid or reselect intervals where the celebrity is not the subject; a declaration alone never
+passes.
 
-工作单显式填写 `cast_policy` 和 `celebrities`。明星登记为 `{"person_id":"person:wu-yue","name":"吴樾","nameplate":{"path":"<PNG绝对路径>","sha256":"<素材哈希>"}}`。规范身份、姓名、铭牌哈希绑定到工作单、状态、原片索引、计划和计划/最终证据及审核，不能删除或修改标记来绕过检查。
+## Registry and plan fields
 
-计划顶层重复绑定相同登记表；每个输出填写 `cast_policy` 与非空、无重复的 `protagonist_ids`，不再同时填写 `protagonist_id`。群演另填 `supporting_person_ids`（无群演可省略），使用来自实际画面的稳定 `person:` 身份编号，不得与所选明星或任何已登记明星重叠；未选明星不能改称群演绕过人物限制。群演不计入单明星/多明星比例，不触发明星铭牌。
+The work order lists `celebrities` (required), e.g.
+`{"person_id": "person:wu-yue", "name": "吴樾", "nameplate": {"path": "<absolute PNG path>", "sha256": "<sha256>"}}`.
+The registry is bound into the work order, state, source index, plan, evidence and every plan/final
+review (repeat `cast_policy` and the exact `celebrities` list at their top level).
 
-片段、候选和实际镜头的 `visible_person_ids` 精确记录全部实际出镜人物，只能来自所选明星和该条声明的群演，并且必须包含所选明星；声明的明星和群演必须实际出现。有群演的区间与镜头必须显式填写非空 `primary_person_ids`，只能指向该区间清楚可见的所选明星，不能指向群演。无群演时默认全部可见所选明星为主体；若显式填写，同样核验。候选与选取片段的出镜人物、主体声明及 `speaker_id` 必须一致，实际镜头主体必须属于覆盖片段的主体声明。完整 `spoken_turns` 也记录说话人；群演说话不会自动变成画面主体，问答仍须连贯。说话者与可见人物分开判断，画外对白不产生出镜或铭牌要求。
+- Output: `cast_policy`, non-empty unique `protagonist_ids`, and optional
+  `supporting_person_ids` with stable `person:` IDs observed in frames. Supporting IDs never overlap the
+  selected or any registered celebrity; an unselected celebrity cannot be relabelled as supporting.
+- Segments, candidates and shots: `visible_person_ids` lists exactly who is visible, only selected
+  celebrities and declared supporting actors, and always at least one selected celebrity. Every
+  declared person must actually appear. With supporting actors visible, set non-empty
+  `primary_person_ids` (selected celebrities clearly visible in that interval); without them the
+  visible selected celebrities are the subject by default. A shot's subjects must belong to its
+  segment's subjects. Candidates and segments agree on visible people, subjects and `speaker_id`.
+- `speaker_id` is separate from visibility: a speaking supporting actor does not become the subject, and
+  offscreen speech needs no appearance or nameplate. Complete `spoken_turns` also record the speaker.
 
-说话人发生变化时，转场 `content_evidence.speaker_change` 填写实际 `from_person_id`、`to_person_id`，`subject_relation` 为 `question_answer`、`parallel_experience` 或 `shared_topic`，并提供具体 `reason`。原有台词前提和桥接要求仍执行。两人的“我”、账号、数量及经历不能拼成同一人的因果结果；人物切换不提供缺失的口播前提。逐转场审核增加 `speaker_change_pass` 和具体 `speaker_change_reason`。
+When the speaker changes, the transition adds
+`content_evidence.speaker_change: {"from_person_id", "to_person_id", "subject_relation", "reason"}` with
+`subject_relation` ∈ `question_answer`, `parallel_experience`, `shared_topic`. Premise and bridge rules
+still apply. Two people's "I", accounts, counts or experiences cannot form one person's cause and
+result: when both segments are first-person (我, 本人, 这个账号…), use `parallel_experience` with
+`speaker_experience`, `contrast`, `counterpoint`, `explanation`, `claim_support` or `proof`.
 
-两个不同说话人的个人经历或账号不能声明为同一共同主体；独立经历比较必须使用 `parallel_experience`，配合 `speaker_experience`、对照、解释或举证关系。因果、条件结果或递进不能把两位玩家的个人结果连接起来。程序识别明确的第一人称和账号表述，其他隐含指代仍须由 Codex 逐转场判断。
+## Review fields
 
-计划逐片段、逐镜及整条审核使用 `selected_cast_pass`；逐片段/整条使用具体 `cast_reason`，整条绑定相同 `protagonist_ids` 和 `supporting_person_ids`。v3逐片段、逐镜及整条审核另须 `protagonist_primary_pass: true` 和具体 `protagonist_primary_reason`；逐片段及逐镜审核重复精确 `primary_person_ids`（无显式计划字段时使用可见所选明星列表）。精确人物表、完整区间画面哈希、镜头、叙事及所有原有审核仍须覆盖；布尔值不能代替实际判断。最终审核再次检查实际整片主体关系、绑定群演表、完整成片画面和全部转场，并增加 `nameplates_pass` 及具体 `nameplate_reason`。缺失、错绑或主体不成立均拒绝。
+- Segment, shot and output findings: `selected_cast_pass: true`, `protagonist_primary_pass: true` and a
+  concrete `protagonist_primary_reason`.
+- Segment and shot findings: exact `visible_person_ids` and `primary_person_ids` (the visible selected
+  celebrities when the plan omits it); segments also `continuous_visual_sha256` and `cast_reason`.
+- Output findings: exact `protagonist_ids`, `supporting_person_ids` (`[]` when none) and `cast_reason`.
+- Transitions with a speaker change: `speaker_change_pass: true` and `speaker_change_reason`.
+- Final review outputs (packaged): `nameplates_pass: true` and `nameplate_reason`, after checking the
+  whole output's subject relations, frames and transitions again.
 
-包装输出使用 `nameplates` 列表，每项包含 `person_id`、`path`、`sha256`、`start_frame` 和 `end_frame_exclusive`。帧号使用未加速底片的60fps时间轴，与实际合并后的渲染镜头一致。每位明星首次出镜的第一帧开始展示，默认192帧；跨连续同一明星镜头可继续显示，但在明星离场或其他明星出现前结束。群演出入不截断明星铭牌，也不产生额外铭牌。再次出镜不重复展示。最终1.2倍速后展示至少48帧（0.8秒），不足时改选首次出场片段，不能停帧或伸长画面。本版仍拒绝多位明星同时首次出场，请选择仅一位所选明星首次介绍的镜头；v3允许该镜头有陪衬群演。
+## Nameplates
 
-v2及v3禁止两位明星铭牌在相邻帧直接替换。按最终60fps编码时间轴，两次展示之间至少18帧（0.3秒）完全没有铭牌；淡出过程仍有铭牌的帧不计入空档。保持后一位铭牌在首次出镜时出现，优先提前结束前一位铭牌；若前一位因此不足48帧展示，则重选首次出场片段。规划、包装、重烧和最终审核均核对该空档，实际编码画面必须验证前牌消失、完整空档、后牌出现。
+Each selected celebrity shows a nameplate once, from the first frame of their first appearance:
+192 clean frames by default, continuing across consecutive solo shots of the same celebrity and ending
+before they leave or another selected celebrity appears. Supporting actors neither end a plate nor get
+one. The first-appearance shot must show only one selected celebrity (supporting actors allowed);
+choose separate introduction shots instead of simultaneous first appearances. Between two different
+celebrities' plates leave at least 18 completely plate-free final frames (0.3 s at 60 fps): the earlier
+plate ends sooner, the later one still starts at the first appearance. Each plate must show at least
+48 final frames (0.8 s); otherwise reselect the first-appearance footage (never freeze or stretch).
 
-自主包装、最终取证及重烧核对登记素材与精确首次出场区间；漏牌、错牌、重复、重叠、跨人物残留或更改时间轴均拒绝。旧 `nameplate` 仍兼容；配置同时包含 `nameplate` 和 `nameplates` 即拒绝。所有铭牌均保留哈希，最终取证按倍速后的起止帧检查实际烧录画面。
+The windows are deterministic: copy them from the plan evidence `outputs[].nameplate_windows` into the
+packaging config as `nameplates: [{"person_id", "path", "sha256", "start_frame", "end_frame_exclusive"}]`
+(unaccelerated 60 fps frames; path and hash from the registry). Packaging, final evidence and reburn
+reject missing, wrong, repeated, overlapping or retimed plates; review the disappearance, the blank gap
+and the next appearance in the actual encoded frames.

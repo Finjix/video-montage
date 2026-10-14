@@ -1,56 +1,44 @@
-# 不同片段的音量均衡
+# Segment loudness balance (`segment-loudness-balance/v1`)
 
-新的底片渲染默认启用 `segment-loudness-balance/v1`。自动流程与直接使用
-`portable_frame_renderer.py` 的流程共用此功能；包装、最终 1.2 倍速和字幕重烧
-沿用已均衡的纯净底轨。现有 MP4 与已完成任务不会被自动重写，字幕重烧也不会
-重新均衡旧底轨；需要重新执行完整底片渲染才能应用。
+Enabled by default for new clean renders, both in the autonomous workflow and when
+`portable_frame_renderer.py` is used directly. Packaging, the final 1.2x and subtitle reburns reuse the
+balanced clean track; existing MP4s and completed jobs are not rewritten (a full clean re-render is
+needed to apply it).
 
-渲染器按实际源帧范围裁切，在已审核的残音清理、片段变速、声道统一和时长锁定
-之后，使用 FFmpeg `loudnorm` 的输入统计测量各渲染片段的 EBU R128 综合响度
-及真实峰值，再对各片段应用固定增益。`loudnorm` 只用于测量，成片音轨使用
-`volume` 调整，保留片段内的自然强弱、音高和清理静音区间，不引入动态压缩。
-启用时统一为双声道，使不同源声道布局的测量和编码一致。
+After the source-frame cut, reviewed cleanup, segment speed, channel unification and duration lock, the
+renderer measures each render segment's EBU R128 integrated loudness and true peak with FFmpeg
+`loudnorm` (measurement only) and applies a static `volume` gain per segment. Natural dynamics, pitch
+and cleaned silences are preserved and no compression is added. Enabled balancing converts to stereo so
+measurement and encoding agree.
 
-默认目标为 **-18 LUFS**、真实峰值上限 **-3 dBTP**、最大自动提升 **12 dB**。
-为使各片段达到同一可实现的响度，实际共同目标取以下值的最小值：请求目标、
-各有效片段响度加最大提升、各有效片段响度加峰值余量。因此遇到弱音频或峰均比
-很大的素材时，整条共同目标会降低，而不会强行放大或削波。
+Defaults: target **-18 LUFS**, true-peak ceiling **-3 dBTP**, maximum boost **12 dB**. The common
+target is the lowest of the requested target, each measurable segment's loudness plus the maximum
+boost, and each segment's loudness plus its peak headroom, so weak or very peaky material lowers the
+whole target instead of being over-amplified or clipped. Segments that are too short to measure, silent
+or below -50 LUFS are never boosted and do not set the target (they may still be attenuated to respect
+the peak ceiling); their status is recorded and they are not claimed to reach the target. Coalesced
+adjacent ranges are measured as one render segment.
 
-没有可测综合响度的短片段、静音及低于 -50 LUFS 的极弱音频不会自动提升，也不
-参与共同目标计算；仍在必要时降低音量以满足峰值上限。这些片段的状态单独记录，
-不能把它们宣称为已达到目标响度。相邻同源区间若按原有规则合并，作为一个连续
-渲染片段测量和调整，保持已有时间轴与镜头计数规则。
+`audio_gain_db` (-24..0 dB, default 0) still applies after balancing as an extra manual attenuation; it
+may keep intentional differences but cannot undo the peak limit.
 
-原有 `audio_gain_db`（-24 至 0 dB，默认 0）继续作为**均衡之后的额外人工衰减**。
-它可以有意保留片段音量差异，不能用来抵消自动均衡的峰值限制。
+## Configuration
 
-## 配置
-
-可在底片帧计划根对象，或自主批次计划根对象中设置 `audio_balance`：
+Set on the plan root (or a frame plan root) and override per field in `outputs[]`:
 
 ```json
-{
-  "audio_balance": {
-    "enabled": true,
-    "target_lufs": -18,
-    "true_peak_db": -3,
-    "max_boost_db": 12
-  }
-}
+{"audio_balance": {"enabled": true, "target_lufs": -18, "true_peak_db": -3, "max_boost_db": 12}}
 ```
 
-批次计划的 `outputs[]` 也可设置同名对象，按字段覆盖批次设置。省略配置即使用
-默认值。设置 `{"enabled": false}` 可关闭均衡，继续原有逐片段人工增益流程。
-`target_lufs` 范围为 -30 至 -10，`true_peak_db` 为 -9 至 -1，`max_boost_db`
-为 0 至 18；拒绝非有限数字、错误类型及未知字段。
+Omit to use defaults; `{"enabled": false}` disables balancing. Ranges: `target_lufs` -30..-10,
+`true_peak_db` -9..-1, `max_boost_db` 0..18; non-finite numbers, wrong types and unknown fields are
+rejected.
 
-## 编码复检
+## Encoded verification
 
-渲染证据记录配置、实际共同目标，以及各片段的输入响度、输入真实峰值、自动
-增益、总增益和编码后复检。对临时 MP4 按实际输出帧区间重新测量：有效片段
-输出响度距预期不超过 0.8 LU，真实峰值不超过配置上限加 0.5 dB 的 AAC 容差。
-测量失败或复检失败时拒绝发布，清除临时编码文件，保留已有成片。
-自主 `clean-qc` 保留这组证据并检查通过状态；原有削波、切点、ASR、残音和最终
-混音检查继续执行。BGM 在此之后混入，整条包装音频仍须通过原有检查。
-
-测量依据见 [FFmpeg loudnorm 实现](https://github.com/FFmpeg/FFmpeg/blob/master/libavfilter/af_loudnorm.c)。
+The render evidence records the configuration, common target, and per segment the input loudness and
+true peak, automatic gain, total gain and the post-encode re-measurement of the temporary MP4 over the
+actual output frames: a measurable segment must land within 0.8 LU of its expected loudness and stay
+within the peak ceiling plus 0.5 dB (AAC tolerance). A failed measurement rejects the render, removes
+the temporary encode and keeps any existing delivery. `clean-qc` keeps this evidence and requires it
+to pass; clipping, cut, ASR, residual and final mix checks still apply, and BGM is mixed afterwards.

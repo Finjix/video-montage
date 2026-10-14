@@ -1,154 +1,108 @@
-# Codex 台词审校（codex-speech-review/v1）
+# Codex speech review (`codex-speech-review/v1`)
 
-ASR 是定位和审校草稿，不是真实台词的最终裁决。Codex 在同一任务中检查原片完整语境、
-原始转写、实际音频范围、画面及已核实素材文字，确认台词并修正误字、漏识别、多识别、
-幻觉和时间码。无法完全确认的字词由 agent 根据原始识别、相邻完整对白、场景及固定词
-写法推测补齐，选取最符合完整语境的表达，并记录推测依据后继续执行。不能把广告文字
-直接替换成原声没有的台词，也不能新增情节或产品承诺来满足数量。
-不能声称人工听审、强制对齐或独立代理审核。程序检查审核范围、时间、原文件和全部哈希；
-台词判断由 Codex 负责，程序通过不等于机器已经证明听感正确。
+ASR locates speech and drafts text; it never decides what was said. Codex reviews the full source
+context, raw ASR, actual audio range, picture and verified asset copy, and corrects misrecognitions,
+omissions, hallucinations and timings. The program checks scope, timing, files and hashes only; a
+passing check does not mean a machine proved the wording. Never claim human listening, forced
+alignment or an independent reviewer, and never insert ad copy, plot or product claims the speaker
+did not say.
 
-新任务同时绑定[固定文字库](text-library.md)快照。审校时按库中规范写法处理已确认的
-游戏名、人名和常用词，原片/候选/底片审核顶层绑定 `text_library_sha256`；
-涉及词条的修正同时引用词条及实际音频区间。计划根对象继承 `text_library` 引用。
-历史任务没有文字库引用时继续使用以下原有格式。
+Reviews happen at three stages, each against its own audio:
 
-新 `init` 默认绑定本策略到工作单、状态、源索引和计划。历史任务及其字幕重烧保留已绑定
-契约；现有 `semantic-continuity/v2` 自主任务可在规划前执行 `source-speech-evidence`
-显式启用。已有计划先使用 `repair` 作废下游批准，不转换旧执行器任务。
+| Stage | Command | Audio | Times |
+| --- | --- | --- | --- |
+| source | `source-speech-evidence` → `source-speech-review --review` | full source, mono 16 kHz WAV | source-local seconds |
+| candidate | inside `approve-plan` (`segments[].speech_review`) | candidate PCM from plan evidence | candidate-local |
+| clean | `clean-qc` → `clean-speech-review --review` | each rendered shot | shot-local |
 
-## 原片
+Raw ASR (including empty results) is never overwritten; reviewed text and word times are stored
+separately and bound by hash. Plans use the reviewed speech: each segment's text must equal the
+complete reviewed words inside its native frame range (no word cut off, no quoting the same words from
+elsewhere). If the real candidate speech differs from the plan, fix the plan and rerun `plan-evidence`;
+the review cannot replace narrative content.
 
-1. `prepare` 保存原始 ASR，空识别也保留；`asset-copy` 核实素材文字。
-2. `source-speech-evidence --job-dir <目录>` 提取每条原片完整单声道 16k PCM WAV，保存
-   原片 SHA-256、原始 ASR 文件哈希、原生帧数/FPS 和音频哈希，返回审校证据路径。
-3. Codex 阅读实际证据，填写以下格式；`source-speech-review --job-dir <目录> --review <JSON>`
-   核验后保存独立的 `reviewed_speech`。不覆盖原 ASR，不伪装成模型识别结果。
-4. 规划依据审校后的完整话轮和时间。计划根对象声明 `speech_review_policy`；
-   `batch_analysis.sources[]` 同时绑定原 `source_asr_sha256` 和 `source_speech_sha256`
-   （源索引 `reviewed_speech.sha256`）。片段的全部台词必须对应其原生帧范围内的完整词，
-   不能引用另一处相同台词，不能裁断词或省略范围内口播。
-
-审核顶层：
+## Review file
 
 ```json
 {
   "schema": "video-montage-codex-speech-review/v1",
   "stage": "source",
   "reviewer_role": "codex",
-  "evidence_sha256": "<source-speech-evidence 返回文件的 SHA-256>",
-  "asset_copy_sha256": "<已核实素材文案审核文件 SHA-256>",
-  "results": [
-    {
-      "source_sha256": "<原片 SHA-256>",
-      "audio_sha256": "<实际证据 WAV SHA-256>",
-      "observed_text": "欢迎无尽东日",
-      "speech_pass": true,
-      "reason": "<完整语境核验及识别差异的具体结论>",
-      "timing_reason": "<逐词时间审核依据及调整说明>",
-      "reviewed_asr": {
-        "text": "欢迎无尽冬日",
-        "segments": [
-          {"text": "欢迎无尽冬日", "start": 0.1, "end": 1.8,
-           "words": [{"word": "欢迎", "start": 0.1, "end": 0.5},
-                     {"word": "无尽冬日", "start": 0.5, "end": 1.8}]}
-        ]
-      },
-      "corrections": [
-        {"before_start": 4, "before_end": 5, "after_start": 4, "after_end": 5,
-         "before": "东", "after": "冬", "start_ms": 500, "end_ms": 1800,
-         "reason": "<结合原片语境及游戏名称文字核实同音字>",
-         "evidence": [{"kind": "asset_copy", "sha256": "<实际图片哈希>", "text": "无尽冬日"}]}
-      ]
-    }
-  ]
+  "evidence_sha256": "<sha256 of the evidence file printed by the evidence command>",
+  "asset_copy_sha256": "<sha256 of the accepted asset copy review>",
+  "text_library_sha256": "<sha256 of the job text library snapshot>",
+  "results": [{
+    "source_sha256": "<original source sha256>",
+    "audio_sha256": "<evidence WAV sha256>",
+    "observed_text": "欢迎无尽东日",
+    "speech_pass": true,
+    "reason": "<context check and conclusion on every ASR difference>",
+    "timing_reason": "<basis for the word times and any adjustment>",
+    "reviewed_asr": {"text": "欢迎无尽冬日", "segments": [
+      {"text": "欢迎无尽冬日", "start": 0.1, "end": 1.8,
+       "words": [{"word": "欢迎", "start": 0.1, "end": 0.5}, {"word": "无尽冬日", "start": 0.5, "end": 1.8}]}]},
+    "corrections": [{
+      "before_start": 4, "before_end": 5, "after_start": 4, "after_end": 5, "before": "东", "after": "冬",
+      "start_ms": 500, "end_ms": 1800, "reason": "<why the audio and context indicate this word>",
+      "evidence": [{"kind": "text_library", "sha256": "<snapshot sha256>", "term_id": "game:wu-jin-dong-ri", "text": "无尽冬日"},
+                   {"kind": "source_audio", "sha256": "<this WAV sha256>", "start_ms": 500, "end_ms": 1800}]}]
+  }]
 }
 ```
 
-`results` 必须覆盖所有原片且每条只出现一次。`reviewed_asr` 使用音频局部秒数，完整文字、
-分段文字、逐词文字归一化后完全对应；每词起止必须递增、落在对应分段和实际音频内。
-不是强制对齐，时间仍须 Codex 审核。原声确实没有口播时可用空文字和空分段，删除识别
-幻觉仍须逐项记录。台词存疑时使用下述推测记录，不要求用户先确认才能继续；
-`speech_pass: true` 表示 agent 接受该台词用于本任务，可能包含明确记录的推测，
-不表示所有字词均已听辨或完全核实。缺失音频、无效时间或哈希不符仍须修复。
+- **Source stage:** `results` covers every source exactly once.
+- **Candidate stage:** each plan-review segment carries this finding as `speech_review` without
+  `source_sha256`; `audio_sha256` is the candidate `pcm.sha256`, `observed_text` equals the candidate
+  `asr.text` exactly, and the reviewed text must equal the planned segment text. The plan review
+  header adds `speech_review_policy` and `text_library_sha256`.
+- **Clean stage:** `"stage": "clean"` and
+  `"results": [{"plan_id": "P1", "shots": [{"shot_index": 1, ...finding fields}]}]`, covering every
+  output and every rendered shot once. Audio, raw ASR and expected text come from the evidence
+  `observations`; words stay within their shot. A rejected review file can be corrected and resubmitted
+  against the same evidence.
 
-`corrections` 必须逐项覆盖归一化文本的所有改动，使用 Python
-`speech_review.changes(before, after, autonomous_montage.normalized)` 提取确定的前后字符
-索引（从零开始，结束排他，`SequenceMatcher(..., autojunk=False)`）。这只是差异定位，
-不会生成理由或批准。插入或删除一侧为空，记录具体音频毫秒范围、理由和依据。
-不是全局同音词白名单，也不按相似度自动放行；未改字填写空列表。
+## Rules for a finding
 
-依据可以是实际 `source_asr`、`source_speech` 或 `asset_copy` 的哈希与原文引用；
-`source_speech` 仅用于候选/底片核验。空识别或无法用文字引用的幻觉，可使用
-`{"kind":"source_audio","sha256":"<本次 WAV 哈希>","start_ms":100,"end_ms":1800}`，
-范围须与该条修正相同。这记录 Codex 对实际音频范围的判断，不宣称程序验证了字词。
-每条修正仍须具体理由和完整上下文审校，不能只凭预期广告文案填字。
+- Text comparisons are normalized: punctuation and spaces removed, case folded, and 1–2 digit
+  numbers read as values (30 = 三十, 13 = 十三, never 一三).
+- `observed_text` is the raw ASR text exactly. `speech_pass: true` means the agent accepts this
+  wording for the task (possibly with recorded inferences), not that every word was verified.
+- `reviewed_asr`: full text = concatenated segment texts = concatenated words (after normalization).
+  Word times increase, stay inside their segment and inside the audio. Use empty text and segments
+  only when the source truly has no speech; still record each removed hallucination.
+- `corrections` lists every normalized change, in order, exactly as computed by
+  `speech_review.changes(observed, reviewed, autonomous_montage.normalized)` (0-based, end-exclusive
+  character indexes; `SequenceMatcher(autojunk=False)`). Use an empty list when nothing changed.
+  Each correction needs integer `start_ms`/`end_ms` inside the audio that cover its reviewed words
+  (±250 ms), a concrete `reason`, and evidence:
+  - `{"kind": "source_asr" | "source_speech" | "asset_copy", "sha256": ..., "text": "<quote>"}` quoting
+    the bound text (`source_speech` only at candidate and clean stages);
+  - `{"kind": "source_audio", "sha256": "<this WAV>", "start_ms": ..., "end_ms": ...}` with the same
+    range as the correction, for empty recognition or hallucinations;
+  - `{"kind": "text_library", ...}` for every fixed term the change touches; it always needs a
+    `source_audio` item too ([text library](text-library.md)).
 
-## 台词推测记录与持续执行
+Compute the change list:
 
-台词无法完全确认时，由当前 agent 自主推测补齐，不要求另一个 agent 独立批准。
-先结合已有完整 ASR、分段识别、相邻对白、画面场景及任务词库判断最可能的表达；
-不必为了得到完全一致的识别结果反复重跑模型。无法直接听辨但已有可用识别及语境，
-同样继续。推测文字写入独立的 `reviewed_asr`，原始 ASR 保持不变。
-
-涉及改字、补词或删除幻觉时，仍按原有 `corrections` 格式记录全部差异和实际音频范围。
-推测项额外标记 `inferred: true`，`reason` 必须明确写“推测”并说明原识别、
-前后文及为什么采用该表达；`evidence` 绑定本次实际 WAV 和对应范围，可另引已有 ASR
-或核实素材。词库只提供规范写法，涉及词条时仍引用其 ID 及快照哈希。新增标记仅用于
-记录判断性质，不替代已有格式、时间范围和哈希校验。例如：
-
-```json
-{
-  "before_start": 1, "before_end": 2, "after_start": 1, "after_end": 2,
-  "before": "降", "after": "僵", "start_ms": 800, "end_ms": 1300,
-  "inferred": true,
-  "reason": "推测：识别为冻降，前句说明零下七十度，后句描述小人需要保暖，采用冻僵以保留最可能的原意；未声称已听辨确认。",
-  "evidence": [
-    {"kind": "source_audio", "sha256": "<本次 WAV 哈希>", "start_ms": 800, "end_ms": 1300}
-  ]
-}
+```text
+assets/dependencies/python/python.exe -c "import json,sys;sys.path.insert(0,'scripts/autonomous');import autonomous_montage as a;print(json.dumps(a.SPEECH.changes(sys.argv[1],sys.argv[2],a.normalized)))" "<observed>" "<reviewed>"
 ```
 
-示例中的差异索引和时间须替换成当前实际值。若推测最终沿用原 ASR、没有文字改动，
-`corrections` 保持空列表，在 finding 的 `reason` 中记录存疑原文、音频范围和推测依据；
-有其他修正时照常保留对应条目。估计的逐词时间在 `timing_reason` 中说明依据，
-不得声称强制对齐。候选和底片审校继续绑定各自实际音频，并在具体理由中引用源推测；
-不能在后续审核中把源推测改称为听辨确认。任务交付记录汇总使用的推测词句及依据。
+## Inference when speech is uncertain
 
-台词推测完成后继续规划、渲染、字幕和包装，不因字词存疑停下要求用户提供台词稿、
-听辨音频或确认疑点。原片、帧界、音频削波、切点、语义连贯、人物、字幕及整批检查
-仍按各自合同执行，不能用推测绕过技术失败。单个阶段拒绝时修复后继续；只有可行修复
-与替代方法已尝试，且绝对阻碍使剩余有用工作均无法进行时才询问用户。
+When wording cannot be fully confirmed, the current agent decides; no second agent or user
+confirmation is needed, and ASR is not rerun hoping for a matching result. Choose the most likely
+wording from the full ASR, segment recognitions, adjacent dialogue, scene and fixed spellings, and
+write it into `reviewed_asr`.
 
-## 候选片段
+- A changed character records `"inferred": true` on its correction, a `reason` that starts with
+  "Inferred:" and explains the original recognition, the context and the choice, and `source_audio`
+  evidence for the range (optionally plus ASR or asset quotes).
+- When the inference keeps the raw ASR unchanged, keep `corrections` empty and state the doubtful
+  words, audio range and basis in `reason`; explain estimated word times in `timing_reason`.
+- Candidate and clean reviews cite the source inference and never upgrade it to "verified".
+  The delivery summary lists inferred wording and its basis.
 
-`plan-evidence` 对每个实际裁切 PCM 做一次中性识别，保留原结果和 `asr_exact`，不靠
-反复变速识别把模型输出凑成预期文本。源台词、原生裁切、PCM 和画面技术检查仍执行。
-识别是否相等都不能代替审校：合格候选标记 `pending_speech_review`，进入计划审核。
-技术失败仍拒绝，不能用台词审核覆盖削波、坏切点或画面缺陷。
-
-`approve-plan` 的原有逐片段 `segments[]` 每项增加 `speech_review`，其字段与上述原片
-finding 相同（不需 `source_sha256`），`audio_sha256` 绑定候选 PCM，时间使用候选局部
-时间，`observed_text` 必须逐字等于实际候选 ASR。计划审核顶层也声明本策略。
-审校后文字必须精确等于对应源范围的计划台词；若真实台词与计划不同，修复计划后重新
-取证，不能在批准阶段替换叙事内容。渲染和最终交付重新核验这些审核与依赖。
-
-## 底片及字幕
-
-`clean-qc` 保留整片识别和每个真实渲染镜头的局部识别，执行音频、切点、时长、画面
-重复和音量检查。技术合格后进入 `clean_speech_pending`，返回独立逐镜审校证据；
-字幕和包装此时不能开始。
-
-填写同一审核顶层格式，将 `stage` 改为 `clean`，证据哈希绑定返回的底片台词证据。
-`results` 改为 `[{"plan_id":"P1","shots":[{"shot_index":1,...finding字段}]}]`。
-全部成片、全部实际渲染镜头必须各审一次；WAV 哈希、原始识别和镜头输出帧范围均绑定。
-逐词时间使用镜头局部时间，不能跨镜，审校文字必须等于该镜保留的源台词。
-执行 `clean-speech-review --job-dir <目录> --review <JSON>` 后，程序保留 raw ASR 并
-将审校后的词时间映射到底片时间轴，生成新的通过 QC，才允许 `subtitle-draft`。
-审核文件有误被拒绝时，可修正审核文件并针对同一有效证据重新提交；不必为了改审核记录
-重跑识别。若原片、音频或计划改变，则先返修并重新取证。
-
-字幕审核继续核对全覆盖、分句、单行字数、镜头边界及哈希，可引用 `source_speech`
-作为文字依据。最终混音的原始识别差异继续保留；已有逐采样混音保真证明及各项最终检查
-仍独立执行。完成清理须保留源审校、底片逐镜审校及原 ASR、WAV、上下文依赖，重烧时
-重新校验，不复用已丢失证据的批准。
+Speech inference never overrides technical failures: frame bounds, clipping, cuts, semantics, cast,
+subtitles and batch checks still apply. Ambiguous cuts are fixed by moving native bounds, audio
+cleanup or replacement footage.

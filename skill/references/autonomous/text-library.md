@@ -1,54 +1,43 @@
-# 固定文字库
+# Fixed text library
 
-新任务从技能根目录 `assets/text-library.json` 读取规范写法，初始收录“无尽冬日”、
-“吴樾”、“林子聪”、“许君聪”。词库确定固定文字的写法；是否说出该词仍由 Codex
-结合实际原片音频、完整上下文及已核实素材判断。不要按同音、相似度或预期文案自动替换。
-未提及的词不补入台词；无法完全确认的同音字或缺词由 agent 结合原始识别、上下句及场景
-推测补齐，并按[台词审校](speech-review.md)记录依据和音频范围后继续。词库提供规范写法，
-不能单凭词库添加一句原声没有的广告内容，也不因此询问用户确认台词。
+`assets/text-library.json` holds canonical spellings of game names, people and common terms (initially
+无尽冬日, 吴樾, 林子聪, 许君聪). It fixes how a word is written; whether it was spoken is still decided by
+Codex from the actual audio, full context and verified asset copy. Never replace by sound-alike,
+similarity or expected ad copy, and never add a sentence the source does not contain.
 
-## 维护与任务快照
-
-词库格式为 `video-montage-text-library/v1`，`entries` 中每项填写：
+## Format and snapshot
 
 ```json
-{"id":"person:wu-yue","category":"person","text":"吴樾"}
+{"schema": "video-montage-text-library/v1",
+ "entries": [{"id": "person:wu-yue", "category": "person", "text": "吴樾"}]}
 ```
 
-分类为 `game`（游戏名）、`person`（人名）、`term`（常用词）。编号和规范文字各自唯一，
-编号使用小写英文字母、数字、冒号及连字符；规范文字为非空单行文本。保留现有编号，
-新增词条使用新编号。编辑该 JSON 即可扩充词库，不需要在代码中登记误识别写法。
+`category` is `game`, `person` or `term`. IDs (lowercase letters, digits, `:` and `-`) and texts are
+unique; texts are non-empty single lines. Keep existing IDs and add new IDs for new entries; editing
+the JSON is enough. Changes affect only future jobs.
 
-`init` 将整份词库保存到任务 `config/text_library.json`，工作单及状态绑定
-`text_library: {"path":"<快照绝对路径>","sha256":"<快照哈希>"}`。
-原片索引、各原片条目、审校证据和审校后的台词记录继承该引用。计划根对象也须复制同一
-`text_library` 引用；候选证据和底片证据继续绑定它。
-全局词库修改仅影响后续新任务，不改变既有任务快照。历史任务缺少该字段时沿用原契约。
-任务快照不得原位修改或移除；交付清理保留快照、原始 ASR、音频和审核依赖供重烧复核。
+`init` copies the library to `<job_dir>/config/text_library.json` and binds
+`text_library: {"path", "sha256"}` in the work order and state; the source index, every source row,
+speech evidence, reviewed speech and the plan root (copy the same reference) inherit it, and candidate
+and clean evidence stay bound to it. Never edit or remove the snapshot; completion cleanup keeps it.
 
-## 台词审校
+## In speech reviews
 
-原片、候选和底片审核顶层增加 `text_library_sha256`，精确填写任务快照的哈希。
-具体审核、逐词时间和差异索引仍使用[台词审校](speech-review.md)的格式。
-
-修正影响库中词条的规范文字时，每项 `corrections[].evidence` 引用对应词条，同时
-绑定本次实际音频区间。例如“无尽东日”的“东”改成“冬”：
+Every source, candidate and clean speech review sets `text_library_sha256` to the snapshot hash. A
+correction that touches a library term cites each affected term and the actual audio range:
 
 ```json
-[
-  {"kind":"text_library","sha256":"<任务快照哈希>",
-   "term_id":"game:wu-jin-dong-ri","text":"无尽冬日"},
-  {"kind":"source_audio","sha256":"<本次 WAV 哈希>","start_ms":500,"end_ms":1800}
-]
+[{"kind": "text_library", "sha256": "<snapshot sha256>", "term_id": "game:wu-jin-dong-ri", "text": "无尽冬日"},
+ {"kind": "source_audio", "sha256": "<this WAV sha256>", "start_ms": 500, "end_ms": 1800}]
 ```
 
-`source_audio` 的毫秒范围必须与该修正的 `start_ms`、`end_ms` 一致；具体理由说明
-音频及完整语境为何指向该游戏或人物，必要时另引原片、审校台词或铭牌证据。
-一次修改涉及多个词条时全部引用。程序核验快照、编号、规范文字、修正范围及音频绑定；
-词库引用不能替代对真实口播的判断。原始 ASR 保持完整，修正只写入独立审校台词。
+The `source_audio` range equals the correction's `start_ms`/`end_ms`. The reason explains why the
+audio and context point to that game or person (cite source, reviewed speech or nameplate evidence when
+useful). The library reference alone never proves speech.
 
-## 字幕
+## In subtitles
 
-字幕从审校后的台词和逐词时间生成，库中固定文字作为完整词保护，不跨字幕条拆分。
-导入字幕及字幕审核也核对词条出现次数、规范写法和完整词边界；例如审校台词是“吴樾”，
-字幕不能写回“吴岳”。人名仍用普通字幕样式，文字库不指定花字、人物身份或铭牌。
+Subtitles come from reviewed speech and word times. Library terms are protected whole words: never
+split across cues, never reverted to a misspelling (for example 吴樾, not 吴岳). Imported and reviewed
+subtitles are checked for term count, spelling and word boundaries. Person names use ordinary subtitle
+styling; the library assigns no flower text, identity or nameplate.

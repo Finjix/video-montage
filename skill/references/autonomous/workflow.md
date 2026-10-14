@@ -1,116 +1,197 @@
-# 无人值守混剪流程（v261008，协议 v260929）
+# Autonomous workflow
 
-新任务默认执行[Codex 台词审校](speech-review.md)，绑定 `codex-speech-review/v1`。
-ASR 只作草稿和定位依据，真实台词由 Codex 结合实际原片、上下文和素材文案校验修正；
-原始识别保留，审校文字和时间另存，并绑定音频、原片和依据哈希。流程增加
-`source-speech-evidence → source-speech-review`（素材文字核实后、规划前），计划审核
-逐候选填写 `speech_review`，`clean-qc` 取证后执行 `clean-speech-review` 才允许字幕。
-具体接口及审核示例以链接合同为准。下文历史有限用字对应、精确 ASR 比较用于未绑定
-本策略的旧任务；新策略保留真实口播精确核对、音频与画面检查，以有据审校承接识别误差，
-不因识别错误反复尝试模型或提前停工。无法完全确认的台词由 agent 根据现有 ASR、
-完整上下句、场景及固定词写法推测补齐，记录推测文字、具体依据和对应音频范围后继续，
-不因此要求用户提供台词稿或确认疑点。历史任务及仅字幕重烧保持原契约。
+Entry point (from the suite root):
 
-底片渲染默认执行[不同片段的音量均衡](audio-balance.md)，并记录编码后逐片段响度
-与峰值复检。配置可写在计划根对象或逐输出的 `audio_balance` 中；包装与重烧复用
-已处理底轨，既有成片需重新渲染才会应用。
-
-新任务还须执行[纯口播残音清理](audio-cleanup.md)。`init` 默认绑定
-`spoken-audio-cleanup/v1`，计划根对象和各片段包含 `audio_cleanup_policy`。
-`plan-evidence` 扫描完整音频与原片上下文；`approve-plan` 的逐片段审核须增加清理
-决定及受保护词范围，不能因没有 ASR 文字直接静音。确认的残音在底片渲染时清理，
-保留画面、时长、字幕和自然表达，底片及最终混音重新核验。历史任务没有此策略时
-保持以下原有兼容行为；详细接口与新音频审核规则以链接合同为准。
-
-脚本执行位置：`package` 在字幕和图层烧录、音频混合后统一倍速；无包装的 `final-evidence --clean` 先生成单独的倍速临时成品，再对它复转写、检查 PCM 和切点并抽取画面。`complete` 仅发布通过审核的倍速版本。无包装交付的未加速输入保存在 `临时文件/manifests/clean_inputs/`，交付的 `混剪（无包装）/` 中为倍速成品；包装交付的 `混剪（无包装）/` 继续保留未加速输入。输出时长按 60 fps 向上补齐到完整帧，误差小于一帧；音频仅在尾部补静音以对齐完整帧。可编辑字幕 TXT 和图层配置始终使用未加速输入的时间轴。
-
-最终输出前增加整片倍速步骤：完成剪辑及用户要求的包装后，将整条视频统一加速至 **1.2 倍**，再生成最终证据、审核和交付。画面与所有混合音频同步加速，音频保持原音调；已烧录字幕和叠加元素随画面同步，输出时长为倍速前的 `1/1.2`，输出帧率保持交付规格。未请求包装时，最终交付的无包装视频同样执行此步骤。保留未加速的纯净输入及其字幕、图层编辑时间轴用于重烧；每次重烧从未加速输入生成，只在最后加速一次。最终转写、PCM、字幕与切点取证、画面审核、清单及 SHA-256 必须对应加速后的实际成品，不能沿用倍速前的通过回执。
-
-入口：`assets/dependencies/python/python.exe scripts/autonomous/scripts/autonomous_montage.py`。这是后续任务的新契约；已有 `three_suite_ff_state.json`、v260928 审核文件和正在运行的 D 盘任务继续使用原状态机，绝不转换成新版通过回执。
-
-已授权任务开始后持续调整、修复或重造，直到请求的全部成片通过交付检查，不设三轮或其他固定重试上限，也不重复请求继续授权。使用 `repair --job-dir <目录> --reason <缺陷说明>` 恢复已有失败任务。保留历史失败和累计轮次，每轮在原交付目录覆盖更新，不新建文件夹；持续返修不豁免任何成片检查。单个命令报错或审核拒绝仅表示该轮需修复，不表示整个任务结束。用户明确要求停止时停止；除此之外，仅在可行修复和替代办法已尝试、绝对阻碍使剩余有用工作均无法继续时，才停下询问用户，说明具体阻碍、已尝试办法和恢复所需的最小输入。台词存疑、ASR 不一致、无法直接听辨、一次失败或耗时较长本身均不是绝对阻碍，不得以这些理由结束任务或请求继续授权。
-
-帧计划的片段可设置 `audio_gain_db`（-24 至 0 dB，默认 0），在 AAC 编码前预留峰值余量。最终包装继续复转写；若音乐使转写发生漂移，可用已通过原片口播检查的纯净音频与绑定 BGM 重建预期混音，并逐采样验证包装音频。信号证明要求等长、相关系数至少 0.999、全片残差不高于 -45 dBFS、任意 250 毫秒残差不高于 -38 dBFS；字幕、削波、切点与 BGM 声级差仍须通过，包装器会独立重算此证明。报告保留原始 ASR 不一致，不宣称转写完全相同。字幕审核允许将口语识别“真呆劲”规范为“真带劲”，仍绑定原证据和时间码，其他口播字词继续严格核对。
-
-Codex 在同一个任务中完成语义与画面判断，不委派独立代理，也不要求人听音频。它阅读原片及候选片段转写、逐帧画面和 PCM 报告，再提交 `reviewer_role: "codex"` 的审核文件。程序独立核验源文件、帧范围、转写、音频指标、字幕、包装版成片和所有哈希。词时间戳只作为定位线索；本流程不声称强制对齐或人工听审。台词无法完全确认时按[台词推测记录](speech-review.md)由 agent 补齐最可能的文字，并明确区分推测与已核实内容；画面或包装证据不充分时继续检查、换片、调整切点或重做包装，并重新取证检查直到完整交付。每轮复用原交付目录，视频在临时文件检查通过后原位替换；旧完成回执失效，新版通过检查后重新签发。
-
-源视频解码后的帧时间戳须从零开始且保持恒定帧率；变帧率及非零视频起点会被拒绝，须先生成可追溯的恒定帧率素材再重新准备任务。判坏区间按原片 SHA-256 和原始帧范围执行，改名或换 ID 不能绕过；计划 ID 忽略大小写后也必须唯一。相邻片段合并为一个渲染镜头时，字幕与口播检查按渲染器记录的原片段索引覆盖完整文本。
-
-包装只在用户要求时执行。未请求包装时，第 4 步完成 `clean-qc` 后，直接运行 `final-evidence --clean`，查看纯净成片片头、片尾与每个切点前后连续帧，提交新的最终审核后运行 `complete --review <JSON>`。该审核仍绑定证据和输出 SHA-256，逐成片填写 `visual_pass: true` 和具体 `reason`，无需字幕及叠加元素字段；不得调用字幕或包装阶段添加用户未要求的内容。
-
-所有新一轮视频及字幕先生成在任务的 `attempt-N/pending/` 中，整批最终技术检查和画面审核通过后，`complete` 才将视频、字幕、配置和清单发布到原交付目录。任何编码、审核或替换失败都会阻止完成；文件替换异常会回滚已替换文件，上一版交付视频保持可用。
-
-未绑定台词审校策略的历史任务，字幕同音字补充：经素材铭牌和完整游戏语境核实，可将“吴岳”写为“吴樾”、“随开随晚”写为“随开随玩”、“聚爽/聚解压”写为“巨爽/巨解压”。仅限这些完整对应项，与“真呆劲/真带劲”一样保留原 ASR、绑定改字依据和逐词时间码，不放宽历史原声 ASR、删加字或其他近似匹配门禁。新策略按独立源台词审校及逐候选、逐镜证据执行，不局限于此名单。
-
-口播数量核对按数值处理 10–99 的十进制与中文写法，例如 30 与三十相同、13 与十三相同；不把 13 视为一三，也不把 30 视为 300。原始 ASR 数字写法保留，词时间按等价中文字符展开核对。
-
-v2原声核验另识别三个有明确语境的转写用字对应：`慢慢的/慢慢地`、
-`乌央乌央的/乌央乌央地`、`幸存者不来啊/幸存者不来呀`。它们不改音频、
-不覆盖原始ASR、不允许增删字符，也不提供语义前提。候选仍须精确绑定原片台词、
-源哈希及帧界，非精确转写仍需逐段、哈希绑定的具体用字审核；底片逐镜重新核验。
-历史v1及未绑定策略的流程保留原比较规则。字幕接口与其他改字规则保持原要求。
-
-底片口播以绑定实际成片的完整逐镜复识别为证：每镜音频哈希、原声台词、连续输出帧范围均核验，全部覆盖实际成片才通过。整片 ASR 继续原样保留，记录 `whole_asr_match`；其词漂移不能推翻已经完整逐镜验证的口播，也不能代替缺失的逐镜证据。削波、切点 PCM、实际帧数和整批画面指纹仍独立检查。
-
-## 阶段
-
-### 批次临时文件归属
-
-项目 `work/` 根目录只允许批次项目文件夹。规则覆盖生产程序和 Codex 临时编写的所有文件：辅助 Python/PowerShell 脚本放当前 `job_dir/scripts/`，工作单及输入配置放 `job_dir/config/`，预览图、拼图和扫描证据放 `job_dir/evidence/`，日志、诊断及检查报告放对应英文子目录。不得先放在 `work/` 根目录再等完成时搬迁，也不得在该根目录创建预览、对比或诊断专用目录。
-
-初始化前尚无 `job_dir` 时，用 `init --work-order -` 从标准输入传入内存中的 JSON；程序创建批次目录并保存工作单快照。外部已有工作单仍可用文件路径读取。初始化后，以返回的 `job_dir` 为所有临时输出的根路径；辅助脚本显式传入项目根目录和 `job_dir`，避免移动脚本后因依赖脚本父目录而写错位置。成功交付时，一次性辅助脚本和检查文件随过程记录清理，仅保留返修及重烧所需文件；完成前检查本次任务没有在 `work/` 根目录遗留散文件或辅助目录。
-
-字幕审核后、`package` 前阅读 [AI 包装设计](../packaging/design.md)，结合实际镜头、素材文案和实际包装成片编写逐视频 `subtitle_design` （`graphic_layers` 省略或为空）。新初始化的任务要求每条包装输出有设计方案，AI只选择和搭配现成效果，不临时生成新效果或装饰素材；没有合适效果时静态呈现。主字体按视频选择，普通文字黄主白辅，实际游戏名完整花字，叙述保留静态阅读段。程序核对字幕哈希与游戏名来源，并增加动画过程取证；最终审核增加 `design_pass` 与具体 `design_reason`。所有包装与重烧均要求设计字段；纯净交付继续直接走无包装流程。
-
-组片前阅读[语义优先规则](semantic-planning.md)。新任务及完整剪辑返修绑定 `semantic-continuity/v2`：完整话轮与语境分析在先，相邻真实关系及整条叙事审核在后；不再执行批次多样化选片。底片 21.6–36 秒，最终倍速成品严格 18–30 秒，至少四个实际视觉镜头，新人物策略允许每条选择一位或多位明星，允许群演在所选明星旁边陪衬同框，但所选明星必须是画面主体；群演不能单独占镜或成为主体，允许语义相关的画外对白；历史任务保留单主角合同。同一连续镜头不能拆段凑数。候选与最终输出取证覆盖完整区间，计划审核提交逐转场、逐镜及逐成片判断。历史完成任务和单纯字幕重烧保留原契约。
-
-还须执行[整批审核](batch-review.md)：新任务和完整返修固定 `semantic-batch-review/v2`，完整候选库存、语义分类和实际视觉类别纳入计划；`plan-evidence` 先拒绝组合重复、片头/前两镜集中复用、相同中段变体和容量不足。计划与最终审核提交绑定自动报告的整批判断及逐条片头类别结论。`clean-qc` 完整解码底片并拒绝相同画面序列；文件名、字幕字体、BGM、增益和切点轻微变化均不能充当内容差异。
-
-v2每处 `content_evidence` 必须引用实际保留前文的 `premise_refs`，跨主题需要真实承接时填写相邻原声 `bridge_ref`。拒绝入坑经历或玩家规模宣传直接跳到具体玩法；同一游戏、人物和关系标签均不能代替前提。整批库存增加规范 `spoken_turns`，核实完整话轮、开头适用性及实际机位。同一完整开场台词和实际片头画面类别每批各最多4次，合理复用也不放宽；拆段、改ID、微移切点不能增加类别。查阅开头使用清单和容量缺口，数量不足时报告缺口，不将部分批次标为完整交付。
-
-1. `init --work-order <JSON>`，程序返回 `work/自动化混剪_xx/临时文件/` 的任务路径，然后 `prepare --job-dir <返回的任务路径>`。也可显式传入符合该结构的 `--job-dir`。工作单使用 `video-montage-autonomous-work-order/v260929`，包含 `requested_outputs`、`sources: [{"path": "原片绝对路径", "sha256": "可选校验值"}]`、`asset_root` ，可选 `output_root` 必须指向项目的 `work` 目录，省略时自动使用项目 `work`。`prepare` 对每条原片重新转写，记录原生帧率、源哈希、说明文字和图片哈希。
-2. Codex 查看素材图片并提交 `video-montage-codex-asset-copy/v260929`：`reviewer_role: "codex"`、`sources_sha256` 指向 `asset_copy_sources.json`，`assets` 对每个素材哈希给出可见文字。说明文件必须逐字保留；看不清的图片填空，不能猜测。
-3. Codex 依据原片转写与画面提交 `video-montage-autonomous-plan/v260929`，顶层声明 `planning_policy: "semantic-continuity/v2"`；新人物策略逐成片使用 `protagonist_ids`、完整 `visual_shots`，历史未绑定人物策略的任务保留 `protagonist_id`。逐片段增加目的与叙事阶段，逐相邻话轮增加有实际台词引用的 `transitions`。完整接口和审核字段见[语义优先规则](semantic-planning.md)及[多明星合同](selected-celebrities.md)。依次运行 `plan-evidence --plan <JSON>`、`approve-plan --review <JSON>`。后者的 `video-montage-codex-review/v260929` 需声明 `stage: "plan"`、`reviewer_role: "codex"`、`evidence_sha256`、`plan_sha256`，并逐片段给出 `semantic_pass`、`visual_pass`、`entry_visual_pass`、`exit_visual_pass`、具体 `reason` 和 `boundary_reason`。机器另查完整转写、首尾 40 毫秒低能量、削波、孤立突发声和逐帧证据；比较片段首尾各 13 帧，并扫描首尾半秒内是否藏有原片转场。Codex 必须看首尾连续 30 帧及相邻片段交界，比较人物位置、景别和画面尺寸；成片后逐帧复查每个拼接点，避免短时间内连续跳镜。不合格片段不可批准。
-4. `render-clean` 用原生整数帧范围渲染 1440×2560、60 fps 的纯净成片；`clean-qc` 保留整片复转写，并按实际渲染镜头分别复转写核对源口播，把每镜词时间偏移到成片时间轴供字幕审核使用，避免整片 ASR 把首词时间归到上一镜的静音；继续检查削波和每处切点前后 40 毫秒的残音与突发声。`subtitle-draft` 生成草稿及不可变快照。Codex 提交 `video-montage-codex-subtitle-review/v260929`，其中 `draft_sha256`、`asset_copy_sha256`、每条字幕的原文、新文、原时间码和更改依据都完整绑定；运行 `subtitle-review` 后才允许烧录。改字必须援引实际源转写、计划口播或素材文案的哈希和文字；全片字幕归一化后必须与原片口播一致，不能照抄与口播相异的广告文案。字幕不能跨越对应口播的渲染镜头边界，ASR 词时间戳偏早时以镜头边界为准。
-5. `package --config <JSON>` 使用已纠错的 `subtitle-<plan_id>.txt` 及其哈希，按现有包装配置叠加铭牌、文字钉、免责和 BGM。包装版清单标记为 `complete_autonomous`，并绑定纯净成片及自动 QC。`final-evidence` 对包装版再次转写，检查削波、切点 PCM 和口播对 BGM 的声级差；抓取每条字幕中间帧与起止前后帧、每处切点前后 72 帧、片头片尾及图层起止帧。Codex 检查这些画面并提交 `stage: "final"` 的逐成片审核。`complete --review <JSON>` 重新执行包装器技术与自动审核校验，全部通过才写 `video_montage_autonomous_completion.json`。
-
-除 `init` 可自动生成任务路径外，所有命令都带 `--job-dir work/自动化混剪_xx/临时文件/`。某阶段拒绝后记录 `reports/repair_round_N.json`；Codex 可以在新一轮重选片段，或在纯净成片已通过时重做包装。失败后必须调整并重新检查，直到完整交付，不因累计轮次停机。`status` 可读取当前阶段和失败原因。工作单 `output_root` 是项目 `work` 目录，不再创建或使用 `output` 目录。初始化自动生成北京时间命名的 `自动化混剪_YYYYMMDD_HHMMSS/`，实际路径写入状态 `output_root`；状态 delivery_directory 固定实际交付路径，修复轮次和字幕重烧均在该目录覆盖。包装 MP4 放 `成片/`，纯净 MP4 放 `混剪（无包装）/`，字幕放 `字幕/`，固定保留无扩展名文件 `修改字幕后让AI重新烧录`。交付目录的 `临时文件/` 存放任务运行记录和编辑必要的文件，包装配置放 `临时文件/config/`，编码后清理临时 MP4、ASS 和字体副本。任务状态、日志、审核、证据、清单、报告和完成回执放项目 `work/<交付目录名>/临时文件/`；完成后保留完成回执及其绑定的最终证据、逐条审核和技术校验 JSON，以及 config/、重烧必要的 manifests/、工作单及最小任务状态。其他过程记录和逐帧图片清理，不宣称已删除图片仍可读取。完整剪辑返工重新 prepare 并生成审核证据；字幕重烧复用纯净输入及其校验。旧状态仍按原有路径运行，不移动哈希绑定文件。
-
-## 正式审核前重新分句
-
-新任务绑定 `subtitle_segmentation_policy: "semantic-reading/v1"`。默认草稿保留标点及逐词时间作为分句依据，并测量现有8/9号字体的单行宽度。Codex发现语义或节奏问题后，可准备包含全部 `subtitle-<plan_id>.txt` 的目录，运行 `subtitle-draft --job-dir <任务目录> --subtitle-dir <目录>`，重新生成草稿快照及哈希，再提交原格式的 `subtitle-review`。允许重新分句改变条数；正式审核继续校验完整口播、逐词时间、镜头边界及哈希。低于最终0.8秒的独立短句在对应审核条目中须写具体 `short_cue_reason`。设计填写相同的 `reading_policy`。不要直接修改已绑定的草稿快照。
-
-## 完成后的字幕重烧
-
-正常词首不能被逐字禁用：“的确、了解”等常见词直接保留；被首字规则标记的“地形、得分、过瘾”等完整词，在对应字幕审核条目中提供 `head_word`、具体 `head_word_reason`，以及引用该完整词的哈希绑定 `evidence`。程序核验完整词与实际字幕开头、口播或素材依据一致；单字助词不能通过此例外，仍须重分句。
-
-已完成且清理过过程文件的自主任务，使用 `reburn --job-dir <任务目录> --plan-id <ID> --subtitle-txt <修改后的TXT>`，不要通过完整 `repair` 重建字幕阶段。命令核验保留的纯净成片及 QC、计划、源转写、素材文案和配置绑定，生成整批新的字幕草稿，并返回下一步使用的配置路径。
-
-按 `subtitle-review --review <新的字幕审核JSON> → package --config <返回的配置路径> → final-evidence → complete --review <新的最终审核JSON>` 顺序执行。未编辑的视频字幕仍使用各自哈希绑定的快照。源文件和素材必须继续存在且哈希一致。可复用的是已通过的纯净输入校验；新字幕和新包装输出都必须重新取证、审核，不能宣称已删除的候选画面审核仍可读取。完整剪辑返修继续用 `repair`，重新准备源证据和计划审核。
-
-整批重新分句时，可改用 `reburn --job-dir <任务目录> --subtitle-dir <目录>`，目录必须包含全部 `subtitle-<plan_id>.txt`；不能同时指定单条参数。每条新字幕仍须重新核对口播时间、镜头边界、完整文字及哈希。重烧尚未交付而需修正字幕时，可在字幕阶段或重烧失败阶段再次运行 `reburn`，不会修改现有成片。清理完成任务时必须保留逐镜转写绑定的音频文件，避免下次重烧缺失校验依据。
-
-## 审核文件示例
-
-以下仅展示计划审核的原有片段字段；新规则还必须填写[语义优先规则](semantic-planning.md)中的人物、完整区间证据、逐转场、逐镜和整条 `outputs` 字段，不可直接使用不完整示例批准：
-
-```json
-{"schema":"video-montage-codex-review/v260929","stage":"plan","reviewer_role":"codex","evidence_sha256":"<plan_evidence SHA-256>","plan_sha256":"<plan SHA-256>","planning_policy":"semantic-continuity/v2","segments":[{"plan_id":"demo-01","segment_index":1,"semantic_pass":true,"visual_pass":true,"entry_visual_pass":true,"exit_visual_pass":true,"reason":"完整一句，人物和画面含义一致","boundary_reason":"已查看原生首尾连续帧，画面稳定且没有残留转场"}]}
+```text
+assets/dependencies/python/python.exe scripts/autonomous/autonomous_montage.py <command> --job-dir <job_dir> [options]
 ```
 
-v2逐转场审核示例（按实际全部转场填写；整条输出另须 `narrative_pass` 和具体 `narrative_reason`）：
+`job_dir` is `work/自动化混剪_YYYYMMDD_HHMMSS/临时文件`, returned by `init`. `status --job-dir` prints
+the phase and `last_failures`. Read evidence files directly from the paths the commands write or print.
+
+## Stages
+
+| # | Command | Codex input | Phase afterwards |
+| --- | --- | --- | --- |
+| 1 | `init --work-order -` (JSON on stdin, or a file path) | work order | `initialized`; prints `job_dir`, `delivery_directory` |
+| 2 | `prepare` | – | `prepared` (raw source ASR, video specs, asset list) |
+| 3 | `asset-copy --copy-text <json>` | asset copy | `copy_indexed` |
+| 4 | `source-speech-evidence` | – | `source_speech_evidenced`; prints the evidence path |
+| 5 | `source-speech-review --review <json>` | source speech review | `copy_indexed` |
+| 6 | `plan-evidence --plan <json>` | plan | `plan_evidenced` |
+| 7 | `approve-plan --review <json>` | plan review | `plan_approved` |
+| 8 | `render-clean` | – | `clean_rendered` |
+| 9 | `clean-qc` | – | `clean_speech_pending`; prints the evidence path |
+| 10 | `clean-speech-review --review <json>` | clean speech review | `clean_validated` |
+
+Then, **without packaging**: `final-evidence --clean` → `complete --review <json>`.
+**With packaging** ([packaging workflow](../packaging/workflow.md)): `subtitle-draft [--subtitle-dir <dir>]`
+→ `subtitle-review --review <json>` → `package --config <json>` → `final-evidence` → `complete --review <json>`.
+
+Contracts per stage: speech reviews in [speech review](speech-review.md) and
+[text library](text-library.md); the plan in [semantic planning](semantic-planning.md),
+[batch review](batch-review.md), [selected celebrities](selected-celebrities.md) and
+[audio cleanup](audio-cleanup.md); rendering loudness in [audio balance](audio-balance.md).
+
+## Work order
 
 ```json
-{"plan_id":"demo-01","transition_index":1,"continuity_pass":true,"relation_supported":true,"missing_premise":false,"reason":"原声先说明升级熔炉提高温度，后句明确说明温度提升使幸存者到来"}
+{
+  "schema": "video-montage-autonomous-work-order/v260929",
+  "requested_outputs": 40,
+  "sources": [{"path": "D:/footage/source-01.mp4", "sha256": "<optional check>"}],
+  "asset_root": "D:/footage/packaging-assets",
+  "output_root": "D:/project/video-montage/work",
+  "packaging_request": "<the user's packaging request, if any>",
+  "cast_policy": "selected-celebrities/v3",
+  "celebrities": [{"person_id": "person:wu-yue", "name": "吴樾",
+                   "nameplate": {"path": "D:/footage/packaging-assets/明星铭牌/吴樾.png", "sha256": "<sha256>"}}]
+}
 ```
 
-最终审核顶层也须有完整 `transitions`。每项保留上述字段，另加实际最终 `output_sha256` 和 `results[].transitions` 中的 `speech_evidence_digest`；重新检查实际成片衔接，不能复制计划结论当作最终审核。批次审核还须 `opening_turns_pass: true`，核实规范完整开头与画面类别。v1历史审核无需补填v2字段；完整返修升级后须重新审核。
+- `sources` are distinct `.mp4/.mov/.mkv` files; `output_root` (optional) must be the project `work/`.
+- `celebrities` is required: every selected celebrity with a hash-bound absolute nameplate PNG
+  ([selected celebrities](selected-celebrities.md)); `cast_policy` is filled in by `init`.
+- `batch_reuse_authorization` only when the user explicitly allows extra reuse ([batch review](batch-review.md)).
+- `init` binds `semantic-continuity/v2`, `semantic-batch-review/v2`, `selected-celebrities/v3`,
+  `spoken-audio-cleanup/v1`, `codex-speech-review/v1`, `required-full-coverage/v1` text pins,
+  `semantic-reading/v1` subtitles and a snapshot of the [text library](text-library.md).
 
-字幕纠错的每条 `cues` 必须给出 `index`、原草稿的 `draft_start_ms`、`draft_end_ms`、`before`，以及纠错后的 `start_ms`、`end_ms`、`after`；新时间要与底片已审校的逐镜词时间相符（历史任务使用原有成片 ASR）。改字时还需 `evidence: [{"kind":"asset_copy|source_asr|source_speech|plan_speech","sha256":"<对应哈希>","text":"<原证据中的字词>"}]`。未改字可留空依据。最终审核的 `outputs` 每条给出 `plan_id`、`output_sha256`、`visual_pass`、`subtitle_pass`、`overlay_pass` 和具体 `reason`。
+## Asset copy
 
-失败回执不会生成“听过原声”“强制对齐”或“独立审核者已批准”的声明。无法确认的同音字及缺词由 agent 根据上下文推测补齐并记录依据，不因字词存疑停工；含混切点继续通过调整原生帧界、音频清理或替换素材修复，不能用台词推测替代切点、削波或其他技术检查。
+`prepare` lists every `.md/.txt/.png/.jpg/.jpeg` under `asset_root` in `evidence/asset_copy_sources.json`.
+Look at every image and submit:
 
+```json
+{"schema": "video-montage-codex-asset-copy/v260929", "reviewer_role": "codex",
+ "sources_sha256": "<sha256 of asset_copy_sources.json>",
+ "assets": [{"sha256": "<asset sha256>", "text": "<visible text, verbatim>"}]}
+```
 
-当前成品组织规则：新交付目录按北京时间命名为 `work/自动化混剪_YYYYMMDD_HHMMSS/`，不追加微秒，同秒重名拒绝覆盖。`临时文件/` 内目录使用英文。生产期间可以生成审核、证据和报告；自动流程通过全部交付检查后清理这些过程文件，仅保留 `config/`、重烧必要的 `manifests/`、最小工作单和任务状态。纯净视频和字幕继续分别保存在 `混剪（无包装）/`、`字幕/`。完整剪辑返工重新生成证据、审核和校验；字幕重烧复用纯净视频和绑定的纯净输入校验文件。旧任务仍使用其原有路径，避免破坏哈希绑定。此规则替代上文关于完成后保留全部运行记录的要求。
+Cover every asset exactly once. `.md/.txt` text must be copied byte-for-byte; use `""` for an image
+whose text is unreadable. Never guess.
 
-新多明星任务执行[所选明星与首次出场铭牌合同](selected-celebrities.md)。工作单登记可扩展明星与铭牌哈希，逐输出使用 `protagonist_ids`；允许群演陪衬同框，所选明星必须是画面主体；群演另行声明且不计明星人数、不展示明星铭牌，每位明星首次出场显示一次铭牌，切换说话人须审核独立主体关系。历史任务保留原人物合同。
+## Plan evidence: machine checks
+
+`plan-evidence` validates the plan, then for every segment extracts candidate PCM, one neutral ASR
+pass, VAD/waveform cleanup evidence, boundary frames (±0.5 s) and every selected native frame at 960 px
+(`continuous_visual`; 16-frame contact sheets are navigation only). It rejects a candidate when:
+
+- the planned text differs from the reviewed source words inside its frame range, or a cut truncates a word;
+- the first/last 13 frames or the nearby 30 frames show a hidden transition (adjacent mean difference
+  > 0.07 or endpoint distance > 0.12).
+
+Identical segments reuse evidence within a round, and full-interval frames are cached by source range
+across rounds, so repairing one output only re-extracts changed ranges. The whole-batch report is
+also written to `reports/batch_review_round_N.json`.
+
+## Plan review (`approve-plan`)
+
+```json
+{
+  "schema": "video-montage-codex-review/v260929", "stage": "plan", "reviewer_role": "codex",
+  "evidence_sha256": "<plan evidence file sha256>", "plan_sha256": "<plan sha256>",
+  "planning_policy": "semantic-continuity/v2", "batch_review_policy": "semantic-batch-review/v2",
+  "speech_review_policy": "codex-speech-review/v1", "audio_cleanup_policy": "spoken-audio-cleanup/v1",
+  "text_library_sha256": "<job text library snapshot sha256>",
+  "cast_policy": "selected-celebrities/v3", "celebrities": ["<exact registry from the work order>"],
+  "batch_review": {"report_digest": "...", "source_inventory_pass": true, "opening_turns_pass": true,
+                   "semantic_routes_pass": true, "visual_families_pass": true, "reuse_pass": true, "reason": "..."},
+  "segments": [], "transitions": [], "visual_shots": [], "outputs": []
+}
+```
+
+Every list covers its full scope exactly once.
+
+- `segments[]` (one per plan segment): `plan_id`, `segment_index` (1-based), `semantic_pass`,
+  `visual_pass`, `entry_visual_pass`, `exit_visual_pass` (all `true`), `reason`, `boundary_reason`,
+  `continuous_visual_sha256` (from the evidence row), `speech_review` ([speech review](speech-review.md)),
+  `audio_cleanup` ([audio cleanup](audio-cleanup.md); the evidence row lists head/tail energy, clipping
+  and transients for that review) and the cast fields of
+  [selected celebrities](selected-celebrities.md) (`cast_reason` etc.).
+- `transitions[]` (one per adjacent pair): `plan_id`, `transition_index` (1-based), `continuity_pass: true`,
+  `relation_supported: true`, `missing_premise: false`, specific `reason`; plus `speaker_change_pass`
+  and `speaker_change_reason` when the speaker changes.
+- `visual_shots[]`: `plan_id`, `shot_index`, `source_visual_shot_id`, `shot_pass: true`, `reason`,
+  `boundary_reason`, plus cast fields.
+- `outputs[]`: `plan_id`, `semantic_pass`, `visual_shots_pass`, `narrative_pass` (all `true`), integer
+  `visual_shot_count`, `semantic_reason`, `shot_reason`, `narrative_reason`, cast fields, and the
+  batch fields `opening_visual_family_id`, `second_visual_family_id`, `opening_visual_pass: true`,
+  `opening_visual_reason`.
+
+Compute `report_digest` from the evidence file:
+
+```text
+assets/dependencies/python/python.exe -c "import json,hashlib,sys;r=json.load(open(sys.argv[1],encoding='utf-8'))['batch_review_report'];print(hashlib.sha256(json.dumps(r,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest())" <evidence.json>
+```
+
+Inspect, for every candidate, the first and last 30 native frames in order and any source transition
+near them; report entry and exit separately. Compare the outgoing segment's last frames with the
+incoming segment's first frames for subject position, scale and shot size; choose a compatible cut
+when they jump. Move a boundary past a residual transition only when a complete phrase remains.
+
+## Clean render and QC
+
+`render-clean` renders every output in parallel at 1440×2560, 60 fps CFR, H.264/AAC from integer
+native frame ranges, applying approved audio cleanup and [audio balance](audio-balance.md). `clean-qc`
+checks frame counts and timeline lineage, clipping, the 40 ms on both sides of every cut (each
+≤ -30 dBFS with no transients, so cut in silence), audio-cleanup residuals, and decodes every clean
+video to reject duplicate picture sequences across the batch. It recognizes each rendered shot separately (shot-local word times feed
+the clean speech review and then the subtitles). Then submit the clean speech review. Inspect the rendered
+video frame by frame around every splice: two shot changes in quick succession are a defect even if
+each candidate edge looked stable.
+
+## Final evidence and review (`complete`)
+
+`final-evidence` (packaged) or `final-evidence --clean` runs ASR on the accelerated output, checks
+clipping, cut PCM, speech/BGM masking (voice at least 6 dB over music), subtitle timing inside shots,
+text pin coverage, nameplates, audio cleanup in the mix, and a sample-level mix proof (correlation
+≥ 0.999, residual ≤ -45 dBFS, every 250 ms ≤ -38 dBFS). It extracts every final frame (cached by output
+hash), ±72 frames around every cut, subtitle and overlay start/end frames and animation frames.
+
+Final review header: `schema`, `"stage": "final"`, `reviewer_role`, `evidence_sha256` of
+`reports/final_evidence.json`, `planning_policy`, `batch_review_policy`, `cast_policy`, `celebrities`,
+and `text_pin_policy` when packaged. Then:
+
+- `outputs[]`: `plan_id`, `output_sha256`, `visual_pass`, `reason`, plus when packaged `subtitle_pass`,
+  `overlay_pass`, `design_pass`, `design_reason`, `text_pins_pass`, `text_pin_reason`,
+  `nameplates_pass`, `nameplate_reason`. Repeat the plan-review output fields (semantic, narrative,
+  shot count, cast) and `continuous_visual_sha256` of the final evidence row. Batch fields as in the
+  plan review plus `reviewed_opening_frame_count` ≥ 60 (inspect at least the first 60 encoded frames).
+- `transitions[]`: every transition again, judged on the actual output, with the plan-review fields
+  plus `output_sha256` and the `speech_evidence_digest` from `results[].transitions[]`.
+- `batch_review`: recomputed `report_digest` from the final evidence file.
+
+`complete` re-runs the technical validator, publishes the batch and compacts the job directory. An
+unpackaged delivery puts the accelerated videos in `混剪（无包装）/` and keeps the unaccelerated inputs in
+`临时文件/manifests/clean_inputs/`.
+
+## Recovering from a rejection
+
+A failed command records `reports/repair_round_N.json`, sets phase `repair_required` and keeps all
+earlier evidence. Fix the cause and resume at the earliest affected stage; do not restart the job.
+
+| Rejected | Resume with |
+| --- | --- |
+| asset copy, source speech review, plan review, clean speech review, final review | correct the JSON and rerun the same command (evidence still matches) |
+| plan content or candidate evidence | revise the plan → `plan-evidence` → `approve-plan` |
+| `render-clean` | `approve-plan` (same review) → `render-clean` |
+| `clean-qc` | repair the plan → `plan-evidence`; or rerun `clean-qc` after a transient error |
+| `subtitle-review` | `subtitle-draft` (or `reburn` on a reburn job) → `subtitle-review` |
+| `package`, `final-evidence` | fix the config → `package` → `final-evidence` (or resume at `subtitle-draft` for subtitle defects) |
+
+Use `repair --reason <defect>` only to discard the plan and rebuild the edit (it revokes all
+downstream approvals and keeps the failure history). Source speech cannot be re-reviewed after a plan
+exists without `repair`.
+
+## Reburn a completed delivery
+
+Completed packaged jobs keep the clean inputs, clean QC, plan, source speech, asset copy and config.
+The sources used by the batch and all assets must still exist unchanged.
+
+- One video: `reburn --plan-id <ID> --subtitle-txt <TXT>`; whole batch: `reburn --subtitle-dir <dir>`
+  (contains every `subtitle-<plan_id>.txt`; never combine with `--plan-id`).
+- `reburn` prints the draft and config paths. Continue with `subtitle-review` → `package --config
+  <returned config>` → `final-evidence` → `complete`. Changed cue text marks the design
+  `needs_design_review`: update `subtitle_design.cues` and remove the flag.
+- `reburn` can be rerun while the reburn is unfinished. Use `repair` for any change to the edit itself.
