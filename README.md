@@ -1,108 +1,25 @@
 # video-montage
 
-字幕每行最多10个可见字符（数字、标点计入，空白不计入）。长句按语义顺序拆分并对齐口播，不能靠缩字号、加宽布局或改为两行突破上限。
+版本：`v261010`。中文口播混剪 Codex 技能。
 
-字幕包装须搭配三种现有动画，整批不能只用单一效果；黄色为主色，白色只与同句黄色重点字词搭配，禁止纯白普通字幕。详见[包装设计规则](references/packaging/design.md)。
+## 依赖版本
 
-`video-montage` 是一个 Codex 技能，用随包的 Python、Whisper 模型和 FFmpeg 完成中文口播混剪。内部模块分别负责语义分析、逐帧渲染、成片编码和独立质检。
+依赖目录：`assets/dependencies/`。运行平台：64 位 Windows。
 
-版本变化见 [版本更新](docs/版本更新.md)。
+| 依赖 | 版本 |
+|---|---|
+| Python | 3.13.15 |
+| FFmpeg / FFprobe | 9.0.2 |
+| faster-whisper | 1.2.1 |
+| CTranslate2 | 4.8.2 |
+| PyAV | 18.1.0 |
+| NumPy | 2.5.3 |
+| Pillow | 12.3.0 |
+| OpenCV | 5.0.0.93 |
+| ONNX Runtime | 1.30.0 |
+| CUDA cuBLAS | 12.9.0.13 |
+| CUDA Runtime | 12.9.37 |
 
-`docs/版本更新.md` **只有在用户明确要求更新时才能更改**。日常代码修改、审阅、问题修复、测试、提交及打包均不授权自动修改此文件；未经用户明确要求，不得新增、改写或删除版本记录。
+Whisper 模型：`mobiuslabsgmbh/faster-whisper-large-v3-turbo`。
 
-版本记录中的代码检查点只写提交哈希，格式为“代码检查点：`<提交哈希>`。”，不附加标签、命令或详细说明。
-
-新任务及完整剪辑返修还执行[整批审核](references/autonomous/batch-review.md)：先完整挖掘语义连贯的候选，再检查组合唯一性、实际片头和前两镜、中段与结尾的复用；渲染后复核底片完整画面序列。不得把少量方案循环复制成请求数量，字体和 BGM 变化不算内容变化。历史交付和字幕重烧保留原任务契约。
-
-后续新任务和完整剪辑返修采用 `semantic-continuity/v2` 与 `semantic-batch-review/v2`。每处衔接须引用实际保留口播中的前提，跨主题须保留真实原声桥接；“刷广告入坑”直接跳到“砍树建造”等缺少承接的组合拒绝。计划及最终成片均逐转场审核，并检查整条叙事、主体和因果顺序。同一完整开场台词、同一连续镜头的实际片头类别每批各最多4次；拆句、改ID、微移切点以及合理复用授权都不能突破上限。数量不足时报告容量和缺口，不能用不连贯或超限方案凑数。历史v1任务和仅字幕重烧仍按原有版本执行。
-
-新无人值守任务使用[自动混剪流程](references/autonomous/workflow.md)及[语义优先规则](references/autonomous/semantic-planning.md)：先分析原片完整话轮与语境，再规划真实衔接的叙事，不再执行批次多样化选片。底片 21.6–36 秒，最终 1.2 倍速成品严格 18–30 秒；每条至少四个实际镜头。新人物策略允许每条选择一位或多位已登记明星，允许群演在所选明星旁边陪衬同框，但所选明星必须是画面主体；群演不能单独占镜或成为主体，允许语义相关的画外对白；历史任务保留单主角合同。程序核验完整区间画面证据、镜头时间轴、实际编码时长及整条审核。已有完成任务与单纯字幕重烧保留原契约，完整剪辑返修执行新规则。
-
-新自主任务还执行[Codex 台词审校](references/autonomous/speech-review.md)：保留原始 ASR，AI 核实完整原片语境后单独保存修正台词和逐词时间，再规划剪辑。候选及底片实际渲染镜头都须有绑定音频的审校记录，识别差异不再要求通过反复模型重试消除；有据修正和技术检查通过后才进入字幕包装。现有 v2 自主任务可在返修后、规划前启用，历史字幕重烧保留已绑定契约。
-
-已授权任务开始后持续执行，阶段报错或审核拒绝后自行修复，不重复询问是否继续。除用户明确要求停止外，仅在可行修复和替代方法已尝试、绝对阻碍使剩余有用工作均无法进行时才停下询问。台词无法完全确认时，由 agent 根据已有识别、上下句、场景及固定词写法推测补齐，保留原始 ASR 并记录推测依据和实际音频范围；无法直接听辨或识别结果不一致不再单独触发停工。台词推测仍须经过原有帧界、音频、语义、字幕与成片质量检查。
-
-新任务使用[固定文字库](references/autonomous/text-library.md)，初始收录游戏名“无尽冬日”和明星名“吴樾、林子聪、许君聪”。编辑 `assets/text-library.json` 可增加游戏名、人名及常用词。AI结合实际原片语境确认词条后统一台词和字幕写法，保留原始识别结果；字幕完整保留固定词。每个任务绑定独立词库快照，更新只影响后续新任务，旧任务及重烧沿用原契约或原快照。
-
-用户明确允许为满足数量进行合理复用时，将实际授权绑定到工作单和计划，按[整批审核的合理复用规则](references/autonomous/batch-review.md)适度放宽复用上限，同时避免大量重复。整条复制和仅靠字幕、字体或BGM变化凑数仍被拒绝；未授权的任务保留原有严格上限。
-
-## 技能包结构与使用位置
-
-ZIP 采用 OpenAI 技能包的单一顶层目录结构，目录名与 `SKILL.md` 中的 `name` 一致：
-
-```text
-video-montage/
-├── SKILL.md                 # 唯一技能入口，包含 name 和 description
-├── agents/openai.yaml       # 技能元数据
-├── scripts/                 # 工作流脚本与运行校验
-├── references/              # 工作流说明、审核合同与配置模板
-└── assets/                  # 字体、Python、FFmpeg 和模型等运行资源
-```
-
-在 64 位 Windows 上，将 ZIP 中的 `video-montage/` 完整解压到 Codex 技能目录 `%CODEX_HOME%\skills\`；未设置 `CODEX_HOME` 时使用 `%USERPROFILE%\.codex\skills\`。最终入口为 `skills/video-montage/SKILL.md`，无需运行安装脚本。解压后重新打开 Codex。
-
-源码目录额外保留 `README.md`、`docs/`、`tools/` 和 `package.cmd` 供维护与打包使用；这些文件不进入技能 ZIP。包内不含 Git 文件、项目测试、任务记录、缓存或已有发布包。
-
-## 使用
-
-流程新增最后的整片倍速步骤：剪辑及所需包装完成后，画面和音频统一加速至 **1.2 倍**，保持音调与字幕同步，再检查并输出成品。无包装交付同样适用；字幕重烧从未加速的纯净输入重新合成，最后只加速一次。最终证据和审核须绑定倍速后的实际成品。
-
-自主流程的 `package` 和 `final-evidence --clean` 已自动执行该步骤。旧任务无包装交付时，在 `controller-finalize` 添加 `--final-speed`；要做包装时不添加该参数，由包装器在合成后加速。无包装交付的未加速输入保存在 `临时文件/manifests/clean_inputs/`，避免和交付的倍速 MP4 混用。字幕 TXT 与图层配置继续按未加速输入编辑。
-
-在 Codex 中统一调用 `video-montage`，项目根目录 `SKILL.md` 是唯一技能入口。新任务及其返修按[自主流程](references/workflows/autonomous-workflow.md)使用 `scripts/autonomous/scripts/autonomous_montage.py`，由 Codex 审核语义、画面和字幕，程序核验 ASR、PCM 与哈希。已有 `three_suite_ff_state.json` 或 v260928 审核回执的任务按[旧任务流程](references/workflows/legacy-workflow.md)继续运行，不转换状态或回执。旧任务由执行器 `scripts/executor/scripts/three_suite_ff.py` 按 `preflight → init → semantic-run → semantic-complete → controller-preflight → controller-finalize → controller-validate → complete` 顺序运行。语义模块制定和审核帧计划，帧渲染器剪出预成片，FFmpeg 控制器编码并复检最终视频。
-
-生产裁切使用 `source_in_frame`、`speech_end_frame`、`source_out_frame_exclusive` 和源帧率；只有秒数的计划会被拒绝。解码后的帧时间戳须为从零开始的恒定帧率，变帧率及非零视频起点会在编码前被拒绝。素材须绑定原片 SHA-256 和原始帧区间，用户判坏的区间不能通过改名或新候选 ID 绕过。计划 ID 在忽略大小写后仍须唯一。两种流程按各自契约执行语义、切点和成片复检；自主流程不声明人工听审、独立审核或强制对齐，旧流程保留原审核门禁。
-
-默认成片为 H.264/AAC、1440×2560、60 fps，不额外添加背景音乐、字幕或叠加元素。新任务合同见[自动混剪流程](references/autonomous/workflow.md)；旧任务合同见 [语义流程](references/workflows/semantic-workflow.md)、[渲染流程](references/workflows/executor-workflow.md) 和 [控制器流程](references/workflows/controller-workflow.md)。
-
-底片渲染默认对不同片段做[音量均衡](references/autonomous/audio-balance.md)：按实测响度调整固定增益，默认目标 -18 LUFS，限制真实峰值和最大提升；编码后逐片段复检。可通过计划中的 `audio_balance` 调整或关闭，旧成片需重新渲染才会应用。
-
-新自主任务默认执行[纯口播残音清理](references/autonomous/audio-cleanup.md)：扫描完整片段的波形、VAD 与上下句逐词转写，由 AI 逐项复核残音和杂音，再对确认区间静音。保留画面、时长、字幕、呼吸和笑声，在加配乐及倍速前清理所有原片音频声道；底片和最终成品都复检。识别不出文字不直接触发静音。历史任务缺少新策略字段时保留原有流程，字幕重烧复用已通过的清理底轨。
-
-未请求包装的新任务，在 `clean-qc` 后运行 `final-evidence --clean`，由 Codex 查看成片画面并提交最终审核，再执行 `complete --review <JSON>`。整批通过后交付 `混剪（无包装）/` 中的 MP4。
-
-### 可选成片包装
-
-新包装任务由 AI 按视频选择主字体，设计黄色主字幕与白色辅助、整词游戏名花字及适量既有入场动画。字号仅限8/9：普通字幕默认8，游戏名9；普通重点使用9时须整条字幕统一字号并单独显示。字幕始终单行，长句按语义拆成先后显示的短句，不换行或缩小字号。使用原有冰1、冰2、火1花字和向上弹入、呐喊声波、冰雪飘动效果，普通叙述保留静态阅读段；不增加复刻文字模板和装饰卡片。AI 只根据口播含义与画面留白选择、搭配已有现成效果，再查看实际成片复查审美；不临时创造新效果或素材，没有合适效果时使用静态字幕。所有包装与重烧配置必须包含逐输出设计，不兼容无设计字段或 `subtitle_srt` 的旧配置。接口、预览、文字来源与重烧规则见 [AI 包装设计](references/packaging/design.md)。
-
-新任务按自主流程执行 `subtitle-draft → subtitle-review → package → final-evidence → complete`，由 Codex 审核包装版画面和字幕；下述控制器及 `packaging-*` 命令用于旧任务。
-
-包装模块生成可编辑中文字幕草稿，并按每条视频的 JSON 配置加入文字钉、BGM、免责图和明星名牌。字幕只烧录进视频，保留 `字幕/subtitle-xx.txt` 供修改后重新烧录，不生成外挂字幕轨或 `.srt` 文件；包装视频放 `成片/`，纯净视频放 `混剪（无包装）/`，配置放 `临时文件/config/`，清单和重烧上下文放 `临时文件/manifests/`。字幕目录固定包含无扩展名文件 `修改字幕后让AI重新烧录`。包装版另存，包装配置、素材、字幕和输出均以 SHA-256 绑定。旧任务在 `controller-validate` 后依次运行 `packaging-draft`、`packaging-finalize`、`packaging-validate`，再运行 `complete`；没有包装配置时继续原流程。已有 1440×2560、60 fps 视频也可用独立命令包装，结果标为单条测试。命令、配置和审核格式见 [包装说明](references/packaging/workflow.md)。
-
-完成后的自主任务修改字幕时，运行 `reburn --job-dir <任务目录> --plan-id <ID> --subtitle-txt <修改后的TXT>`。按命令返回的草稿和配置完成新的 `subtitle-review → package → final-evidence → complete`。保留的纯净输入及 QC 可复用，新的字幕和包装画面必须重新审核；原始素材仍需可访问且哈希一致。
-
-## 随包依赖与检查
-
-`assets/dependencies/python/` 包含 64 位 Python 3.13.15 和模块，`assets/dependencies/ffmpeg/` 包含 FFmpeg、FFprobe，`assets/dependencies/models/` 包含完整的 `faster-whisper-large-v3-turbo` 模型，`assets/dependencies/cuda/` 包含可选的 CUDA 推理 DLL。GPU 推理需要兼容的 NVIDIA 驱动；无法使用 CUDA 时，ASR 可回退 CPU。精确版本与模型 revision 见 [依赖版本](docs/依赖版本.md)。
-
-运行环境检查：`assets\dependencies\python\python.exe scripts\verify_runtime.py`。完整发布回归：`assets\dependencies\python\python.exe tools\validate_release.py`。
-
-## 打包分发
-
-运行 `package.cmd`，在项目的 `release/` 目录生成 `video-montage-v261010.zip`（默认版本读取 `SKILL.md`）。可传入压缩包文件名版本，例如 `package.cmd v261011` 会生成 `release/video-montage-v261011.zip`。无论文件名版本如何，包内顶层目录始终为 `video-montage/`，其中仅有一个 `SKILL.md`，保留完整运行依赖。打包前检查技能入口及随包运行环境。完成或失败后显示结果并等待按键；脚本调用可加 `-NoPause`。
-
-目录布局依据 [OpenAI Skills 官方文档](https://developers.openai.com/api/docs/guides/tools-skills)，用于内部完整技能分发，不限制包大小或文件数量。
-
-
-所有新任务的交付目录放在项目 `work/`，时间戳使用北京时间（`YYYYMMDD_HHMMSS`），同秒重名拒绝覆盖：
-
-`work/` 根目录只放批次项目文件夹。AI 临时编写的辅助脚本、工作单 JSON、扫描结果、预览图、拼图、日志和检查记录也必须归入当前批次的 `临时文件/`，分别使用 `scripts/`、`config/`、`evidence/`、`reports/` 等英文子目录。初始化前通过 `init --work-order -` 从标准输入传入内存中的工作单，程序会在批次内保存快照；初始化后所有临时输出使用返回的 `job_dir`。完成时清理一次性辅助文件，并检查本次任务没有在 `work/` 根目录遗留散文件或辅助目录。
-
-```text
-work/
-└── 自动化混剪_20261008_153000/
-    ├── 成片/                       # 包装、烧录后的 MP4
-    ├── 混剪（无包装）/             # 供重新烧录的纯净 MP4
-    ├── 字幕/
-    │   ├── subtitle-xx.txt
-    │   └── 修改字幕后让AI重新烧录
-    └── 临时文件/                   # 完成后保留的必要文件
-        ├── config/                 # 重烧需要的包装配置
-        ├── manifests/              # 清单、纯净输入校验和重烧上下文
-        ├── autonomous_state.json
-        └── work_order.json
-```
-
-运行 `init --work-order <JSON>` 自动创建交付目录与项目临时运行目录，返回的 `job_dir` 为 `work/<交付目录名>/临时文件/`；后续命令使用这个路径。工作单 `output_root` 可省略，填写时必须指向 `work`。过程状态、日志、审核、证据和报告统一保存在 `临时文件/` 的英文子目录。自主任务完成后清理过程记录、临时 MP4、ASS 和字体副本，仅保留配置、清单、纯净输入授权、计划/转写/素材文案等重烧上下文及最小工作单和状态。返修和字幕重烧复用同一交付目录；整批临时视频通过最终检查后才替换交付文件，替换失败会回滚已替换文件。新任务不再创建根目录 `.runtime/`。Git、安装和分发排除 `work/`，并继续排除兼容旧任务的 `.runtime/`。已有旧流程任务保留原路径和绑定。
-
-新多明星任务执行[所选明星与首次出场铭牌合同](references/autonomous/selected-celebrities.md)。工作单登记可扩展明星与铭牌哈希，逐输出使用 `protagonist_ids`；允许群演陪衬同框，所选明星必须是画面主体；群演另行声明且不计明星人数、不展示明星铭牌，每位明星首次出场显示一次铭牌，切换说话人须审核独立主体关系。历史任务保留原人物合同。
+模型 revision：`0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf`。
