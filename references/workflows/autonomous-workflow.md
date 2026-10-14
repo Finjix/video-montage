@@ -76,10 +76,18 @@ hash-bound `reviewer_role: codex` findings. Never claim an independent reviewer,
 human listening, or forced word alignment. Machine gates re-run ASR on source,
 candidate, clean and packaged media, inspect PCM, validate subtitles and
 recheck output hashes and the bound speech review. Review and correct recognition
-errors before deciding that actual speech is ambiguous. Reject ambiguous speech, visuals or copy rather than
-guessing. After every rejected round, adjust the edit, replace unsuitable footage,
+errors; when wording cannot be fully confirmed, the agent infers and completes
+the most likely speech from ASR and the full context, records the inference and
+its basis under the speech-review contract, and continues. Do not ask the user
+for a transcript or wording confirmation merely because speech is uncertain or
+direct listening is unavailable. Unclear visuals or asset copy still require
+further inspection or replacement. After every rejected round, adjust the edit, replace unsuitable footage,
 or rebuild and run the required checks again until complete delivery passes.
 There is no three-round stopping rule and no repeated continuation approval.
+Stop when the user asks. Otherwise ask the user only after an absolute blocker
+prevents further useful work and available repairs or alternatives have been
+exhausted. A failed command, recognition disagreement or uncertain speech does
+not end the task; repair or document the agent's speech inference and continue.
 Use `repair --reason <defect>` to resume an existing failed job, preserving
 all previous failures, evidence, and round numbers. Continue
 repairing or rebuilding until every requested video passes; never replace

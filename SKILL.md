@@ -32,8 +32,14 @@ containing this file in both the source project and the installed skill. Resolve
   Plan from reviewed native source ranges. Review each candidate in approve-plan;
   after clean-qc, run clean-speech-review for every actual rendered shot before
   subtitles or packaging. Do not repeatedly retry ASR merely to match expected
-  words or stop production merely because a recognition differs. Unresolved
-  speech still requires stronger evidence or replacement footage. Historical
+  words or stop production merely because a recognition differs. When speech
+  cannot be fully confirmed, the agent must infer and complete the most likely
+  wording from available ASR, adjacent dialogue, scene context and fixed spellings.
+  Record inferred wording and its basis separately from verified corrections,
+  preserve the raw ASR, and continue without asking the user for a transcript or
+  confirmation. Inability to listen directly is not a blocker when usable ASR and
+  context are available. Follow the inference records in the speech-review contract;
+  do not describe inferred words as heard or fully verified. Historical
   jobs/reburns preserve their bound contract; current autonomous full repairs can
   enable this policy before planning. Preserve these dependencies for reburn.
   New jobs also bind `spoken-audio-cleanup/v1`; read
@@ -131,11 +137,18 @@ delivered clean version must also receive this final speed-up. Final ASR, audio,
 visual checks, timeline evidence, manifests and hashes must describe the actual
 accelerated output; old pre-speed approvals cannot authorize it.
 
-New autonomous jobs must keep adjusting, repairing or rebuilding until every
+Once an authorized task starts, keep adjusting, repairing or rebuilding until every
 requested finished video passes all delivery checks. There is no retry ceiling
-or additional continuation approval. Preserve failed-round history while working;
-never bypass quality gates or report a partial batch as complete. Pause only
-when the user asks to stop or an external dependency truly prevents progress.
+or additional continuation approval. A rejected command or review is an instruction
+to repair and continue, not a reason to end the task or ask whether to proceed.
+Resolve routine choices and uncertain speech autonomously. Preserve failed-round
+history while working; never bypass quality gates or report a partial batch as
+complete. Stop when the user requests it. Otherwise ask the user only when an
+absolute blocker prevents all remaining useful work after available repairs and
+alternatives have been exhausted. Report the concrete blocker, attempted remedies
+and the minimum missing input needed to resume. ASR disagreement, uncertain wording,
+inability to listen directly, a failed round or processing time alone is not such
+a blocker.
 
 Every source segment must bind original-source SHA-256, integer native-frame
 bounds and source FPS. Reject seconds-only cuts, rejected source ranges, stale
