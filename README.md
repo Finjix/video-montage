@@ -1,10 +1,20 @@
 # video-montage
 
-版本：`v261010`。中文口播混剪 Codex 技能。
+版本：`0.0.1`。中文口播混剪 Codex 技能。
+
+## 目录与发布
+
+- `skill/`：完整技能，包含 `SKILL.md`、`agents/`、`scripts/`、`references/` 和 `assets/`（含运行依赖与模型）。
+- `dev/`：本地开发专用目录。
+- `work/`：本地任务产物。
+
+发布时直接将整个 `skill` 文件夹压缩为 ZIP，再按需改名。
+
+新增开发工具和测试统一放入 `dev/`，不要在仓库根目录或 `skill/` 中建立开发工具、测试或临时产物目录。技能运行所需的脚本、资源和依赖保留在 `skill/`。
 
 ## 依赖版本
 
-依赖目录：`assets/dependencies/`。运行平台：64 位 Windows。
+运行平台：64 位 Windows。
 
 | 依赖 | 版本 |
 |---|---|
@@ -21,5 +31,3 @@
 | CUDA Runtime | 12.9.37 |
 
 Whisper 模型：`mobiuslabsgmbh/faster-whisper-large-v3-turbo`。
-
-模型 revision：`0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf`。

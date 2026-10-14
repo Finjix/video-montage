@@ -2,7 +2,7 @@
 name: video-montage
 description: Produce and repair Chinese spoken-video montage batches with native-frame editing, Codex semantic and visual review, subtitle packaging, and post-encode QC. Use the autonomous workflow for new jobs and preserve the independent-review workflow for existing legacy jobs.
 metadata:
-  version: "v261010"
+  version: "0.0.1"
 ---
 
 # Video montage

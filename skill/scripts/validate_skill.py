@@ -21,7 +21,7 @@ def validate(root: Path) -> None:
     if set(metadata) - {"name", "description", "license", "allowed-tools", "metadata"}:
         raise ValueError(f"Unexpected frontmatter keys: {path}")
     name, description = metadata.get("name"), metadata.get("description")
-    if name != root.name or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name or "") or len(name) > 64:
+    if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", name or "") or len(name) > 64:
         raise ValueError(f"Invalid skill name: {path}")
     if not isinstance(description, str) or not description.strip() or len(description) > 1024:
         raise ValueError(f"Invalid skill description: {path}")
