@@ -18,8 +18,8 @@ metadata:
 
 ## Workflow
 
-Run every job through `scripts/autonomous/autonomous_montage.py`; read the
-[workflow](references/autonomous/workflow.md) first. `init` binds the current policy versions into
+Run every job through `scripts/video_montage.py <command>`; read the
+[workflow](references/workflow.md) first. `init` binds the current policy versions into
 the work order, state, source index, plan, evidence and reviews; never delete, rename or change a
 policy marker to pass a gate. Jobs from earlier versions of this skill are not supported.
 
@@ -35,7 +35,7 @@ policy marker to pass a gate. Jobs from earlier versions of this skill are not s
    transcript, and never replace real speech with ad copy.
 3. **Frame authority.** Every source segment binds original-source SHA-256, integer native frame
    bounds and source FPS. Seconds-only cuts, stale evidence and incomplete speech are hard failures,
-   as are ranges in `references/semantic/wuzimu-v20-invalid-intervals.json` (matched by source hash
+   as are ranges in `assets/rejected-source-intervals.json` (matched by source hash
    and frames; renaming never bypasses them). Sources must decode at a constant frame rate from
    timestamp 0; otherwise create a traceable CFR copy and prepare again.
 4. **Edit shape.** Clean input 1296–2160 frames (21.6–36 s at 60 fps, natural speed); final delivery
@@ -87,10 +87,10 @@ refused, never overwritten):
 
 Read the workflow first; open the others when the stage needs them:
 
-- [workflow](references/autonomous/workflow.md): commands, stage gates, review formats, recovery, repair, reburn
-- [speech review](references/autonomous/speech-review.md) and [text library](references/autonomous/text-library.md): source, candidate and clean speech reviews
-- [semantic planning](references/autonomous/semantic-planning.md): plan format and editorial rules
-- [batch review](references/autonomous/batch-review.md): inventory, reuse limits, opening capacity
-- [selected celebrities](references/autonomous/selected-celebrities.md): cast, supporting actors, nameplates
-- [audio cleanup](references/autonomous/audio-cleanup.md) and [audio balance](references/autonomous/audio-balance.md)
-- [packaging workflow](references/packaging/workflow.md) and [packaging design](references/packaging/design.md): only when packaging is requested
+- [workflow](references/workflow.md): commands, stage gates, review formats, recovery, repair, reburn
+- [speech review](references/speech-review.md) and [text library](references/text-library.md): source, candidate and clean speech reviews
+- [planning](references/planning.md): plan format and editorial rules
+- [batch review](references/batch-review.md): inventory, reuse limits, opening capacity
+- [celebrities](references/celebrities.md): cast, supporting actors, nameplates
+- [audio cleanup](references/audio-cleanup.md) and [audio balance](references/audio-balance.md)
+- [packaging](references/packaging.md) and [packaging design](references/packaging-design.md): only when packaging is requested

@@ -19,14 +19,14 @@ REQUIRED = (
     "assets/rejected-source-intervals.json",
     "assets/packaging/design/catalog.json",
     *(f"assets/packaging/animations/parameters/{name}.json" for name in ("static", "bounce_up", "shout_wave", "ice_drift")),
-    *(f"scripts/autonomous/{name}.py" for name in ("autonomous_montage", "batch_review", "cast_policy",
-                                                    "planning_policy", "speech_review")),
-    *(f"scripts/semantic/{name}.py" for name in ("asr", "audio_balance", "audio_cleanup", "content_gate", "frame_plan_gate",
-                                                  "portable_frame_renderer", "rejected_intervals", "source_timing")),
-    *(f"scripts/packaging/{name}.py" for name in ("package_video", "delivery_files", "packaging_design", "design_renderer",
-                                                   "reference_animation", "animation_common", "animation_shader",
-                                                   "dynamic_flowers", "flower_effects", "subtitle_fonts",
-                                                   "subtitle_segmentation", "text_library")),
+    "scripts/video_montage.py",
+    *(f"scripts/montage/{name}.py" for name in ("common", "workflow", "planning", "cast", "batch", "speech",
+                                                 "text_library", "content_gate", "rejected_intervals")),
+    *(f"scripts/montage/media/{name}.py" for name in ("asr", "timing", "frame_plan", "renderer", "audio_cleanup",
+                                                       "audio_balance", "mix")),
+    *(f"scripts/montage/packaging/{name}.py" for name in ("packager", "design", "design_renderer", "fonts", "segmentation",
+                                                           "dynamic_flowers", "flower_effects", "reference_animation",
+                                                           "delivery_files")),
 )
 
 
