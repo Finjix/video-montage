@@ -6,7 +6,7 @@ Entry point (from the suite root):
 assets/dependencies/python/python.exe scripts/video_montage.py <command> --job-dir <job_dir> [options]
 ```
 
-`job_dir` is `work/自动化混剪_YYYYMMDD_HHMMSS/临时文件`, returned by `init`. `status --job-dir` prints
+`job_dir` is `<output_root>/自动化混剪_YYYYMMDD_HHMMSS/临时文件`, returned by `init`. `status --job-dir` prints
 the phase and `last_failures`. Read evidence files directly from the paths the commands write or print.
 
 ## Stages
@@ -41,7 +41,6 @@ Contracts per stage: speech reviews in [speech review](speech-review.md) and
   "requested_outputs": 40,
   "sources": [{"path": "D:/footage/source-01.mp4", "sha256": "<optional check>"}],
   "asset_root": "D:/footage/packaging-assets",
-  "output_root": "D:/project/video-montage/work",
   "packaging_request": "<the user's packaging request, if any>",
   "cast_policy": "selected-celebrities/v3",
   "celebrities": [{"person_id": "person:wu-yue", "name": "吴樾",
@@ -49,7 +48,8 @@ Contracts per stage: speech reviews in [speech review](speech-review.md) and
 }
 ```
 
-- `sources` are distinct `.mp4/.mov/.mkv` files; `output_root` (optional) must be the project `work/`.
+- `sources` are distinct `.mp4/.mov/.mkv` files; `output_root` (optional) is a directory,
+  created if missing; it defaults to the user's Desktop.
 - `celebrities` is required: every selected celebrity with a hash-bound absolute nameplate PNG
   ([selected celebrities](celebrities.md)); `cast_policy` is filled in by `init`.
 - `batch_reuse_authorization` only when the user explicitly allows extra reuse ([batch review](batch-review.md)).

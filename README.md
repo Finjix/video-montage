@@ -9,7 +9,8 @@
   - `scripts/montage/`：核心包。`workflow` 状态机与命令，`planning`/`batch`/`cast`/`speech`/`text_library` 等审阅策略；`media/` 为 ASR、裁剪渲染、音频清理与响度；`packaging/` 为字幕包装与设计渲染。
   - `references/`：按阶段查阅的说明文档；`assets/`：文本库、无效区间、包装素材与 `dependencies/` 运行依赖。
 - `dev/`：本地开发专用目录。
-- `work/`：本地任务产物。
+
+成品与临时文件默认输出到当前用户桌面的 `自动化混剪_YYYYMMDD_HHMMSS/`（可在工单中用 `output_root` 指定其他目录）。
 
 发布时直接将整个 `skill` 文件夹压缩为 ZIP，再按需改名。
 

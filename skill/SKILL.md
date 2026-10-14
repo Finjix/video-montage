@@ -60,8 +60,8 @@ policy marker to pass a gate. Jobs from earlier versions of this skill are not s
 
 ## Delivery layout
 
-New jobs deliver to `work/自动化混剪_YYYYMMDD_HHMMSS/` (Beijing time; a same-second collision is
-refused, never overwritten):
+New jobs deliver to `<Desktop>/自动化混剪_YYYYMMDD_HHMMSS/` (the user's Desktop, or the work order's
+`output_root`; Beijing time; a same-second collision is refused, never overwritten):
 
 | Path | Content |
 | --- | --- |
@@ -70,8 +70,8 @@ refused, never overwritten):
 | `字幕/` | editable `subtitle-<plan_id>.txt` and the extensionless file `修改字幕后让AI重新烧录` |
 | `临时文件/` | the job directory (`job_dir`): state, work order, `config/`, `manifests/`, evidence, reviews, reports |
 
-- All subdirectories of `临时文件/` use English names. The project `work/` root holds batch
-  directories only: put helper scripts in `<job_dir>/scripts/`, input JSON in `<job_dir>/config/`,
+- All subdirectories of `临时文件/` use English names. Never write loose files next to the
+  batch directories: put helper scripts in `<job_dir>/scripts/`, input JSON in `<job_dir>/config/`,
   previews, contact sheets and scans in `<job_dir>/evidence/`, and logs in an English subdirectory.
   Before a job exists, pass the work order to `init --work-order -` on stdin. Resolve helper paths
   from explicit project/job roots, not the helper's own location.
@@ -80,7 +80,7 @@ refused, never overwritten):
   stale completion receipts.
 - After a successful completion the workflow deletes disposable evidence and keeps the completion
   receipt with its final findings, `config/`, the reburn `manifests/`, the work order and minimal
-  state. Delete your own disposable helpers too and confirm nothing was left in `work/`. Deleted
+  state. Delete your own disposable helpers too and confirm nothing was left outside the batch directory. Deleted
   evidence is never reused; a full repair regenerates it.
 
 ## References

@@ -19,6 +19,21 @@ LARGE_FILE_BYTES = 8 * 1024 * 1024
 _LARGE_DIGESTS: dict[tuple, str] = {}
 
 
+def desktop() -> Path:
+    """The user's Desktop folder, honouring OneDrive/folder redirection."""
+    try:
+        import ctypes
+        buffer = ctypes.create_unicode_buffer(260)
+        if ctypes.windll.shell32.SHGetFolderPathW(None, 0x10, None, 0, buffer) == 0 and buffer.value:
+            return Path(buffer.value)
+    except (AttributeError, OSError):
+        pass
+    return Path.home() / "Desktop"
+
+
+OUTPUT_ROOT = desktop()
+
+
 def read(path: Path) -> dict:
     return json.loads(Path(path).read_text(encoding="utf-8-sig"))
 

@@ -125,7 +125,7 @@ def runtime_directory(root: Path) -> Path:
 
 
 def delivery_category(root: Path, kind: str) -> Path:
-    """Delivery folders inside work/自动化混剪_*; a plain directory for standalone tests."""
+    """Delivery folders inside <output_root>/自动化混剪_*; a plain directory otherwise."""
     if OUTPUT_NAME.fullmatch(root.name):
         if kind in {"manifests", "reports"}:
             return runtime_directory(root) / {"manifests": "manifests", "reports": "reports"}[kind]

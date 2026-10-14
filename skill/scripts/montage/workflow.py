@@ -28,7 +28,7 @@ from montage import planning as EDITING
 from montage import rejected_intervals as REJECTED
 from montage import speech as SPEECH
 from montage import text_library as TEXT_LIBRARY
-from montage.common import (FFMPEG, FFPROBE, MODEL_ROOT, ROOT, background, probe, quietly, read, ref,
+from montage.common import (FFMPEG, FFPROBE, MODEL_ROOT, OUTPUT_ROOT, ROOT, background, probe, quietly, read, ref,
                             require_ref, run, sha, write)
 from montage.media import asr as ASR
 from montage.media import audio_balance as BALANCE
@@ -306,15 +306,15 @@ def init(args) -> None:
     asset = Path(order["asset_root"]).resolve()
     if not asset.is_dir():
         raise ValueError("asset root missing")
-    parent = Path(order.get("output_root", ROOT / "work")).resolve()
-    if parent.name != "work":
-        raise ValueError("output_root must be the work directory")
+    parent = Path(order.get("output_root") or OUTPUT_ROOT).resolve()
+    if parent.exists() and not parent.is_dir():
+        raise ValueError(f"output_root must be a directory: {parent}")
     if args.job_dir is not None:
         job = args.job_dir.resolve()
         output = job.parent
         if (output.parent != parent or not PACKAGER.OUTPUT_NAME.fullmatch(output.name)
                 or job != PACKAGER.runtime_directory(output)):
-            raise ValueError("job-dir must be work/自动化混剪_xx/临时文件")
+            raise ValueError("job-dir must be <output_root>/自动化混剪_xx/临时文件")
     else:
         output = parent / ("自动化混剪_" + datetime.now(timezone(timedelta(hours=8))).strftime("%Y%m%d_%H%M%S"))
         job = PACKAGER.runtime_directory(output)
