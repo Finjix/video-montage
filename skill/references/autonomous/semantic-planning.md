@@ -111,7 +111,7 @@ These fail at `plan-evidence`; satisfy them before submitting:
 - reasons (`entity_flow`, `state_flow`, review reasons) need at least 8 characters and cannot be generic
   ("同一游戏", "语义连贯", "衔接自然", "通过审核"…).
 
-The program checks structure, quotes, frame timelines, signals and hashes only. Codex must analyse the
+The program checks structure, quotes, frame timelines, signals and hashes only. The agent must analyse the
 full context and the actual frames; mechanism-to-result bridges, first-person subject continuity,
 deduplicated results, concrete benefits and the closing rules still need judgment.
 

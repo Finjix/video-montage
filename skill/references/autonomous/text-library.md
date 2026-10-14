@@ -2,7 +2,7 @@
 
 `assets/text-library.json` holds canonical spellings of game names, people and common terms (initially
 无尽冬日, 吴樾, 林子聪, 许君聪). It fixes how a word is written; whether it was spoken is still decided by
-Codex from the actual audio, full context and verified asset copy. Never replace by sound-alike,
+the agent from the actual audio, full context and verified asset copy. Never replace by sound-alike,
 similarity or expected ad copy, and never add a sentence the source does not contain.
 
 ## Format and snapshot

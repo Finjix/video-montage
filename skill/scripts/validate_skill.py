@@ -1,4 +1,4 @@
-"""Validate a bundled Codex skill entrypoint without host tooling."""
+"""Validate the skill entrypoint (SKILL.md frontmatter) without host tooling."""
 
 from __future__ import annotations
 

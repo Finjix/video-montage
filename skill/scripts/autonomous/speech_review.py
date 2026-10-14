@@ -1,4 +1,4 @@
-"""Hash-bound Codex speech judgments, separate from immutable recognizer output.
+"""Hash-bound agent speech judgments, separate from immutable recognizer output.
 
 These checks validate the scope and provenance of a judgment, not whether a
 model or a person heard the words. ASR remains an observation, never an approval.
@@ -9,8 +9,8 @@ import difflib
 import math
 import re
 
-POLICY = "codex-speech-review/v1"
-SCHEMA = "video-montage-codex-speech-review/v1"
+POLICY = "agent-speech-review/v1"
+SCHEMA = "video-montage-agent-speech-review/v1"
 
 
 def changes(before, after, normalize):
@@ -129,7 +129,7 @@ def validate(a, finding, observation, audio_ref, duration, texts, *, expected=No
             if isinstance(item, dict) and item.get("kind") == "source_audio":
                 if (item.get("sha256") != audio_ref["sha256"] or item.get("start_ms") != start or item.get("end_ms") != end):
                     raise ValueError("correction source-audio hash/range changed")
-                continue  # A bound Codex judgment, not a machine-verified quotation.
+                continue  # A bound agent judgment, not a machine-verified quotation.
             quote = a.normalized(item.get("text", "")) if isinstance(item, dict) else ""
             if not quote or quote not in texts.get((item.get("kind"), item.get("sha256")), ""):
                 raise ValueError("ASR correction evidence changed, missing or invented")
@@ -174,7 +174,7 @@ def source_asr(a, row):
 
 
 def header(review, stage, evidence_ref, asset_ref, library_ref=None):
-    if (review.get("schema") != SCHEMA or review.get("reviewer_role") != "codex"
+    if (review.get("schema") != SCHEMA or review.get("reviewer_role") != "agent"
             or review.get("stage") != stage or review.get("evidence_sha256") != evidence_ref["sha256"]
             or review.get("asset_copy_sha256") != asset_ref["sha256"]):
         raise ValueError("speech review stage/evidence/copy binding invalid")

@@ -1,6 +1,6 @@
 # video-montage
 
-版本：`0.0.1`。中文口播混剪 Codex 技能。
+版本：`0.0.1`。中文口播混剪通用智能体技能（Agent Skill），可在 Codex、Claude Code 等支持 SKILL.md 的环境中使用。
 
 ## 目录与发布
 

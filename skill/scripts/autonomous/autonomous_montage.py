@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Fail-closed Codex + machine evidence workflow for montage jobs.
+"""Fail-closed agent + machine evidence workflow for montage jobs.
 
-Codex supplies editorial, speech and visual judgments; the local gates verify
+The agent supplies editorial, speech and visual judgments; the local gates verify
 their inputs, media hashes, ASR, PCM and rendered output. No hearing or forced
 alignment claim is made by this workflow.
 """
@@ -36,7 +36,7 @@ MODEL_ROOT = ROOT / "assets/dependencies/models"
 STATE_SCHEMA = "video-montage-autonomous-state/v260929"
 ORDER_SCHEMA = "video-montage-autonomous-work-order/v260929"
 PLAN_SCHEMA = "video-montage-autonomous-plan/v260929"
-REVIEW_SCHEMA = "video-montage-codex-review/v260929"
+REVIEW_SCHEMA = "video-montage-agent-review/v260929"
 TEXT_PIN_POLICY = "required-full-coverage/v1"
 READING_POLICY = "semantic-reading/v1"
 
@@ -211,7 +211,7 @@ def require_speech_policy(value: dict, index: dict, plan: dict | None = None) ->
     for row in index["sources"]:
         TEXT_LIBRARY.require_binding(value.get("text_library"), row)
         if not row.get("reviewed_speech"):
-            raise ValueError("Codex source speech review required before planning")
+            raise ValueError("agent source speech review required before planning")
         if value.get("asset_copy") and read(require_ref(row["reviewed_speech"], "reviewed source speech")).get("asset_copy", {}).get("sha256") != value["asset_copy"]["sha256"]:
             raise ValueError("source speech review asset-copy binding changed")
         source_speech(row)
@@ -494,7 +494,7 @@ def subtitle_segment_bounds(cues: list[dict], plan_output: dict, render_value: d
 
 
 def transcribe(model, path: Path) -> dict:
-    """One neutral recognition; Codex reviews the words, ASR is never retried to match a target."""
+    """One neutral recognition; The agent reviews the words, ASR is never retried to match a target."""
     return ASR.transcribe(model, str(path), "zh", initial_prompt="以下是简体中文口播。")[0]
 
 
@@ -504,7 +504,7 @@ def load_model():
 
 def state(job: Path, *, discarding_plan: bool = False) -> dict:
     value = read(job / "autonomous_state.json")
-    if value.get("schema") != STATE_SCHEMA or value.get("review_mode") != "codex_asr_pcm":
+    if value.get("schema") != STATE_SCHEMA or value.get("review_mode") != "agent_asr_pcm":
         raise ValueError("not an autonomous montage job")
     order = read(require_ref(value["work_order"], "work order"))
     for key, policy in POLICIES.items():
@@ -612,7 +612,7 @@ def init(args) -> None:
     order.update(POLICIES, celebrities=celebrities, text_library=ref(library_path))
     order_snapshot = job / "work_order.json"
     write(order_snapshot, order)
-    save(job, {"schema": STATE_SCHEMA, "review_mode": "codex_asr_pcm", "work_order": ref(order_snapshot),
+    save(job, {"schema": STATE_SCHEMA, "review_mode": "agent_asr_pcm", "work_order": ref(order_snapshot),
                "source_hashes": {str(Path(row["path"]).resolve()): sha(Path(row["path"])) for row in sources},
                "asset_root": str(asset), "output_root": str(output), "delivery_directory": str(output),
                "repair_round": 0, **POLICIES, "subtitle_segmentation_policy": READING_POLICY,
@@ -673,8 +673,8 @@ def asset_copy(args) -> None:
     source_path = require_ref(index["asset_copy_sources"], "asset copy sources")
     originals = read(source_path)["assets"]
     proposed = read(args.copy_text)
-    if (proposed.get("schema") != "video-montage-codex-asset-copy/v260929"
-            or proposed.get("reviewer_role") != "codex" or proposed.get("sources_sha256") != sha(source_path)):
+    if (proposed.get("schema") != "video-montage-agent-asset-copy/v260929"
+            or proposed.get("reviewer_role") != "agent" or proposed.get("sources_sha256") != sha(source_path)):
         raise ValueError("asset copy text unbound")
     rows = proposed.get("assets", [])
     by_hash = {row.get("sha256"): row for row in rows}
@@ -999,7 +999,7 @@ def require_audio_approval(value: dict) -> None:
     review_path = require_ref(value["plan_review"], "audio cleanup review")
     evidence, review = read(evidence_path), read(review_path)
     if (evidence.get("plan") != value["plan"] or review.get("evidence_sha256") != sha(evidence_path)
-            or review.get("plan_sha256") != value["plan"]["sha256"] or review.get("reviewer_role") != "codex"
+            or review.get("plan_sha256") != value["plan"]["sha256"] or review.get("reviewer_role") != "agent"
             or artifact.get("plan") != value["plan"] or artifact.get("plan_review") != value["plan_review"]
             or artifact.get("plan_evidence") != value["plan_evidence"]):
         raise ValueError("audio cleanup approval binding changed")
@@ -1070,7 +1070,7 @@ def require_editing_approval(value: dict) -> None:
     if (evidence.get("planning_policy") != value["planning_policy"] or evidence.get("plan") != value["plan"]
             or evidence.get("source_index") != value["source_index"]
             or review.get("schema") != REVIEW_SCHEMA or review.get("stage") != "plan"
-            or review.get("reviewer_role") != "codex" or review.get("planning_policy") != value["planning_policy"]
+            or review.get("reviewer_role") != "agent" or review.get("planning_policy") != value["planning_policy"]
             or review.get("evidence_sha256") != sha(evidence_path) or review.get("plan_sha256") != sha(plan_path)):
         raise ValueError("editorial approval binding invalid")
     errors = EDITING.plan_review_errors(plan, evidence, review)
@@ -1214,7 +1214,7 @@ def visual_boundary_metrics(visual: list[dict], start: int, end: int) -> dict:
 
     A transition may leave the first few frames looking like the previous shot
     or arrive just before the last 13 frames. Preserve both sets of per-frame
-    scores so Codex can inspect position, scale, and shot continuity.
+    scores so the agent can inspect position, scale, and shot continuity.
     """
     by_frame = {row["frame"]: Path(row["path"]) for row in visual}
 
@@ -1348,26 +1348,26 @@ def approve_plan(args) -> None:
     evidence_path = require_ref(value["plan_evidence"], "plan evidence")
     evidence = read(evidence_path); review = read(args.review)
     if (review.get("schema") != REVIEW_SCHEMA or review.get("stage") != "plan"
-            or review.get("reviewer_role") != "codex" or review.get("evidence_sha256") != sha(evidence_path)
+            or review.get("reviewer_role") != "agent" or review.get("evidence_sha256") != sha(evidence_path)
             or review.get("plan_sha256") != value["plan"]["sha256"]
             or evidence.get("planning_policy") != EDITING.POLICY or review.get("planning_policy") != EDITING.POLICY):
-        raise ValueError("Codex plan review binding invalid")
+        raise ValueError("agent plan review binding invalid")
     plan = read(require_ref(value["plan"], "plan"))
     require_cast_binding(value, plan, evidence, review)
     errors = check_plan(plan, read(require_ref(value["source_index"], "source index")),
                         int(read(require_ref(value["work_order"], "work order"))["requested_outputs"]))
     if errors:
-        fail_round(job, value, "codex_whole_edit_review", errors)
+        fail_round(job, value, "agent_whole_edit_review", errors)
     errors = EDITING.plan_review_errors(plan, evidence, review) + batch_review_errors(value, evidence, review)
     if errors:
-        fail_round(job, value, "codex_whole_edit_review", errors)
+        fail_round(job, value, "agent_whole_edit_review", errors)
     findings = {(row.get("plan_id"), row.get("segment_index")): row for row in review.get("segments", [])}
     expected = {(row["plan_id"], row["segment_index"]) for row in evidence["results"]}
     if (len(findings) != len(review.get("segments", [])) or set(findings) != expected
             or any(row.get(key) is not True for row in findings.values()
                    for key in ("semantic_pass", "visual_pass", "entry_visual_pass", "exit_visual_pass"))
             or any(not row.get("reason") or not row.get("boundary_reason") for row in findings.values())):
-        fail_round(job, value, "codex_plan_review", ["incomplete or failed visual/semantic or first/last frame findings"])
+        fail_round(job, value, "agent_plan_review", ["incomplete or failed visual/semantic or first/last frame findings"])
     require_candidate_speech(value, evidence, review)
     value["plan_review"] = ref(args.review)
     try:
@@ -1385,7 +1385,7 @@ def approve_plan(args) -> None:
 def render_clean(args) -> None:
     job = args.job_dir.resolve(); value = state(job)
     if value["phase"] != "plan_approved":
-        raise ValueError("Codex plan approval required")
+        raise ValueError("agent plan approval required")
     require_editing_approval(value)
     plan = read(require_ref(value["plan"], "plan"))
     audio_by_key = {(r["plan_id"], r["segment_index"]): r["audio_cleanup"] for r in
@@ -1429,7 +1429,7 @@ def rendered_shot_asr(model, output: Path, rendered: dict, planned: dict, direct
     """Recognize each rendered shot separately and anchor its word times to that shot.
 
     Whole-video ASR may assign a new shot's first word to the previous shot's
-    silence; per-shot observations feed the Codex clean speech review.
+    silence; per-shot observations feed the agent's clean speech review.
     """
     planned_segments = rendered_plan_segments(planned, rendered)
     directory.mkdir(parents=True, exist_ok=True)
@@ -1547,7 +1547,7 @@ def clean_qc(args) -> None:
                         if "audio_balance" in rendered else {}),
                      "timing_asr": timing_asr, "metrics": metrics, "cut_pcm": cut_metrics,
                      "expected_text": row["expected_text"], "text_match": False,
-                     "text_match_basis": "pending_codex_shot_review"})
+                     "text_match_basis": "pending_agent_shot_review"})
     report_path = job / "reports" / "clean_qc.json"
     batch_clean = {}
     if not failures:
@@ -1578,7 +1578,7 @@ def clean_qc(args) -> None:
 def clean_speech_review(args) -> None:
     job = args.job_dir.resolve(); value = state(job)
     if value["phase"] not in {"clean_speech_pending", "repair_required"} or not value.get("clean_speech_evidence"):
-        raise ValueError("clean speech evidence and explicit Codex review required")
+        raise ValueError("clean speech evidence and explicit agent review required")
     require_editing_approval(value)
     evidence = read(require_ref(value["clean_speech_evidence"], "clean speech evidence"))
     if any(evidence.get(k) != value[k] for k in ("plan", "source_index", "asset_copy")):
@@ -1611,7 +1611,7 @@ def clean_speech_review(args) -> None:
         if not verified_shot_speech(timing, row["output"], plans[pid],
                                     read(require_ref(by_id[pid]["render_evidence"], "reviewed clean render"))):
             raise ValueError("incomplete reviewed shot speech proof")
-        row.update(text_match=True, text_match_basis="codex_reviewed_rendered_shots")
+        row.update(text_match=True, text_match_basis="agent_reviewed_rendered_shots")
     qc.update(decision="pass", speech_review_policy=SPEECH.POLICY, speech_review=ref(review_path),
               speech_review_evidence=value["clean_speech_evidence"])
     target = job / "reports" / f"clean_qc_reviewed_round_{value['repair_round'] + 1}.json"
@@ -1623,7 +1623,7 @@ def clean_speech_review(args) -> None:
 def subtitle_draft(args) -> None:
     job = args.job_dir.resolve(); value = state(job)
     if value["phase"] not in {"clean_validated", "subtitle_drafted", "repair_required"} or not value.get("asset_copy") or not value.get("clean_qc"):
-        raise ValueError("clean QC and Codex asset copy index required")
+        raise ValueError("clean QC and agent asset copy index required")
     if read(require_ref(value["clean_qc"], "clean QC")).get("decision") != "pass":
         raise ValueError("passing clean QC required")
     require_clean_qc(value)
@@ -1676,12 +1676,12 @@ def subtitle_review(args) -> None:
     draft_path = require_ref(value["subtitle_draft"], "subtitle draft")
     draft = read(draft_path); review = read(args.review)
     TEXT_LIBRARY.require_binding(value.get("text_library"), draft)
-    if (review.get("schema") != "video-montage-codex-subtitle-review/v260929"
+    if (review.get("schema") != "video-montage-agent-subtitle-review/v260929"
             or review.get("draft_sha256") != sha(draft_path)
             or review.get("asset_copy_sha256") != value["asset_copy"]["sha256"]):
         raise ValueError("subtitle review binding invalid")
     packager = package_module()
-    asset_copy_value = read(require_ref(value["asset_copy"], "Codex asset copy"))
+    asset_copy_value = read(require_ref(value["asset_copy"], "agent asset copy"))
     source_index = read(require_ref(value["source_index"], "source index"))
     clean = read(require_ref(value["clean_delivery"], "clean delivery"))
     plan = read(require_ref(value["plan"], "plan"))
@@ -1759,7 +1759,7 @@ def subtitle_review(args) -> None:
                         "reading_issues": reading})
     report = job / "reports" / "subtitle_review.json"
     write(report, {"schema": "video-montage-autonomous-subtitle-review/v260929",
-                   "draft": ref(draft_path), "codex_review": ref(args.review), "results": revised,
+                   "draft": ref(draft_path), "agent_review": ref(args.review), "results": revised,
                    **text_library_fields(value),
                    "decision": "pass"})
     value["subtitle_review"] = ref(report)
@@ -1794,7 +1794,7 @@ def package(args) -> None:
     for row in config["outputs"]:
         subtitle = require_ref(by_id[row["plan_id"]]["subtitle"], "corrected subtitle")
         if not isinstance(row.get("subtitle_design"), dict):
-            raise ValueError("every packaging output requires a Codex-authored subtitle_design")
+            raise ValueError("every packaging output requires a agent-authored subtitle_design")
         if row["subtitle_design"].get("reading_policy") != READING_POLICY:
             raise ValueError("subtitle design must bind the reviewed reading policy")
         supplied = Path(row.get("subtitle_txt", ""))
@@ -1949,7 +1949,7 @@ def require_clean_qc(value: dict) -> tuple[dict, dict]:
             or len(by_id) != len(qc.get("results", [])) or set(by_id) != set(ids)
             or clean.get("plan_sha256") != value["plan"]["sha256"] or qc.get("plan_sha256") != value["plan"]["sha256"]
             or qc.get("speech_review_policy") != SPEECH.POLICY):
-        raise ValueError("complete hash-bound, Codex speech-reviewed clean QC required")
+        raise ValueError("complete hash-bound, agent speech-reviewed clean QC required")
     plan_by_id = {row["plan_id"]: row for row in read(require_ref(value["plan"], "plan"))["outputs"]}
     require_clean_batch(value, clean, qc)
     for row in clean["results"]:
@@ -1966,7 +1966,7 @@ def require_clean_qc(value: dict) -> tuple[dict, dict]:
         if errors or (spec["fps_num"], spec["fps_den"]) != (60, 1):
             raise ValueError("clean render constraints failed: " + "; ".join(errors))
         if (measured.get("output") != row["output"] or measured.get("text_match") is not True
-                or measured.get("text_match_basis") != "codex_reviewed_rendered_shots"
+                or measured.get("text_match_basis") != "agent_reviewed_rendered_shots"
                 or measured.get("metrics", {}).get("clipped_samples") != 0
                 or not isinstance(measured.get("cut_pcm"), list)
                 or any(cut.get("decision") != "pass" for cut in measured["cut_pcm"])):
@@ -2306,8 +2306,8 @@ def complete(args) -> None:
     evidence = read(evidence_path); review = read(args.review)
     require_cast_binding(value, read(require_ref(value["plan"], "final cast plan")), evidence, review)
     if (review.get("schema") != REVIEW_SCHEMA or review.get("stage") != "final"
-            or review.get("reviewer_role") != "codex" or review.get("evidence_sha256") != sha(evidence_path)):
-        raise ValueError("Codex final visual review binding invalid")
+            or review.get("reviewer_role") != "agent" or review.get("evidence_sha256") != sha(evidence_path)):
+        raise ValueError("agent final visual review binding invalid")
     if evidence.get("decision", "pass") != "pass":
         raise ValueError("passing final evidence required")
     if value["phase"] == "repair_required" and value.get("delivery_mode") != "clean" and evidence.get("manifest") != value.get("packaging_delivery"):
@@ -2317,7 +2317,7 @@ def complete(args) -> None:
         raise ValueError("final text pin policy review binding invalid")
     batch_errors = batch_review_errors(value, evidence, review)
     if batch_errors:
-        fail_round(job, value, "codex_final_batch_review", batch_errors)
+        fail_round(job, value, "agent_final_batch_review", batch_errors)
     if (evidence.get("planning_policy") != EDITING.POLICY or evidence.get("plan") != value["plan"]
             or review.get("planning_policy") != EDITING.POLICY):
         raise ValueError("final review binding invalid")
@@ -2326,7 +2326,7 @@ def complete(args) -> None:
     require_clean_qc(value)
     transition_errors = EDITING.transition_review_errors(plan, review, evidence)
     if transition_errors:
-        fail_round(job, value, "codex_final_transition_review", transition_errors)
+        fail_round(job, value, "agent_final_transition_review", transition_errors)
     audit_provenance(value)
     by_id = {row.get("plan_id"): row for row in review.get("outputs", [])}
     if set(by_id) != {row["plan_id"] for row in evidence["results"]} or len(by_id) != len(review.get("outputs", [])):
@@ -2357,12 +2357,12 @@ def complete(args) -> None:
             errors.append("FINAL_EDITING_EVIDENCE_CHANGED")
         verify_continuous_visual(row["continuous_visual"], row["output"], 0, count)
         if errors:
-            fail_round(job, value, "codex_final_editing_review", errors)
+            fail_round(job, value, "agent_final_editing_review", errors)
         required_passes = ("visual_pass",) if value.get("delivery_mode") == "clean" else ("visual_pass", "subtitle_pass", "overlay_pass")
         if (finding.get("output_sha256") != row["output"]["sha256"]
                 or any(finding.get(key) is not True for key in required_passes) or not finding.get("reason")
                 or (value.get("delivery_mode") != "clean" and not package_module().packaging_design.review_ok(row.get("design"), finding))):
-            fail_round(job, value, "codex_final_review", [f"{row['plan_id']}: incomplete visual finding"])
+            fail_round(job, value, "agent_final_review", [f"{row['plan_id']}: incomplete visual finding"])
         require_ref(row["output"], "packaged output")
         for frame in row["frames"]:
             require_ref(frame, "reviewed packaged frame")
@@ -2418,7 +2418,7 @@ def complete(args) -> None:
     write(receipt, {"schema": "video-montage-autonomous-completion/v260929", "decision": "pass",
                     **POLICIES, "celebrities": value["celebrities"],
                     "repair_round_count": value.get("repair_round", 0),
-                    "review_mode": "codex_asr_pcm", "forced_alignment_claimed": False,
+                    "review_mode": "agent_asr_pcm", "forced_alignment_claimed": False,
                     "human_listening_claimed": False, "work_order": value["work_order"],
                     "source_index": value["source_index"], "asset_copy": value["asset_copy"],
                     "plan": value["plan"], "delivery_mode": value.get("delivery_mode", "packaged"),

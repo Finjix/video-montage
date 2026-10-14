@@ -14,7 +14,7 @@ parameters and file bytes are all bound; identical source/range/text/gain/policy
 scan.
 
 Neither audible energy nor missing ASR text authorizes a mute, and VAD can mistake a neighbouring
-sentence's residual syllable for speech. Codex reads the context and waveform and classifies every
+sentence's residual syllable for speech. The agent reads the context and waveform and classifies every
 suspect: previous/next-sentence residue, non-speech noise, natural expression, valid speech or
 uncertain. Breaths, laughter, exclamations and weak consonants are kept by default. Head/tail energy,
 bursts and clipping are recorded; with cleanup they move to this review, but the rendered clean video

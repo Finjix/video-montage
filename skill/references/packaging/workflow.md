@@ -2,7 +2,7 @@
 
 Only when the user requests packaging. Input is a validated clean video (1440×2560, 60 fps, with
 audio); the packaged copy goes to `成片/` and the clean video is kept. Every package, render and reburn
-configuration needs a per-output Codex [design](design.md); there is no fixed-yellow, random-font or
+configuration needs a per-output agent-written [design](design.md); there is no fixed-yellow, random-font or
 random-flower fallback and `subtitle_srt` is not read.
 
 Rendering composes subtitles, flowers, overlays and audio on the unaccelerated timeline, then applies the
@@ -15,7 +15,7 @@ one audio stream and no subtitle track.
 
 ## Subtitles (autonomous)
 
-1. `subtitle-draft` writes `字幕/subtitle-<plan_id>.txt` from the Codex-reviewed shot words and keeps an
+1. `subtitle-draft` writes `字幕/subtitle-<plan_id>.txt` from the agent-reviewed shot words and keeps an
    immutable snapshot. The TXT uses SRT blocks (`index`, `HH:MM:SS,mmm --> HH:MM:SS,mmm`, text) on the
    unaccelerated clean timeline.
 2. To resegment, write the complete batch of `subtitle-<plan_id>.txt` files into a directory and run
@@ -25,7 +25,7 @@ one audio stream and no subtitle track.
 3. Submit the subtitle review and run `subtitle-review --review <json>`:
 
 ```json
-{"schema": "video-montage-codex-subtitle-review/v260929",
+{"schema": "video-montage-agent-subtitle-review/v260929",
  "draft_sha256": "<sha256 of reports/subtitle_draft.json>", "asset_copy_sha256": "<asset copy sha256>",
  "results": [{"plan_id": "P1", "draft_subtitle_sha256": "<draft snapshot TXT sha256>",
    "cues": [{"index": 1, "draft_start_ms": 0, "draft_end_ms": 1500, "before": "来玩无尽冬日",

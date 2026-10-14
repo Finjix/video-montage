@@ -1,6 +1,6 @@
-# Codex speech review (`codex-speech-review/v1`)
+# Agent speech review (`agent-speech-review/v1`)
 
-ASR locates speech and drafts text; it never decides what was said. Codex reviews the full source
+ASR locates speech and drafts text; it never decides what was said. The agent reviews the full source
 context, raw ASR, actual audio range, picture and verified asset copy, and corrects misrecognitions,
 omissions, hallucinations and timings. The program checks scope, timing, files and hashes only; a
 passing check does not mean a machine proved the wording. Never claim human listening, forced
@@ -25,9 +25,9 @@ the review cannot replace narrative content.
 
 ```json
 {
-  "schema": "video-montage-codex-speech-review/v1",
+  "schema": "video-montage-agent-speech-review/v1",
   "stage": "source",
-  "reviewer_role": "codex",
+  "reviewer_role": "agent",
   "evidence_sha256": "<sha256 of the evidence file printed by the evidence command>",
   "asset_copy_sha256": "<sha256 of the accepted asset copy review>",
   "text_library_sha256": "<sha256 of the job text library snapshot>",

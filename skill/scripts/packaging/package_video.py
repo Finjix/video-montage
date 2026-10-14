@@ -409,7 +409,7 @@ def timed_lines(lines: list[str], start_ms: int, end_ms: int) -> list[tuple[int,
 
 
 def verified_caption_rows(asr: dict) -> list[dict]:
-    """Propose measured, speech-bound phrases; Codex still reviews semantics."""
+    """Propose measured, speech-bound phrases; the agent still reviews semantics."""
     return subtitle_segmentation.caption_rows(asr)
 
 
@@ -829,9 +829,9 @@ def validate(manifest_path: Path, report_path: Path, autonomous_evidence: Path |
             raise ValueError("validation reports inside the delivery must be in 临时文件")
     failures = []
     if bool(autonomous_evidence) != bool(autonomous_review):
-        raise ValueError("final evidence and its Codex review must be provided together")
+        raise ValueError("final evidence and its agent review must be provided together")
     automatic = read(autonomous_evidence) if autonomous_evidence else None
-    codex = read(autonomous_review) if autonomous_review else None
+    agent = read(autonomous_review) if autonomous_review else None
     auto_findings = {}
     if automatic is not None:
         if (manifest.get("mode") != "complete_autonomous"
@@ -839,27 +839,27 @@ def validate(manifest_path: Path, report_path: Path, autonomous_evidence: Path |
                 or automatic.get("decision") != "pass"
                 or automatic.get("manifest", {}).get("sha256") != sha(manifest_path)
                 or Path(str(automatic.get("manifest", {}).get("path") or "")).resolve() != manifest_path.resolve()
-                or codex.get("schema") != "video-montage-codex-review/v260929"
-                or codex.get("stage") != "final" or codex.get("reviewer_role") != "codex"
-                or codex.get("evidence_sha256") != sha(autonomous_evidence)):
+                or agent.get("schema") != "video-montage-agent-review/v260929"
+                or agent.get("stage") != "final" or agent.get("reviewer_role") != "agent"
+                or agent.get("evidence_sha256") != sha(autonomous_evidence)):
             failures.append("autonomous_review_binding")
         auto_rows = automatic.get("results", [])
-        codex_rows = codex.get("outputs", [])
-        if (not isinstance(auto_rows, list) or not isinstance(codex_rows, list)
+        agent_rows = agent.get("outputs", [])
+        if (not isinstance(auto_rows, list) or not isinstance(agent_rows, list)
                 or len(auto_rows) != len(manifest.get("results", []))
-                or len(codex_rows) != len(auto_rows)):
+                or len(agent_rows) != len(auto_rows)):
             failures.append("autonomous_review_scope")
         else:
             auto_by_id = {row.get("plan_id"): row for row in auto_rows}
-            codex_by_id = {row.get("plan_id"): row for row in codex_rows}
+            agent_by_id = {row.get("plan_id"): row for row in agent_rows}
             ids = {row.get("plan_id") for row in manifest.get("results", [])}
-            if len(auto_by_id) != len(auto_rows) or len(codex_by_id) != len(codex_rows) or set(auto_by_id) != ids or set(codex_by_id) != ids:
+            if len(auto_by_id) != len(auto_rows) or len(agent_by_id) != len(agent_rows) or set(auto_by_id) != ids or set(agent_by_id) != ids:
                 failures.append("autonomous_review_scope")
             else:
-                auto_findings = codex_by_id
+                auto_findings = agent_by_id
                 for item in manifest["results"]:
                     pid = item["plan_id"]
-                    measured, finding = auto_by_id[pid], codex_by_id[pid]
+                    measured, finding = auto_by_id[pid], agent_by_id[pid]
                     if (measured.get("decision") != "pass" or not verify_autonomous_speech(measured, item, manifest)
                             or measured.get("subtitle_timing_pass") is not True
                             or not isinstance(measured.get("cut_pcm"), list)

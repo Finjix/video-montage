@@ -235,7 +235,7 @@ def prepare(value: dict, cues: list[dict], subtitle_sha256: str, layers: list[di
 
 
 def verify_sources(design: dict, cues: list[dict], asset_copy: dict, speech: str, request: str = "") -> None:
-    """Check declared copy against already hash-bound Codex asset evidence."""
+    """Check declared copy against already hash-bound agent asset evidence."""
     assets = {row["sha256"]: row.get("text", "") for row in asset_copy.get("assets", [])}
     known = [speech, request, *assets.values()]
     for name in design["game_names"]:

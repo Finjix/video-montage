@@ -1,7 +1,7 @@
 # Packaging design
 
-After the subtitle review, Codex writes one `subtitle_design` per video from the speech, shots,
-available space and rhythm, and judges it again on the actual packaged output. Codex only selects and
+After the subtitle review, the agent writes one `subtitle_design` per video from the speech, shots,
+available space and rhythm, and judges it again on the actual packaged output. The agent only selects and
 combines existing library effects; it never creates or modifies effects, animations, flower styles,
 shaders or decorative assets, and the effect library is only extended on a separate explicit user
 request. When nothing fits, use static subtitles. The renderer runs the existing implementations and

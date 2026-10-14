@@ -1,6 +1,6 @@
 ---
 name: video-montage
-description: Produce, repair and reburn batches of Chinese spoken-word celebrity montage videos with native-frame editing, Codex speech, semantic and visual review, optional subtitle packaging and post-encode QC.
+description: Produce, repair and reburn batches of Chinese spoken-word celebrity montage videos with native-frame editing, agent-driven speech, semantic and visual review, optional subtitle packaging and post-encode QC.
 metadata:
   version: "0.0.1"
 ---
@@ -25,8 +25,8 @@ policy marker to pass a gate. Jobs from earlier versions of this skill are not s
 
 ## Non-negotiable rules
 
-1. **Honest review.** Codex itself inspects the actual ASR, native frames, asset copy, candidate
-   evidence and final encoded evidence, and signs reviews with `reviewer_role: "codex"`. Never claim
+1. **Honest review.** The agent itself inspects the actual ASR, native frames, asset copy, candidate
+   evidence and final encoded evidence, and signs reviews with `reviewer_role: "agent"`. Never claim
    an independent reviewer, human listening or forced alignment. Booleans and keyword matches are
    not judgments: every finding needs a concrete reason.
 2. **ASR is a draft.** Keep raw ASR immutable and review real speech separately. When wording cannot

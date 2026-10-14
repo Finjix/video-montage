@@ -1,7 +1,7 @@
 """Speech-bound subtitle proposals, measured at the calibrated display sizes.
 
 Punctuation and pauses propose boundaries; they are not displayed or allowed to
-change spoken text. Codex reviews the resulting phrases before packaging.
+change spoken text. The agent reviews the resulting phrases before packaging.
 """
 from __future__ import annotations
 
@@ -178,7 +178,7 @@ def split_shot(shot: dict, *, names: tuple[str, ...] = GAME_NAMES, font: str | N
 def caption_rows(asr: dict, *, names: tuple[str, ...] = GAME_NAMES, font: str | None = None) -> list[dict]:
     protected = text_library.protected_terms(asr.get("text_library"))
     observations = asr.get("shot_observations") or [{"output_in_frame": 0, "asr": asr}]
-    if asr.get("review_basis") == "codex-speech-review/v1":
+    if asr.get("review_basis") == "agent-speech-review/v1":
         if any(not isinstance(shot.get("reviewed_asr"), dict) for shot in observations):
             raise ValueError("reviewed caption timing requires every shot's reviewed speech")
         # Keep original recognition in QC; captions use the approved text/times.

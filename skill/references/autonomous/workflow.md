@@ -11,7 +11,7 @@ the phase and `last_failures`. Read evidence files directly from the paths the c
 
 ## Stages
 
-| # | Command | Codex input | Phase afterwards |
+| # | Command | Agent input | Phase afterwards |
 | --- | --- | --- | --- |
 | 1 | `init --work-order -` (JSON on stdin, or a file path) | work order | `initialized`; prints `job_dir`, `delivery_directory` |
 | 2 | `prepare` | – | `prepared` (raw source ASR, video specs, asset list) |
@@ -54,7 +54,7 @@ Contracts per stage: speech reviews in [speech review](speech-review.md) and
   ([selected celebrities](selected-celebrities.md)); `cast_policy` is filled in by `init`.
 - `batch_reuse_authorization` only when the user explicitly allows extra reuse ([batch review](batch-review.md)).
 - `init` binds `semantic-continuity/v2`, `semantic-batch-review/v2`, `selected-celebrities/v3`,
-  `spoken-audio-cleanup/v1`, `codex-speech-review/v1`, `required-full-coverage/v1` text pins,
+  `spoken-audio-cleanup/v1`, `agent-speech-review/v1`, `required-full-coverage/v1` text pins,
   `semantic-reading/v1` subtitles and a snapshot of the [text library](text-library.md).
 
 ## Asset copy
@@ -63,7 +63,7 @@ Contracts per stage: speech reviews in [speech review](speech-review.md) and
 Look at every image and submit:
 
 ```json
-{"schema": "video-montage-codex-asset-copy/v260929", "reviewer_role": "codex",
+{"schema": "video-montage-agent-asset-copy/v260929", "reviewer_role": "agent",
  "sources_sha256": "<sha256 of asset_copy_sources.json>",
  "assets": [{"sha256": "<asset sha256>", "text": "<visible text, verbatim>"}]}
 ```
@@ -89,10 +89,10 @@ also written to `reports/batch_review_round_N.json`.
 
 ```json
 {
-  "schema": "video-montage-codex-review/v260929", "stage": "plan", "reviewer_role": "codex",
+  "schema": "video-montage-agent-review/v260929", "stage": "plan", "reviewer_role": "agent",
   "evidence_sha256": "<plan evidence file sha256>", "plan_sha256": "<plan sha256>",
   "planning_policy": "semantic-continuity/v2", "batch_review_policy": "semantic-batch-review/v2",
-  "speech_review_policy": "codex-speech-review/v1", "audio_cleanup_policy": "spoken-audio-cleanup/v1",
+  "speech_review_policy": "agent-speech-review/v1", "audio_cleanup_policy": "spoken-audio-cleanup/v1",
   "text_library_sha256": "<job text library snapshot sha256>",
   "cast_policy": "selected-celebrities/v3", "celebrities": ["<exact registry from the work order>"],
   "batch_review": {"report_digest": "...", "source_inventory_pass": true, "opening_turns_pass": true,

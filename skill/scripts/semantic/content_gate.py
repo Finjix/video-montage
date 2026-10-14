@@ -1,6 +1,6 @@
 """Machine-checkable editorial rules for one planned output.
 
-These checks validate grounded annotations. Codex must still review the whole
+These checks validate grounded annotations. The agent must still review the whole
 spoken edit: labels and matching keywords do not prove a coherent narrative.
 """
 from __future__ import annotations

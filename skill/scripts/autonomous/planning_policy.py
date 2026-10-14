@@ -1,4 +1,4 @@
-"""Semantic-first editing contract; visual conclusions belong to Codex reviews."""
+"""Semantic-first editing contract; visual conclusions belong to The agent reviews."""
 from __future__ import annotations
 
 import importlib.util
@@ -123,7 +123,7 @@ def audit_output(output: dict) -> list[str]:
 
 
 def specific_reason(value) -> bool:
-    """Reject empty/general assent; editorial truth still requires Codex review."""
+    """Reject empty/general assent; editorial truth still requires agent review."""
     if not isinstance(value, str):
         return False
     normalized = semantic.normalize_text(value)

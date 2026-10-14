@@ -6,7 +6,7 @@ comes from actual frames, never folder names. The batch cast mix (about 80% sing
 
 ## Subject rule
 
-Codex checks the whole interval: the selected celebrity is the centre of composition, performance and
+The agent checks the whole interval: the selected celebrity is the centre of composition, performance and
 narrative attention and clearly visible. Supporting actors may react or interact beside them, but may
 not obscure them beyond recognition, take over the subject or hold the frame alone; no supporting-only
 reverse shots. There is no area threshold: state the actual position, shot size, action and subject
