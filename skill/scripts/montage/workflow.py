@@ -1025,8 +1025,8 @@ def plan_evidence(args) -> None:
                 numbers = []
                 source_frames = video(source)["frames"]
                 for boundary in (segment["source_in_frame"], segment["source_out_frame_exclusive"]):
-                    numbers.extend(range(max(0, boundary - round(float(fps) * .5)),
-                                         min(source_frames, boundary + round(float(fps) * .5))))
+                    half = max(30, round(float(fps) * .5))  # visual_boundary_metrics scans up to 30 native frames
+                    numbers.extend(range(max(0, boundary - half), min(source_frames, boundary + half)))
                 visual = frames(source, numbers, target.parent / "frames")
                 warming[(str(source.resolve()), segment["source_in_frame"], segment["source_out_frame_exclusive"])].result()
                 continuous = continuous_visual(source, segment["source_in_frame"], segment["source_out_frame_exclusive"],

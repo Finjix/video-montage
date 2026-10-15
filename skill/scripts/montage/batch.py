@@ -14,20 +14,25 @@ LIMITS = {"candidate_uses": 6, "exact_text_uses": 6, "opening_uses": 4,
           "closing_uses": 4, "semantic_route_uses": 2,
           "same_position_overlap": .4, "trigram_similarity": .88}
 REASONABLE_REUSE_POLICY = "explicit-user-reasonable-reuse/v1"
+EXTENDED_REUSE_POLICY = "explicit-user-extended-reuse/v1"
 REASONABLE_LIMITS = {**LIMITS, "candidate_uses": 16, "exact_text_uses": 16, "opening_second_pair_uses": 5,
                      "closing_uses": 10, "semantic_route_uses": 4, "same_position_overlap": .6,
                      "middle_route_uses": 3}
+# Only when the user explicitly accepts heavier repetition to reach the requested count.
+EXTENDED_LIMITS = {**REASONABLE_LIMITS, "candidate_uses": 30, "exact_text_uses": 30, "opening_uses": 8,
+                   "opening_visual_family_uses": 8, "opening_second_pair_uses": 10, "closing_uses": 16,
+                   "semantic_route_uses": 6, "same_position_overlap": .8, "trigram_similarity": .93}
 
 
 def reuse_limits(source_index: dict) -> dict:
     authorization = source_index.get("batch_reuse_authorization")
     if authorization is None:
         return LIMITS.copy()
-    if (not isinstance(authorization, dict) or authorization.get("policy") != REASONABLE_REUSE_POLICY
+    if (not isinstance(authorization, dict) or authorization.get("policy") not in {REASONABLE_REUSE_POLICY, EXTENDED_REUSE_POLICY}
             or authorization.get("authorized_by") != "user" or not isinstance(authorization.get("instruction"), str)
             or not authorization["instruction"].strip()):
         raise ValueError("explicit user instruction required for reasonable batch reuse")
-    return REASONABLE_LIMITS.copy()
+    return (EXTENDED_LIMITS if authorization["policy"] == EXTENDED_REUSE_POLICY else REASONABLE_LIMITS).copy()
 
 
 def text(value: str) -> str:
@@ -253,8 +258,8 @@ def audit(plan: dict, source_index: dict, requested_outputs: int | None = None) 
     if len(uses["ordered"]) != len(rows) or len(uses["spoken"]) != len(rows):
         fail("UNIQUE_PLAN_CAPACITY_SHORTAGE", "batch", "duplicate plans cannot satisfy requested count")
     valid_turns = [turn for turn in turns if turn["opening_eligible"]]
-    text_capacity = len({text(turn["text"]) for turn in valid_turns}) * 4
-    visual_capacity = len({turn["opening_visual_family_id"] for turn in valid_turns}) * 4
+    text_capacity = len({text(turn["text"]) for turn in valid_turns}) * limits_used["opening_uses"]
+    visual_capacity = len({turn["opening_visual_family_id"] for turn in valid_turns}) * limits_used["opening_uses"]
     upper_bound = min(text_capacity, visual_capacity)
     if upper_bound < target_count:
         fail("OPENING_INVENTORY_CAPACITY_SHORTAGE", "batch", f"at most {upper_bound} openings for {target_count} outputs")
@@ -264,10 +269,10 @@ def audit(plan: dict, source_index: dict, requested_outputs: int | None = None) 
     extra = {"opening_usage": {
         "speech": [{"signature": identity, "quote": next(row["opening_quote"] for row in plans if row["opening_signature"] == identity),
                     "count": count, "plan_ids": [row["plan_id"] for row in plans if row["opening_signature"] == identity],
-                    "limit": 4, "exceeded": count > 4} for identity, count in uses["opening"].items()],
+                    "limit": limits_used["opening_uses"], "exceeded": count > limits_used["opening_uses"]} for identity, count in uses["opening"].items()],
         "visual": [{"visual_family_id": identity, "count": count,
                     "plan_ids": [row["plan_id"] for row in plans if row["opening_visual_family_id"] == identity],
-                    "limit": 4, "exceeded": count > 4} for identity, count in uses["family"].items()]},
+                    "limit": limits_used["opening_visual_family_uses"], "exceeded": count > limits_used["opening_visual_family_uses"]} for identity, count in uses["family"].items()]},
         "capacity": {"requested_outputs": target_count, "opening_text_upper_bound": text_capacity,
                      "opening_visual_upper_bound": visual_capacity, "opening_upper_bound": upper_bound,
                      "opening_shortfall": max(0, target_count - upper_bound), "planned_unique_outputs": unique_count,

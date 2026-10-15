@@ -49,7 +49,7 @@ policy marker to pass a gate. Jobs from earlier versions of this skill are not s
 6. **Packaging only on request.** Add music, subtitles, overlays or extra audio only when the
    current user asks. Packaging writes a separate output and preserves the clean video; subtitles
    are burned into the picture only.
-7. **Whole batch.** Deliver exactly the requested count. Never report a partial batch as complete,
+7. **Whole batch.** Deliver exactly the requested count; use the permitted reasonable reuse (never ask the user for it) when the inventory needs it. Never report a partial batch as complete,
    invent approvals, or bypass a gate.
 8. **Persist until done.** Once a task starts, keep repairing and rebuilding until every requested
    video passes; there is no retry ceiling and no need to ask permission to continue. A rejected

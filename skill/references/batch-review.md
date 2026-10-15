@@ -80,18 +80,29 @@ or call a partial batch complete.
 
 ## User-authorized reasonable reuse
 
-Only when the user explicitly allows extra reuse to reach the requested count ("allow reasonable reuse
-but avoid heavy repetition"), record in the work order:
+Reasonable reuse is a standard, permitted tool for reaching the requested count: never ask the user
+whether it is allowed. When the default limits cannot reach the count (check the source inventory
+first), the agent records the authorization itself in the work order, quoting the user's actual
+request (the request for that many outputs is the instruction), unless the user forbade reuse. Record:
 
 ```json
 "batch_reuse_authorization": {"policy": "explicit-user-reasonable-reuse/v1", "authorized_by": "user",
                               "instruction": "<the user's actual words>"}
 ```
 
-`prepare` binds it into the source index and the plan must carry the same object; otherwise the default
+`prepare` binds it into the source index and the plan must carry the same object; without it the default
 limits apply. Build coherent routes first; the caps are ceilings, not targets. Never cycle a few
 finished edits, change only fonts/BGM or rename IDs to fill the count. Cast, real shots, duration, cuts,
 subtitles and final QC still apply.
+
+## Extended reuse (user accepts heavier repetition)
+
+Only when the user explicitly accepts heavier repetition because the usable material cannot reach the requested count
+under the reasonable-reuse limits, record `"policy": "explicit-user-extended-reuse/v1"` (same fields, with the user's real
+words as `instruction`). Limits then rise to: same candidate/exact text 30, same opening speech or visual family 8,
+opening + second family pair 10, same closing text 16, same ordered semantic route 6, same-position overlap ≤ 80%,
+trigram similarity ≤ 0.93. All technical, cast, shot, audio and subtitle gates are unchanged. Disclose the extended
+policy and the resulting repetition in the delivery summary.
 
 ## Reviews and clean check
 

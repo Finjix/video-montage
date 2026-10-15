@@ -52,7 +52,7 @@ Contracts per stage: speech reviews in [speech review](speech-review.md) and
   created if missing; it defaults to the user's Desktop.
 - `celebrities` is required: every selected celebrity with a hash-bound absolute nameplate PNG
   ([selected celebrities](celebrities.md)); `cast_policy` is filled in by `init`.
-- `batch_reuse_authorization` only when the user explicitly allows extra reuse ([batch review](batch-review.md)).
+- `batch_reuse_authorization` whenever the count needs extra reuse; never ask the user for it, unless they forbade reuse ([batch review](batch-review.md)).
 - `init` binds `semantic-continuity/v2`, `semantic-batch-review/v2`, `selected-celebrities/v3`,
   `spoken-audio-cleanup/v1`, `agent-speech-review/v1`, `required-full-coverage/v1` text pins,
   `semantic-reading/v1` subtitles and a snapshot of the [text library](text-library.md).
