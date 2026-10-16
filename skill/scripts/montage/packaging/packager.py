@@ -16,7 +16,7 @@ import numpy as np
 
 from montage import cast as CAST
 from montage.common import FFMPEG, probe, read, require_ref, run, sha, workers, write as atomic
-from montage.media.mix import FINAL_SPEED, delivery_mix_evidence, delivery_speed, final_frames, pcm
+from montage.media.mix import FINAL_SPEED, auto_bgm_gain_db, delivery_mix_evidence, delivery_speed, final_frames, pcm
 from montage.packaging import design as packaging_design
 from montage.packaging import design_renderer, flower_effects
 from montage.packaging import fonts as subtitle_fonts
@@ -434,10 +434,13 @@ def prepared_rows(config_path: Path, expected_inputs: dict[str, str] | None = No
             prepared["disclaimer"] = resolve_overlay(base, item.get("path"), item.get("sha256"))
         if row.get("bgm"):
             item = row["bgm"]
-            gain = item.get("gain_db", -18)
+            music = resolve_file(base, item.get("path"), item.get("sha256"))
+            gain = item.get("gain_db")
+            if gain is None:
+                gain = auto_bgm_gain_db(pcm(Path(source["path"])), pcm(Path(music["path"])))
             if isinstance(gain, bool) or not isinstance(gain, (int, float)) or not -60 <= gain <= 0:
                 raise ValueError("BGM gain must be between -60 and 0 dB")
-            prepared["bgm"] = {**resolve_file(base, item.get("path"), item.get("sha256")), "gain_db": float(gain)}
+            prepared["bgm"] = {**music, "gain_db": float(gain)}
         rows.append(prepared)
     if expected_inputs is not None and set(expected_inputs) != {row["plan_id"] for row in rows}:
         raise ValueError("packaging configuration must cover the complete delivery")

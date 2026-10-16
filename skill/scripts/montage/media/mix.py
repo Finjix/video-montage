@@ -114,6 +114,21 @@ def voice_over_music_db(clean_audio: np.ndarray, music: np.ndarray, gain_db: flo
     return round(float(np.quantile(ratios, .1)), 2) if ratios else float("-inf")
 
 
+BGM_TARGET_MARGIN_DB = 6.5  # review gate requires 6.0; automatic gain stops 0.5 dB above it
+
+
+def auto_bgm_gain_db(clean_audio: np.ndarray, music: np.ndarray) -> float:
+    """Loudest BGM gain that keeps the review gate's voice-over-music margin.
+
+    The gate metric is linear in the music gain, so one measurement at 0 dB is enough. Using it instead
+    of a loudness offset keeps dynamic voices (quiet words, loud shouts) from tripping the gate.
+    """
+    unity = voice_over_music_db(clean_audio, music, 0.0)
+    if not math.isfinite(unity):
+        raise ValueError("no speech windows to balance the BGM against")
+    return round(min(0.0, unity - BGM_TARGET_MARGIN_DB), 1)
+
+
 def packaged_mix_evidence(output_audio: np.ndarray, clean_audio: np.ndarray,
                           music: np.ndarray | None, gain_db: float = 0, rate: int = 16000) -> dict:
     """Verify the actual decoded mix against its hash-bound, ASR-checked voice.

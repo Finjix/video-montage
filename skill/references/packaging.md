@@ -73,7 +73,7 @@ Write the config into `<job_dir>/config/`; relative paths resolve from the confi
                     "start_frame": 0, "end_frame_exclusive": 192}],
     "text_pins": [{"path": "<asset path>", "sha256": "<sha256>", "start_frame": 0, "end_frame_exclusive": 1800}],
     "disclaimer": {"path": "<asset path>"},
-    "bgm": {"path": "<asset path>", "gain_db": -18}
+    "bgm": {"path": "<asset path>"}
   }]
 }
 ```
@@ -88,8 +88,10 @@ Write the config into `<job_dir>/config/`; relative paths resolve from the confi
   pin assets, their copy and the coverage seen in the encoded frames.
 - **Nameplates**: copy the windows from the plan evidence ([selected celebrities](celebrities.md)).
 - **Disclaimer**: covers the whole video. Overlays are 9:16 PNGs with transparency.
-- **BGM** loops to the end, gain -60..0 dB (default -18); speech is not ducked, and final evidence
-  requires the voice to stay at least 6 dB above the music.
+- **BGM** loops to the end; speech is not ducked, and final evidence requires the voice to stay at least
+  6 dB above the music. Omit `gain_db` (recommended): the gain is computed per video from the balanced
+  clean voice so the music is as loud as that gate allows plus 0.5 dB (6.5 dB at the quietest speech
+  windows), which puts the finished video at about -23 LUFS. An explicit `gain_db` (-60..0) overrides it.
 - `graphic_layers` must be absent or empty: decorative cards are not supported.
 
 `package --config <json>` checks the design sources (game names must appear in the speech, asset copy

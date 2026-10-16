@@ -34,6 +34,7 @@ from montage.media import asr as ASR
 from montage.media import audio_balance as BALANCE
 from montage.media import audio_cleanup as AUDIO
 from montage.media import frame_plan as FRAME_GATE
+from montage.media import remaster as REMASTER
 from montage.media import renderer as RENDERER
 from montage.media import timing as SOURCE_TIMING
 from montage.media.mix import (FINAL_SPEED, audio_metrics, cut_pcm_metrics, delivery_mix_evidence, delivery_speed,
@@ -2290,6 +2291,13 @@ def speech_diff(args) -> None:
     print(json.dumps(SPEECH.changes(args.observed, args.reviewed, normalized)))
 
 
+def remaster_audio(args) -> None:
+    """Rebuild the packaged audio of a finished delivery at the current loudness policy (picture copied)."""
+    record = REMASTER.remaster(args.delivery_dir)
+    print(json.dumps({"decision": record["decision"], "outputs": len(record["results"]),
+                      "report": str(args.delivery_dir.resolve() / "临时文件" / "reports" / "audio_remaster.json")}))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -2323,8 +2331,11 @@ def main() -> None:
     diff_parser = sub.add_parser("speech-diff", help="print the correction spans for observed -> reviewed text")
     diff_parser.add_argument("--observed", required=True)
     diff_parser.add_argument("--reviewed", required=True)
+    remaster_parser = sub.add_parser("remaster-audio", help="rebuild the audio of a finished packaged delivery")
+    remaster_parser.add_argument("--delivery-dir", type=Path, required=True)
     args = parser.parse_args()
-    helpers = {"review-digest": review_digest, "speech-diff": speech_diff, "batch-check": batch_check}
+    helpers = {"review-digest": review_digest, "speech-diff": speech_diff, "batch-check": batch_check,
+               "remaster-audio": remaster_audio}
     if args.command in helpers:
         helpers[args.command](args)
         return
