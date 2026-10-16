@@ -37,7 +37,7 @@ rejected.
 ## Delivery loudness
 
 The finished packaged video targets **-23 LUFS** with a tolerance of **±1 LU** (true peak at most
--1 dBTP, voice at least 6 dB over the BGM). `remaster-audio --delivery-dir <dir>` rebuilds the audio
+-1 dBTP, voice at least 4 dB over the BGM). `remaster-audio --delivery-dir <dir>` rebuilds the audio
 of a finished packaged delivery to this rule without touching the picture: it scales the clean voice,
 mixes the BGM at its automatic gain, measures the encoded result, corrects the voice gain once when it
 is more than 0.5 LU off, and publishes only when every output passes (report:

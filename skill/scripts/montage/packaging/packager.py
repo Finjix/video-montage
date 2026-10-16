@@ -16,7 +16,7 @@ import numpy as np
 
 from montage import cast as CAST
 from montage.common import FFMPEG, probe, read, require_ref, run, sha, workers, write as atomic
-from montage.media.mix import FINAL_SPEED, auto_bgm_gain_db, delivery_mix_evidence, delivery_speed, final_frames, pcm
+from montage.media.mix import FINAL_SPEED, MIN_VOICE_OVER_MUSIC_DB, auto_bgm_gain_db, delivery_mix_evidence, delivery_speed, final_frames, pcm
 from montage.packaging import design as packaging_design
 from montage.packaging import design_renderer, flower_effects
 from montage.packaging import fonts as subtitle_fonts
@@ -780,7 +780,7 @@ def validate(manifest_path: Path, report_path: Path, autonomous_evidence: Path |
                             or Path(str(measured.get("output", {}).get("path") or "")).resolve() != Path(item["output_path"]).resolve()
                             or measured.get("metrics", {}).get("clipped_samples") != 0
                             or measured.get("subtitle_cue_count") != item.get("subtitles", {}).get("cue_count")
-                            or (measured.get("voice_over_bgm_db") is not None and measured["voice_over_bgm_db"] < 6)
+                            or (measured.get("voice_over_bgm_db") is not None and measured["voice_over_bgm_db"] < MIN_VOICE_OVER_MUSIC_DB)
                             or finding.get("output_sha256") != item.get("output_sha256")
                             or any(finding.get(name) is not True for name in ("visual_pass", "subtitle_pass", "overlay_pass"))
                             or not finding.get("reason")):

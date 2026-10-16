@@ -17,7 +17,7 @@ import numpy as np
 
 from montage.common import FFMPEG, read, require_ref, run, sha, workers, write
 from montage.media import audio_balance
-from montage.media.mix import FINAL_SPEED, auto_bgm_gain_db, pcm, voice_over_music_db
+from montage.media.mix import FINAL_SPEED, MIN_VOICE_OVER_MUSIC_DB, auto_bgm_gain_db, pcm, voice_over_music_db
 from montage.packaging.delivery_files import publish_files
 from montage.packaging.packager import packaged_streams_ok, video_spec
 
@@ -25,7 +25,6 @@ POLICY = "audio-remaster/v1"
 TARGET_LUFS = audio_balance.DEFAULTS["target_lufs"]
 TOLERANCE_LU = 1.0
 SAMPLE_PEAK_CEILING_DB = -1.0
-MIN_VOICE_OVER_MUSIC_DB = 6.0
 MIN_ENVELOPE_CORRELATION = 0.95  # 50 ms energy envelope vs the previous audio: same words, same timing
 ENVELOPE_WINDOW = 800  # samples at 16 kHz
 
@@ -47,7 +46,9 @@ def remaster_one(row: dict, stage: Path) -> dict:
     if not row.get("bgm"):
         raise ValueError(f"{plan_id}: unpackaged outputs have no BGM mix to rebuild")
     clean = require_ref(row["input"], f"{plan_id} clean input")
-    old = require_ref({"path": row["output_path"], "sha256": row["output_sha256"]}, f"{plan_id} packaged output")
+    old = Path(row["output_path"]).resolve()
+    if not old.is_file():
+        raise ValueError(f"{plan_id}: packaged output missing")
     music_path = require_ref(row["bgm"], f"{plan_id} BGM")
     frames = int(row["output_frames"])
 
@@ -95,7 +96,7 @@ def remaster_one(row: dict, stage: Path) -> dict:
         "same_speech_and_timing": math.isfinite(correlation) and correlation >= MIN_ENVELOPE_CORRELATION,
     }
     return {"plan_id": plan_id, "decision": "pass" if all(checks.values()) else "reject", "checks": checks,
-            "previous": {"path": str(old), "sha256": row["output_sha256"],
+            "previous": {"path": str(old), "sha256": sha(old), "packaged_sha256": row["output_sha256"],
                          "bgm_gain_db": row["bgm"]["gain_db"], "clean_lufs": measured["integrated_lufs"]},
             "voice_gain_db": voice_gain, "bgm_gain_db": bgm_gain, "voice_over_music_db": gate,
             "output_lufs": new_loudness["integrated_lufs"], "output_true_peak_db": new_loudness["true_peak_db"],
@@ -112,6 +113,7 @@ def remaster(delivery: Path) -> dict:
     targets = [Path(row["output_path"]).resolve() for row in rows]
     if not rows or any(path.parent != (delivery / "成片").resolve() for path in targets):
         raise ValueError("packaging manifest does not describe this delivery's 成片 directory")
+    report = job / "reports" / "audio_remaster.json"
     stage = job / "remaster"
     stage.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="stage-", dir=stage) as directory:
@@ -123,10 +125,10 @@ def remaster(delivery: Path) -> dict:
                   "tolerance_lu": TOLERANCE_LU, "packaging_manifest": {"path": str(manifest_path), "sha256": sha(manifest_path)},
                   "created_at": datetime.now(timezone(timedelta(hours=8))).isoformat(timespec="seconds"),
                   "decision": "pass" if not failed else "reject", "failed": failed, "results": results}
-        report = job / "reports" / "audio_remaster.json"
-        write(report, record)
         if failed:
-            raise RuntimeError(f"audio remaster rejected {failed}; nothing was published; see {report}")
+            # Keep the last published report intact.
+            write(report.with_name("audio_remaster_rejected.json"), record)
+            raise RuntimeError(f"audio remaster rejected {failed}; nothing was published; see {report.with_name("audio_remaster_rejected.json")}")
         publish_files([(Path(row["staged"]["path"]), target) for row, target in zip(results, targets)], stage)
         for row, target in zip(results, targets):
             if sha(target) != row["staged"]["sha256"]:

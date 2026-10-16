@@ -10,8 +10,8 @@ import subprocess
 from pathlib import Path
 
 POLICY = "segment-loudness-balance/v1"
-# Delivery loudness is -23 LUFS. The voice carries it; the BGM sits far enough below (see
-# mix.auto_bgm_gain_db) that the finished mix measures within about 0.3 LU of the voice.
+# Delivery loudness is -23 LUFS for the finished mix. The voice carries it; the BGM (see
+# mix.auto_bgm_gain_db) adds up to about 1.5 dB, which remaster.py corrects by measuring the encode.
 DEFAULTS = {"enabled": True, "target_lufs": -23.0, "true_peak_db": -3.0, "max_boost_db": 12.0}
 MIN_SIGNAL_LUFS = -50.0
 

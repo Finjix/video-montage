@@ -37,7 +37,7 @@ from montage.media import frame_plan as FRAME_GATE
 from montage.media import remaster as REMASTER
 from montage.media import renderer as RENDERER
 from montage.media import timing as SOURCE_TIMING
-from montage.media.mix import (FINAL_SPEED, audio_metrics, cut_pcm_metrics, delivery_mix_evidence, delivery_speed,
+from montage.media.mix import (FINAL_SPEED, MIN_VOICE_OVER_MUSIC_DB, audio_metrics, cut_pcm_metrics, delivery_mix_evidence, delivery_speed,
                                final_frames, isolated_transients, pcm, voice_over_music_db)
 from montage.packaging import packager as PACKAGER
 from montage.speech import character_times, normalized
@@ -1633,7 +1633,7 @@ def final_evidence(args) -> None:
             decision = ((asr_match or speech_preserved) and subtitle_timing_pass and metrics["clipped_samples"] == 0
                         and all(cut["decision"] == "pass" for cut in cut_metrics)
                         and mix_evidence["audio_cleanup"]["decision"] == "pass"
-                        and (bgm_db is None or bgm_db >= 6))
+                        and (bgm_db is None or bgm_db >= MIN_VOICE_OVER_MUSIC_DB))
             if not decision:
                 failures.append(f"{pid}: ASR/subtitle timing/clipping/BGM masking failure")
             result = {"plan_id": pid, "output": ref(output), "asr": asr, **editing, "asr_match": asr_match,

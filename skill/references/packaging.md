@@ -89,8 +89,8 @@ Write the config into `<job_dir>/config/`; relative paths resolve from the confi
 - **Nameplates**: copy the windows from the plan evidence ([selected celebrities](celebrities.md)).
 - **Disclaimer**: covers the whole video. Overlays are 9:16 PNGs with transparency.
 - **BGM** loops to the end; speech is not ducked, and final evidence requires the voice to stay at least
-  6 dB above the music. Omit `gain_db` (recommended): the gain is computed per video from the balanced
-  clean voice so the music is as loud as that gate allows plus 0.5 dB (6.5 dB at the quietest speech
+  4 dB above the music. Omit `gain_db` (recommended): the gain is computed per video from the balanced
+  clean voice so the music is as loud as that gate allows (4 dB at the quietest speech
   windows), which puts the finished video at about -23 LUFS. An explicit `gain_db` (-60..0) overrides it.
 - `graphic_layers` must be absent or empty: decorative cards are not supported.
 

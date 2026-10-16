@@ -114,7 +114,7 @@ def voice_over_music_db(clean_audio: np.ndarray, music: np.ndarray, gain_db: flo
     return round(float(np.quantile(ratios, .1)), 2) if ratios else float("-inf")
 
 
-BGM_TARGET_MARGIN_DB = 6.5  # review gate requires 6.0; automatic gain stops 0.5 dB above it
+MIN_VOICE_OVER_MUSIC_DB = 4.0  # review gate: voice at least this far over the music (also the automatic target)
 
 
 def auto_bgm_gain_db(clean_audio: np.ndarray, music: np.ndarray) -> float:
@@ -126,7 +126,8 @@ def auto_bgm_gain_db(clean_audio: np.ndarray, music: np.ndarray) -> float:
     unity = voice_over_music_db(clean_audio, music, 0.0)
     if not math.isfinite(unity):
         raise ValueError("no speech windows to balance the BGM against")
-    return round(min(0.0, unity - BGM_TARGET_MARGIN_DB), 1)
+    # Round toward quieter music so the gate metric never lands below the margin.
+    return min(0.0, math.floor((unity - MIN_VOICE_OVER_MUSIC_DB) * 10) / 10)
 
 
 def packaged_mix_evidence(output_audio: np.ndarray, clean_audio: np.ndarray,

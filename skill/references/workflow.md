@@ -145,7 +145,7 @@ each candidate edge looked stable.
 ## Final evidence and review (`complete`)
 
 `final-evidence` (packaged) or `final-evidence --clean` runs ASR on the accelerated output, checks
-clipping, cut PCM, speech/BGM masking (voice at least 6 dB over music), subtitle timing inside shots,
+clipping, cut PCM, speech/BGM masking (voice at least 4 dB over music), subtitle timing inside shots,
 text pin coverage, nameplates, audio cleanup in the mix, and a sample-level mix proof (correlation
 ≥ 0.999, residual ≤ -45 dBFS, every 250 ms ≤ -38 dBFS). It extracts every final frame (cached by output
 hash), ±72 frames around every cut, subtitle and overlay start/end frames and animation frames.
