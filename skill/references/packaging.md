@@ -1,6 +1,6 @@
 # Packaging workflow
 
-Only when the user requests packaging. Input is a validated clean video (1440×2560, 60 fps, with
+Packaging is the default for every batch (skip it only when the user explicitly asks for unpackaged videos). Input is a validated clean video (1440×2560, 60 fps, with
 audio); the packaged copy goes to `成片/` and the clean video is kept. Every package, render and reburn
 configuration needs a per-output agent-written [design](packaging-design.md); there is no fixed-yellow, random-font or
 random-flower fallback and `subtitle_srt` is not read.

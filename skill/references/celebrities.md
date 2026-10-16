@@ -2,7 +2,7 @@
 
 Every job binds this policy. Each output selects one or more registered celebrities. Supporting actors may appear beside them, but a selected celebrity must
 always be the visual subject. Other people may speak offscreen when it serves the meaning. Identity
-comes from actual frames, never folder names. The batch cast mix (about 80% single, 20% multi) is in [batch review](batch-review.md).
+comes from actual frames, never folder names. There is no single/multi cast ratio: use the material that gives the most coherent edits ([batch review](batch-review.md)).
 
 ## Subject rule
 

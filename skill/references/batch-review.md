@@ -9,11 +9,11 @@ and downstream approvals.
 
 ## Cast mix
 
-Count finished videos, not shots or screen time: aim for about 80% single-celebrity and 20%
-multi-celebrity outputs (two or more selected celebrities on screen); 40 outputs normally means about
-32 and 8. This is a planning target, not a machine quota: adjust slightly for usable material and
-coherence, and allocate individual celebrities by usable material. Record the actual counts, ratio and
-any reason for deviating in the batch review `reason`. Supporting actors do not count.
+There is no single/multi-celebrity ratio and no quota. Choose single- or multi-celebrity outputs, and
+allocate individual celebrities, purely by what the usable material supports and by semantic
+coherence; a coherent multi-celebrity edit is as acceptable as a single-celebrity one. State the actual
+counts in the batch review `reason` for the record only; no deviation reason is needed. Supporting
+actors do not count.
 
 ## Plan annotations
 

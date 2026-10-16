@@ -55,7 +55,12 @@ and colours.
   the neighbouring cues stay meaningful (no orphan fillers like 玩). It needs ≥ 0.8 s final display and
   ≥ 0.6 s settled reading, complete flower text at 9, preferably `ice_drift` with a 200 ms entrance
   (unaccelerated). Otherwise keep the name inside mixed text.
-- **Layout:** avoid covering faces, mouths and on-screen game information.
+- **Layout:** avoid covering faces, mouths and on-screen game information. Check the source shot of every
+  cue, not just the batch default: in an extreme close-up (face filling the frame, mouth near the default
+  y 0.69) set that cue's `layout.y` lower (about 0.80–0.84, still clear of the bottom disclaimer) so the text
+  sits under the chin, and keep the default for ordinary mid or wide shots. Decide per cue from the segment's
+  source, then confirm in the encoded frames (entrance and settled reading) that the mouth and chin are clear
+  and the text does not touch the disclaimer; if it still touches, lower it further and repackage.
 
 ## `subtitle_design`
 

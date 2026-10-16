@@ -1,6 +1,6 @@
 ---
 name: video-montage
-description: Produce, repair and reburn batches of Chinese spoken-word celebrity montage videos with native-frame editing, agent-driven speech, semantic and visual review, optional subtitle packaging and post-encode QC.
+description: Produce, repair and reburn batches of Chinese spoken-word celebrity montage videos with native-frame editing, agent-driven speech, semantic and visual review, subtitle and overlay packaging (default) and post-encode QC.
 metadata:
   version: "0.0.1"
 ---
@@ -41,15 +41,20 @@ policy marker to pass a gate. Jobs from earlier versions of this skill are not s
 4. **Edit shape.** Clean input 1296–2160 frames (21.6–36 s at 60 fps, natural speed); final delivery
    1080–1800 frames (18–30 s); at least four real visual shots. No freezes, slow motion, repeated
    source frames, half sentences or filler.
-5. **Final 1.2x, once.** After editing and any requested packaging, and before final evidence, speed
+5. **Final 1.2x, once.** After editing and packaging, and before final evidence, speed
    up the whole video 1.2x: picture and full mix together, pitch preserved, burned subtitles and
    overlays in sync, 60 fps kept. Keep unaccelerated clean inputs and editable timing for reburns;
    never accelerate an accelerated file. Final ASR, audio, frames, manifests and hashes describe the
    accelerated output. Unpackaged deliveries are accelerated too.
-6. **Packaging only on request.** Add music, subtitles, overlays or extra audio only when the
-   current user asks. Packaging writes a separate output and preserves the clean video; subtitles
-   are burned into the picture only.
-7. **Whole batch.** Deliver exactly the requested count; use the permitted reasonable reuse (never ask the user for it) when the inventory needs it. Never report a partial batch as complete,
+6. **Full packaging by default.** A request to run a batch means complete packaged finished videos
+   (subtitles, nameplates, text pins, disclaimer, BGM from the asset pack); never ask the user whether
+   to package, and never ask for confirmation of defaults. Deliver unpackaged videos only when the
+   user explicitly says no packaging. Packaging writes a separate output and preserves the clean video;
+   subtitles are burned into the picture only. Add extra audio or overlays beyond the asset pack only
+   when the user asks.
+7. **Whole batch.** Deliver exactly the requested count; coherent, logical before-and-after meaning
+   comes first, and the permitted reasonable reuse (never ask the user for it) is used whenever the
+   inventory needs it. There is no single/multi-celebrity ratio. Never report a partial batch as complete,
    invent approvals, or bypass a gate.
 8. **Persist until done.** Once a task starts, keep repairing and rebuilding until every requested
    video passes; there is no retry ceiling and no need to ask permission to continue. A rejected
@@ -93,4 +98,4 @@ Read the workflow first; open the others when the stage needs them:
 - [batch review](references/batch-review.md): inventory, reuse limits, opening capacity
 - [celebrities](references/celebrities.md): cast, supporting actors, nameplates
 - [audio cleanup](references/audio-cleanup.md) and [audio balance](references/audio-balance.md)
-- [packaging](references/packaging.md) and [packaging design](references/packaging-design.md): only when packaging is requested
+- [packaging](references/packaging.md) and [packaging design](references/packaging-design.md): needed for every packaged batch (the default)

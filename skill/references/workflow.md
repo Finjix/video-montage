@@ -24,6 +24,7 @@ the phase and `last_failures`. Read evidence files directly from the paths the c
 | 9 | `clean-qc` | – | `clean_speech_pending`; prints the evidence path |
 | 10 | `clean-speech-review --review <json>` | clean speech review | `clean_validated` |
 
+Packaging is the default; use the unpackaged path only when the user explicitly asks for no packaging.
 Then, **without packaging**: `final-evidence --clean` → `complete --review <json>`.
 **With packaging** ([packaging workflow](packaging.md)): `subtitle-draft [--subtitle-dir <dir>]`
 → `subtitle-review --review <json>` → `package --config <json>` → `final-evidence` → `complete --review <json>`.
@@ -41,7 +42,7 @@ Contracts per stage: speech reviews in [speech review](speech-review.md) and
   "requested_outputs": 40,
   "sources": [{"path": "D:/footage/source-01.mp4", "sha256": "<optional check>"}],
   "asset_root": "D:/footage/packaging-assets",
-  "packaging_request": "<the user's packaging request, if any>",
+  "packaging_request": "<the user's request text; packaging is on by default>",
   "cast_policy": "selected-celebrities/v3",
   "celebrities": [{"person_id": "person:wu-yue", "name": "吴樾",
                    "nameplate": {"path": "D:/footage/packaging-assets/明星铭牌/吴樾.png", "sha256": "<sha256>"}}]
