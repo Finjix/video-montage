@@ -102,7 +102,7 @@ These fail at `plan-evidence`; satisfy them before submitting:
   `condition_result`, `problem_solution` or `payoff`; 这下 needs `cause_effect`, `condition_result` or
   `payoff`; 然后/接着/随后 need `progression`/`escalation`; the first segment cannot open with 因为 unless
   it contains 所以/因此; 只要 without 就/便/即可/才能 needs a following `condition_result`;
-- every output's spoken text contains at least one canonical game name from the text library (category `game`) at least once; checked per output as `GAME_NAME_REQUIRED:<plan_id>`;
+- every output has at least one segment whose own text contains a canonical game name from the text library (category `game`), whoever speaks it; a name split across segments does not count; checked per output as `GAME_NAME_REQUIRED:<plan_id>`;
 - the last segment lasts ≥ 2 s and is not a bare account number ("我收了N个幸存者") or a method beat
   ("把资源拿来升级熔炉", "…发展建设");
 - only one segment may contain 易如反掌/轻轻松松/小意思/so easy, and "so easy" only beside a result phrase;

@@ -514,8 +514,8 @@ def check_plan(plan: dict, source_index: dict, count: int) -> list[str]:
         games = [normalized(entry["text"]) for entry in TEXT_LIBRARY.load(plan["text_library"])["entries"]
                  if entry["category"] == "game"] if plan.get("text_library") else []
         for output in plan.get("outputs", []):
-            spoken = normalized("".join(str(segment.get("text", "")) for segment in output.get("segments", [])))
-            if games and not any(name in spoken for name in games):
+            if games and not any(any(name in normalized(str(segment.get("text", ""))) for name in games)
+                                 for segment in output.get("segments", [])):
                 errors.append(f"GAME_NAME_REQUIRED:{output.get('plan_id')}")
         for source in plan.get("batch_analysis", {}).get("sources", []):
             if any(not CAST.person_id(turn.get("speaker_id")) for turn in source.get("spoken_turns", [])):
