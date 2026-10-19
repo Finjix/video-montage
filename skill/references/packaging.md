@@ -101,12 +101,18 @@ differ; the manifest binds both. Then run `final-evidence` and `complete` ([work
 
 ## BGM
 
-Every packaged video carries one BGM. `package` accepts only two origins and rejects any other path:
+Every packaged video carries one BGM, and **no single track may serve more than 67% of the batch's videos**
+(`package` rejects it; 3 videos need at least 2 tracks, 5 need 2, 6 need 2, a lone video needs 1). `package` accepts only two origins and rejects any other path:
 
 1. **Audio in the asset pack** (`asset_root`, any `.mp3/.wav/.m4a/.aac/.flac/.ogg/.opus`). Use it.
-2. **A licensed download**, only when the pack has no audio. Never ask the user for music.
+2. **A licensed download**: when the pack has no audio, fetch it yourself and never ask the user for music. When the
+   pack has audio but fewer distinct tracks than the 67% limit needs (`ask_user_before_adding_tracks: true`), **ask the
+   user** whether you may add downloaded tracks; only after their yes record `bgm_extension_authorization`
+   (`{"policy": "explicit-user-bgm-extension/v1", "authorized_by": "user", "instruction": "<their words>"}`) in the work
+   order, after which `fetch-bgm` works beside the pack audio. If they refuse, record `bgm_repetition_waiver`
+   (`explicit-user-bgm-repetition-waiver/v1`, same fields) to accept the repetition.
 
-`bgm-assets --job-dir <job_dir>` lists both and prints `download_required`. When it is `true`:
+`bgm-assets --job-dir <job_dir>` lists both and prints `download_required` (true when the pack is empty, or short and you were authorized). When it is `true`:
 
 1. Search the web yourself (WebSearch/WebFetch/curl) for one instrumental track, 20 s or longer, calm enough
    to sit under speech, whose license allows commercial use **without attribution, share-alike or
@@ -127,8 +133,9 @@ assets/dependencies/python/python.exe scripts/video_montage.py fetch-bgm --job-d
    Use `--file <path>` instead of `--url` for a track you downloaded another way. It refuses when the pack
    has audio unless `--asset-audio-unsuitable "<concrete reason>"` explains why none of it works (for
    example only sound effects). `--instrumental` asserts that you checked the track has no vocals.
-3. Put the printed `{"path": ..., "sha256": ...}` into `outputs[].bgm`. One track may serve the whole batch;
-   different tracks are fine. The registry and the file stay in `config/` after completion, so reburns
+3. Put the printed `{"path": ..., "sha256": ...}` into `outputs[].bgm`. Spread the batch over enough tracks to
+   stay within 67% per track; `bgm-assets` prints `tracks_available`, `tracks_needed`, `max_videos_per_track` and
+   `ask_user_before_adding_tracks`. The registry and the file stay in `config/` after completion, so reburns
    and `remaster-audio` keep working. If no source is reachable, keep trying other sources and search
    terms; only a failure of every route to the internet is a blocker (report what was tried).
 

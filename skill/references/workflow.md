@@ -54,7 +54,10 @@ Contracts per stage: speech reviews in [speech review](speech-review.md) and
   created if missing; it defaults to the user's Desktop.
 - `celebrities` is required: every selected celebrity with a hash-bound absolute nameplate PNG
   ([selected celebrities](celebrities.md)); `cast_policy` is filled in by `init`.
-- `batch_reuse_authorization` whenever the count needs extra reuse; never ask the user for it, unless they forbade reuse ([batch review](batch-review.md)).
+- Optional user decisions, written only after the user answered ([batch review](batch-review.md), [packaging](packaging.md#bgm)):
+  `batch_reuse_authorization` (reuse beyond the default limits), `source_minimum_waiver` (fewer than 3 files per output),
+  `bgm_extension_authorization` (agent may add downloaded BGM beside a small pack) and `bgm_repetition_waiver`
+  (one BGM may exceed 67% of the videos). Without them the defaults apply: 3 files per output, 67% BGM share.
 - `init` binds `semantic-continuity/v2`, `semantic-batch-review/v2`, `selected-celebrities/v3`,
   `spoken-audio-cleanup/v1`, `agent-speech-review/v1`, `required-full-coverage/v1` text pins,
   `semantic-reading/v1` subtitles and a snapshot of the [text library](text-library.md).

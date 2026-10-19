@@ -78,12 +78,21 @@ the shortfall. An inventory upper bound does not prove enough coherent routes ex
 short, keep analysing the sources; if it is truly insufficient, report the shortfall. Never exceed four
 or call a partial batch complete.
 
-## User-authorized reasonable reuse
+## Source minimum and user-authorized reuse
 
-Reasonable reuse is a standard, permitted tool for reaching the requested count: never ask the user
-whether it is allowed. When the default limits cannot reach the count (check the source inventory
-first), the agent records the authorization itself in the work order, quoting the user's actual
-request (the request for that many outputs is the instruction), unless the user forbade reuse. Record:
+Every output draws on at least **3 distinct original files** (`OUTPUT_SOURCE_MINIMUM_NOT_MET`; the plan review
+repeats it). Reuse beyond the default limits above is never assumed.
+
+When the inventory cannot reach the requested count under these limits (check the source inventory first,
+including whether three files can feed every output), **ask the user** before planning on: report the counts
+(sources, outputs, the limit that fails) and offer the options. Never treat the request for N outputs as
+authorization. Record only what the user answered, quoting their words:
+
+- fewer sources per output (1 or 2): `"source_minimum_waiver": {"policy": "explicit-user-source-minimum-waiver/v1",
+  "authorized_by": "user", "instruction": "<the user's words>", "min_sources": 2}`;
+- reuse beyond the default limits: `batch_reuse_authorization` below.
+
+Reasonable reuse, once the user has agreed, records:
 
 ```json
 "batch_reuse_authorization": {"policy": "explicit-user-reasonable-reuse/v1", "authorized_by": "user",
@@ -97,7 +106,7 @@ subtitles and final QC still apply.
 
 ## Extended reuse (user accepts heavier repetition)
 
-Only when the user explicitly accepts heavier repetition because the usable material cannot reach the requested count
+Only when the user explicitly accepts heavier repetition (ask them first) because the usable material cannot reach the requested count
 under the reasonable-reuse limits, record `"policy": "explicit-user-extended-reuse/v1"` (same fields, with the user's real
 words as `instruction`). Limits then rise to: same candidate/exact text 30, same opening speech or visual family 8,
 opening + second family pair 10, same closing text 16, same ordered semantic route 6, same-position overlap ≤ 80%,

@@ -46,19 +46,24 @@ policy marker to pass a gate. Jobs from earlier versions of this skill are not s
 6. **Full packaging by default.** A request to run a batch means complete packaged finished videos
    (subtitles, nameplates, text pins, disclaimer, BGM); never ask the user whether
    to package, and never ask for confirmation of defaults. BGM comes from the asset pack; when the pack
-   has no audio, download a commercial-use track yourself ([packaging](references/packaging.md#bgm)). Deliver unpackaged videos only when the
+   has no audio, download a commercial-use track yourself ([packaging](references/packaging.md#bgm)).
+   One track may serve at most 67% of the batch's videos (for 3 videos, at most 2): use more tracks.
+   When the pack has audio but too few tracks for that limit, ask the user whether you may add licensed downloads. Deliver unpackaged videos only when the
    user explicitly says no packaging. Packaging writes a separate output and preserves the clean video;
    subtitles are burned into the picture only. Add extra audio or overlays beyond the asset pack (and that one BGM fallback) only
    when the user asks.
 7. **Whole batch.** Deliver exactly the requested count; coherent, logical before-and-after meaning
-   comes first, and the permitted reasonable reuse (never ask the user for it) is used whenever the
-   inventory needs it. There is no single/multi-celebrity ratio. Never report a partial batch as complete,
+   comes first. Every output draws on at least **three** distinct original files. When the inventory truly
+   cannot meet a limit (the three-source minimum, the batch reuse limits, the BGM share), stop and ask the user
+   whether to allow reuse / fewer sources / more BGM; record only their answer in the work order and never grant
+   it yourself ([batch review](references/batch-review.md)). There is no single/multi-celebrity ratio. Never report a partial batch as complete,
    invent approvals, or bypass a gate.
 8. **Persist until done.** Once a task starts, keep repairing and rebuilding until every requested
    video passes; there is no retry ceiling and no need to ask permission to continue. A rejected
    command or review means "fix and continue". Stop when the user says so. Ask the user only when an
    absolute blocker prevents all remaining useful work after repairs and alternatives are exhausted;
-   then report the blocker, what was tried and the minimum input needed. Uncertain speech, ASR
+   then report the blocker, what was tried and the minimum input needed. Insufficient footage or BGM under rule 7 is
+   such a case: ask once with the numbers, then continue with the user's answer. Uncertain speech, ASR
    disagreement, being unable to listen, a failed round or long processing are never blockers.
 
 ## Delivery layout

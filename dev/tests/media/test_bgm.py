@@ -95,3 +95,29 @@ class BgmTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestBgmRepetition(unittest.TestCase):
+    def test_share_limit(self):
+        self.assertEqual([BGM.max_uses(n) for n in (1, 2, 3, 5, 10)], [1, 1, 2, 3, 6])
+        self.assertEqual([BGM.tracks_needed(n) for n in (1, 2, 3, 40)], [1, 2, 2, 2])
+        BGM.require_distribution(["a", "a", "b"], None)
+        with self.assertRaises(ValueError):
+            BGM.require_distribution(["a", "a", "a"], None)
+        BGM.require_distribution(["a", "a", "a"], {"policy": BGM.REPETITION_WAIVER_POLICY,
+                                                   "authorized_by": "user", "instruction": "可以重复"})
+
+    def test_waiver_must_be_the_users(self):
+        with self.assertRaises(ValueError):
+            BGM.require_distribution(["a", "a", "a"], {"policy": BGM.REPETITION_WAIVER_POLICY,
+                                                       "authorized_by": "agent", "instruction": "x"})
+
+
+class TestSourceMinimum(unittest.TestCase):
+    def test_minimum_and_waiver(self):
+        from montage import batch
+        self.assertEqual(batch.source_minimum({}), 3)
+        waiver = {"policy": batch.SOURCE_MINIMUM_WAIVER_POLICY, "authorized_by": "user", "instruction": "两个也行", "min_sources": 2}
+        self.assertEqual(batch.source_minimum({"source_minimum_waiver": waiver}), 2)
+        with self.assertRaises(ValueError):
+            batch.source_minimum({"source_minimum_waiver": {**waiver, "authorized_by": "agent"}})

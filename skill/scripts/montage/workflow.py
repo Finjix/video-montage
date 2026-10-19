@@ -294,6 +294,9 @@ def init(args) -> None:
     order["cast_policy"] = CAST.POLICY
     celebrities = CAST.registry(order)
     BATCH.reuse_limits(order)
+    BATCH.source_minimum(order)
+    BGM.require_waiver(order.get("bgm_repetition_waiver"), BGM.REPETITION_WAIVER_POLICY)
+    BGM.require_waiver(order.get("bgm_extension_authorization"), BGM.EXTENSION_POLICY)
     seen = set()
     for row in sources:
         path = Path(row["path"]).resolve()
@@ -380,7 +383,9 @@ def prepare(args) -> None:
                        "cast_policy": CAST.POLICY, "celebrities": CAST.registry(order),
                        "planning_policy": EDITING.POLICY, "batch_review_policy": BATCH.POLICY,
                        **({"batch_reuse_authorization": order["batch_reuse_authorization"]}
-                          if "batch_reuse_authorization" in order else {})})
+                          if "batch_reuse_authorization" in order else {}),
+                       **({"source_minimum_waiver": order["source_minimum_waiver"]}
+                          if "source_minimum_waiver" in order else {})})
     value["source_index"] = ref(index_path)
     value.pop("source_speech_evidence", None)
     save(job, value, "prepared")
@@ -1530,7 +1535,9 @@ def package(args) -> None:
     plan = read(require_ref(value["plan"], "cast packaging plan"))
     plan_by_id = {output["plan_id"]: output for output in plan["outputs"]}
     require_cast_binding(value, plan)
-    for prepared in PACKAGER.prepared_rows(args.config.resolve()):
+    prepared_rows = PACKAGER.prepared_rows(args.config.resolve())
+    BGM.require_distribution([row["bgm"]["sha256"] for row in prepared_rows if row["bgm"]], order.get("bgm_repetition_waiver"))
+    for prepared in prepared_rows:
         if prepared["bgm"]:
             BGM.require_authorized(job, Path(value["asset_root"]), prepared["bgm"])
         output = plan_by_id[prepared["plan_id"]]
@@ -2304,13 +2311,16 @@ def remaster_audio(args) -> None:
 def bgm_assets(args) -> None:
     """List the asset pack's audio and the licensed downloads; download_required says whether to fetch one."""
     value = state(args.job_dir.resolve())
-    print(json.dumps(BGM.status(args.job_dir.resolve(), Path(value["asset_root"])), ensure_ascii=False, indent=2))
+    order = read(require_ref(value["work_order"], "work order"))
+    print(json.dumps(BGM.status(args.job_dir.resolve(), Path(value["asset_root"]), int(order["requested_outputs"]),
+                                order.get("bgm_extension_authorization")), ensure_ascii=False, indent=2))
 
 
 def fetch_bgm(args) -> None:
     """Download a commercial-use BGM (the asset pack has none) and record its license evidence."""
     job = args.job_dir.resolve()
-    entry = BGM.acquire(job, Path(state(job)["asset_root"]), url=args.url, file=args.file, license=args.license,
+    order = read(require_ref(state(job)["work_order"], "work order"))
+    entry = BGM.acquire(job, Path(state(job)["asset_root"]), extension=order.get("bgm_extension_authorization"), url=args.url, file=args.file, license=args.license,
                         license_url=args.license_url, license_evidence=args.license_evidence,
                         source_page=args.source_page, title=args.title, creator=args.creator,
                         instrumental=args.instrumental, asset_audio_unsuitable=args.asset_audio_unsuitable)

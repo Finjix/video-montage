@@ -15,6 +15,8 @@ LIMITS = {"candidate_uses": 6, "exact_text_uses": 6, "opening_uses": 4,
           "same_position_overlap": .4, "trigram_similarity": .88}
 REASONABLE_REUSE_POLICY = "explicit-user-reasonable-reuse/v1"
 EXTENDED_REUSE_POLICY = "explicit-user-extended-reuse/v1"
+MIN_SOURCES_PER_OUTPUT = 3
+SOURCE_MINIMUM_WAIVER_POLICY = "explicit-user-source-minimum-waiver/v1"
 REASONABLE_LIMITS = {**LIMITS, "candidate_uses": 16, "exact_text_uses": 16, "opening_second_pair_uses": 5,
                      "closing_uses": 10, "semantic_route_uses": 4, "same_position_overlap": .6,
                      "middle_route_uses": 3}
@@ -33,6 +35,19 @@ def reuse_limits(source_index: dict) -> dict:
             or not authorization["instruction"].strip()):
         raise ValueError("explicit user instruction required for reasonable batch reuse")
     return (EXTENDED_LIMITS if authorization["policy"] == EXTENDED_REUSE_POLICY else REASONABLE_LIMITS).copy()
+
+
+def source_minimum(source_index: dict) -> int:
+    """Distinct original files every output must draw on: 3, lower only with the user's explicit waiver."""
+    waiver = source_index.get("source_minimum_waiver")
+    if waiver is None:
+        return MIN_SOURCES_PER_OUTPUT
+    if (not isinstance(waiver, dict) or waiver.get("policy") != SOURCE_MINIMUM_WAIVER_POLICY
+            or waiver.get("authorized_by") != "user" or not isinstance(waiver.get("instruction"), str)
+            or not waiver["instruction"].strip() or type(waiver.get("min_sources")) is not int
+            or not 1 <= waiver["min_sources"] < MIN_SOURCES_PER_OUTPUT):
+        raise ValueError("source minimum waiver needs the user's explicit instruction and min_sources of 1 or 2")
+    return waiver["min_sources"]
 
 
 def text(value: str) -> str:
@@ -109,6 +124,7 @@ def audit(plan: dict, source_index: dict, requested_outputs: int | None = None) 
     if plan.get("batch_reuse_authorization") != authorization:
         fail("BATCH_REUSE_AUTHORIZATION_MISMATCH", "plan", "bind the source-index user authorization")
     rows = plan.get("outputs", [])
+    required_sources = source_minimum(source_index)
     sources = {row["source"]["sha256"]: row for row in source_index.get("sources", [])}
     inventory = plan.get("batch_analysis", {}).get("sources", [])
     inventory_ids = [row.get("source_sha256") for row in inventory]
@@ -166,6 +182,10 @@ def audit(plan: dict, source_index: dict, requested_outputs: int | None = None) 
     for row in rows:
         pid = row["plan_id"]
         segments = row["segments"]
+        used_sources = len({segment["source_sha256"] for segment in segments})
+        if used_sources < required_sources:
+            fail("OUTPUT_SOURCE_MINIMUM_NOT_MET", pid,
+                 f"{used_sources} original files < {required_sources}; use more sources, or ask the user whether fewer is acceptable")
         for segment in segments:
             key = candidate(segment)
             uses["candidate"][digest(key)] += 1
@@ -277,7 +297,8 @@ def audit(plan: dict, source_index: dict, requested_outputs: int | None = None) 
                      "opening_visual_upper_bound": visual_capacity, "opening_upper_bound": upper_bound,
                      "opening_shortfall": max(0, target_count - upper_bound), "planned_unique_outputs": unique_count,
                      "planned_shortfall": max(0, target_count - unique_count)}}
-    return {"schema": POLICY, "limits": limits_used,
+    return {"schema": POLICY, "limits": limits_used, "min_sources_per_output": required_sources,
+            "source_minimum_waiver": source_index.get("source_minimum_waiver"),
             "batch_reuse_authorization": authorization, "decision": "reject" if failures else "pass", **extra,
             "failures": failures, "metrics": {"output_count": len(rows), "unique_ordered_routes": len(uses["ordered"]),
                 "unique_spoken_routes": len(uses["spoken"]), "required_opening_families": required_families,

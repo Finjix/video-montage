@@ -4,7 +4,7 @@ Read each source's complete reviewed transcript ([speech review](speech-review.m
 and actions first; identify complete turns, propositions and what each depends on; only then compose
 adjacent turns and the whole narrative. Never join material only because it shares a game name,
 keyword or diversity goal. Logical, semantically continuous before-and-after flow is the first priority: when coherence conflicts
-with variety, cast mix or any other target, coherence wins. Reasonable reuse of coherent material within the
+with variety, cast mix or any other target, coherence wins. Each output uses at least three distinct original files. Reasonable reuse of coherent material within the
 [batch limits](batch-review.md) is allowed and pre-authorized; there is no diversify stage and no
 `diversity_reason`.
 
