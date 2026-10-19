@@ -13,7 +13,11 @@ REQUIRED = (
     "assets/dependencies/python/python.exe",
     "assets/dependencies/ffmpeg/bin/ffmpeg.exe",
     "assets/dependencies/ffmpeg/bin/ffprobe.exe",
-    "assets/dependencies/models/models--mobiuslabsgmbh--faster-whisper-large-v3-turbo/snapshots/0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf/model.bin",
+    "assets/dependencies/models/Qwen3-ASR-1.7B/model.safetensors.index.json",
+    "assets/dependencies/models/Qwen3-ASR-1.7B/config.json",
+    "assets/dependencies/models/Qwen3-ForcedAligner-0.6B/model.safetensors",
+    "assets/dependencies/models/Qwen3-ForcedAligner-0.6B/config.json",
+    "assets/dependencies/models/silero-vad/silero_vad_v6.onnx",
     "SKILL.md",
     "assets/text-library.json",
     "assets/rejected-source-intervals.json",
@@ -22,8 +26,8 @@ REQUIRED = (
     "scripts/video_montage.py",
     *(f"scripts/montage/{name}.py" for name in ("common", "workflow", "planning", "cast", "batch", "speech",
                                                  "text_library", "content_gate", "rejected_intervals")),
-    *(f"scripts/montage/media/{name}.py" for name in ("asr", "timing", "frame_plan", "renderer", "audio_cleanup",
-                                                       "audio_balance", "mix")),
+    *(f"scripts/montage/media/{name}.py" for name in ("asr", "silero_vad", "timing", "frame_plan", "renderer",
+                                                       "audio_cleanup", "audio_balance", "mix")),
     *(f"scripts/montage/packaging/{name}.py" for name in ("packager", "design", "design_renderer", "fonts", "segmentation",
                                                            "dynamic_flowers", "flower_effects", "reference_animation",
                                                            "delivery_files")),
@@ -62,12 +66,40 @@ def packaging_resources() -> list[str]:
     return failures
 
 
+def safetensors_complete(path: Path) -> bool:
+    """A safetensors file is whole when its header's last tensor ends exactly at the end of the file."""
+    try:
+        with path.open("rb") as source:
+            size = int.from_bytes(source.read(8), "little")
+            header = json.loads(source.read(size))
+        end = max((entry["data_offsets"][1] for name, entry in header.items() if name != "__metadata__"), default=0)
+        return path.stat().st_size == 8 + size + end
+    except (OSError, ValueError, KeyError):
+        return False
+
+
+def asr_model_failures() -> list[str]:
+    """Qwen3-ASR and aligner weights must be complete, every indexed shard included."""
+    models = ROOT / "assets/dependencies/models"
+    failures = []
+    try:
+        index = json.loads((models / "Qwen3-ASR-1.7B/model.safetensors.index.json").read_text(encoding="utf-8"))
+        shards = [models / "Qwen3-ASR-1.7B" / name for name in sorted(set(index["weight_map"].values()))]
+    except (OSError, ValueError, KeyError):
+        shards = []
+    if not shards or not all(safetensors_complete(shard) for shard in shards):
+        failures.append("Qwen3-ASR model incomplete")
+    if not safetensors_complete(models / "Qwen3-ForcedAligner-0.6B/model.safetensors"):
+        failures.append("Qwen3-ForcedAligner model incomplete")
+    return failures
+
+
 def verify() -> dict:
     failures = [f"missing: {path}" for path in REQUIRED if not (ROOT / path).is_file()]
     failures.extend(packaging_resources())
     if sys.version_info[:3] != (3, 13, 15) or sys.maxsize <= 2**32:
         failures.append("bundled 64-bit Python 3.13.15 required")
-    for name in ("faster_whisper", "numpy", "PIL", "av", "cv2", "onnxruntime", "yaml"):
+    for name in ("torch", "transformers", "qwen_asr", "soundfile", "numpy", "PIL", "av", "cv2", "onnxruntime", "yaml"):
         try:
             importlib.import_module(name)
         except Exception as exc:
@@ -83,9 +115,7 @@ def verify() -> dict:
         filters = subprocess.run([str(ffmpeg), "-hide_banner", "-filters"], capture_output=True, text=True)
         if filters.returncode or any(f" {name} " not in filters.stdout for name in ("ass", "overlay", "amix", "loudnorm")):
             failures.append("FFmpeg montage/packaging filters unavailable: ass, overlay, amix, loudnorm")
-    model = ROOT / REQUIRED[3]
-    if model.is_file() and model.stat().st_size < 1_500_000_000:
-        failures.append("Whisper model incomplete")
+    failures.extend(asr_model_failures())
     return {"schema": "video-montage-runtime-check/v260928", "decision": "pass" if not failures else "reject", "failures": failures}
 
 

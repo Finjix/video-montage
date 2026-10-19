@@ -80,12 +80,12 @@ Write the config into `<job_dir>/config/`; relative paths resolve from the confi
 
 - `outputs` covers every plan ID. `subtitle_txt`/`subtitle_sha256` must be the reviewed subtitle;
   `subtitle_design` follows [packaging design](packaging-design.md).
-- **Text pins** (required on every fully packaged video): content-appropriate, verified pin images from
-  the asset pack, separate from subtitles, nameplates and disclaimers. Intervals use unaccelerated
-  60 fps frames, run from frame 0 to the last frame without gaps or overlaps, and each shows for at
-  least 48 final frames (0.8 s). Choose suitable existing assets; never omit pins because choosing takes
-  work. Check overlap with people, subtitles and nameplates; the final `text_pin_reason` records the
-  pin assets, their copy and the coverage seen in the encoded frames.
+- **Text pin** (required on every fully packaged video): exactly one content-appropriate, verified pin image
+  from the asset pack per video, separate from subtitles, nameplates and disclaimers. It spans the whole
+  video (unaccelerated 60 fps frames, frame 0 to the last frame); never rotate, swap or stack several pins.
+  Choose a suitable existing asset; never omit the pin because choosing takes work. Check overlap with
+  people, subtitles and nameplates; the final `text_pin_reason` records the pin asset, its copy and the
+  coverage seen in the encoded frames.
 - **Nameplates**: copy the windows from the plan evidence ([selected celebrities](celebrities.md)).
 - **Disclaimer**: covers the whole video. Overlays are 9:16 PNGs with transparency.
 - **BGM** loops to the end; speech is not ducked, and final evidence requires the voice to stay at least

@@ -124,8 +124,7 @@ def scan(samples: np.ndarray, origin: int, segment: dict, asr: dict, probabiliti
 
 
 def analyze(ffmpeg: Path, source: Path, segment: dict, asr: dict, directory: Path) -> dict:
-    from faster_whisper.vad import get_vad_model
-    from faster_whisper.utils import get_assets_path
+    from montage.media import silero_vad
     lo, hi = bounds(segment)
     origin = max(0, lo - RATE)
     samples = decode(ffmpeg, source, origin, hi + RATE)
@@ -134,11 +133,11 @@ def analyze(ffmpeg: Path, source: Path, segment: dict, asr: dict, directory: Pat
     # Use the strongest source channel rather than cancelling opposite-phase channels.
     channel = int(np.argmax(np.mean(samples * samples, axis=0)))
     mono = samples[::3, channel].copy()
-    probabilities = get_vad_model()(np.pad(mono, (0, 512 - len(mono) % 512)))
+    probabilities = silero_vad.get_vad_model()(np.pad(mono, (0, 512 - len(mono) % 512)))
     evidence = scan(samples, origin, segment, asr, probabilities)
     pcm_path = directory / "context.wav"
     write_pcm(pcm_path, samples)
-    model_path = Path(get_assets_path()) / "silero_vad_v6.onnx"
+    model_path = silero_vad.MODEL_PATH
     evidence.update(context_pcm=file_ref(pcm_path), vad_model_sha256=file_ref(model_path)["sha256"],
                     source_asr_digest=digest(asr), parameters={"window_ms": 20, "step_ms": 10,
                     "context_seconds": 1, "vad_window_ms": 32, "fade_samples": FADE_SAMPLES})

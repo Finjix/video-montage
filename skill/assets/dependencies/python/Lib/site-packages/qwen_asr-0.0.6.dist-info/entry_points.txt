@@ -1,0 +1,4 @@
+[console_scripts]
+qwen-asr-demo = qwen_asr.cli.demo:main
+qwen-asr-demo-streaming = qwen_asr.cli.demo_streaming:main
+qwen-asr-serve = qwen_asr.cli.serve:main

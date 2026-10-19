@@ -92,7 +92,7 @@ def _shot_stream(shot: dict):
                 if letters and re.search(r"[。！？!?]", raw):
                     punctuation[len(letters)] = "strong"
                 continue
-            # Whisper often stores a leading space on English words.
+            # ASR words store the space that precedes an English word.
             if letters and raw[:matches[0].start()].isspace() and letters[-1].isascii() and matches[0][0].isascii():
                 spaces.add(len(letters))
             for index, match in enumerate(matches):

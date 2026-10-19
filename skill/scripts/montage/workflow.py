@@ -214,11 +214,11 @@ def subtitle_segment_bounds(cues: list[dict], plan_output: dict, render_value: d
 
 def transcribe(model, path: Path) -> dict:
     """One neutral recognition; The agent reviews the words, ASR is never retried to match a target."""
-    return ASR.transcribe(model, str(path), "zh", initial_prompt="以下是简体中文口播。")[0]
+    return ASR.transcribe(model, str(path), "zh")
 
 
 def load_model():
-    return ASR.build_model("large-v3-turbo", MODEL_ROOT, "auto", "int8", "float16")[0]
+    return ASR.build_model(MODEL_ROOT, "auto")
 
 
 def state(job: Path, *, discarding_plan: bool = False) -> dict:

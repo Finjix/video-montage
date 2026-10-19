@@ -50,9 +50,11 @@ def prepare_nameplates(row: dict, base: Path, frames: int) -> list[dict]:
 
 
 def text_pin_coverage(layers: list[dict], frames: int) -> dict:
-    """Required pins cover every clean frame, with readable, hash-bound assets."""
+    """One required pin covers every clean frame, with a readable, hash-bound asset."""
     if not isinstance(layers, list) or not layers:
         raise ValueError("every packaged video requires text pins")
+    if len(layers) != 1:
+        raise ValueError("each packaged video uses exactly one text pin for its whole length; no rotating or changing pins")
     cursor = 0
     for layer in layers:
         if (not isinstance(layer, dict) or type(layer.get("start_frame")) is not int

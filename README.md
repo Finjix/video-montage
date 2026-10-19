@@ -24,14 +24,13 @@
 |---|---|
 | Python | 3.13.15 |
 | FFmpeg / FFprobe | 9.0.2 |
-| faster-whisper | 1.2.1 |
-| CTranslate2 | 4.8.2 |
+| PyTorch | 2.11.0+cu128 |
+| Transformers | 4.57.6 |
+| qwen-asr | 0.0.6 |
 | PyAV | 18.1.0 |
 | NumPy | 2.5.3 |
 | Pillow | 12.3.0 |
 | OpenCV | 5.0.0.93 |
 | ONNX Runtime | 1.30.0 |
-| CUDA cuBLAS | 12.9.0.13 |
-| CUDA Runtime | 12.9.37 |
 
-Whisper 模型：`mobiuslabsgmbh/faster-whisper-large-v3-turbo`。
+语音识别模型：`Qwen/Qwen3-ASR-1.7B`（识别文字）+ `Qwen/Qwen3-ForcedAligner-0.6B`（字级时间戳），位于 `skill/assets/dependencies/models/`。CUDA 运行库随 PyTorch 自带，不再单独打包；无可用 GPU 时自动退回 CPU。音频清理使用的 Silero VAD v6（ONNX）位于 `models/silero-vad/`。
