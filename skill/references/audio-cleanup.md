@@ -61,12 +61,12 @@ missed suspects, changed parameters or replaced evidence bytes.
 
 The renderer resamples, cuts by source samples and mutes approved intervals on all channels with 5 ms
 fades inside each interval. Picture frames, duration and subtitle timing are unchanged; gain, BGM mixing
-and the single 1.2x follow.
+and final delivery follow.
 
 `clean-qc` verifies the render used the authorization, that every channel stays ≤ -60 dBFS inside each
 muted interval (excluding fades and about one AAC packet margin, scaled down for short intervals; an
 interval with no checkable interior fails) and that boundaries have no jumps. `final-evidence` maps the
-intervals through segment speed and the final 1.2x, rebuilds the same cleaned track plus authorized BGM
+intervals through segment speed, rebuilds the same cleaned track plus authorized BGM
 and requires the mix residual inside them to be ≤ -45 dBFS (the BGM itself is not muted).
 
 Completion keeps `manifests/audio_cleanup_authorization.json` (intervals, protected ranges, provenance)

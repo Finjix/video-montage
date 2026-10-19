@@ -10,12 +10,12 @@ import numpy as np
 from montage.common import FFMPEG, require_ref, run
 from montage.media import audio_cleanup as AUDIO
 
-FINAL_SPEED = 1.2
+FINAL_SPEED = 1.0  # no final speed-up: delivery timeline equals the clean timeline
 
 
 def final_frames(input_frames: int) -> int:
     # Round up to a complete output frame so the last source frame is retained.
-    return (input_frames * 5 + 5) // 6
+    return input_frames if FINAL_SPEED == 1.0 else (input_frames * 5 + 5) // 6
 
 
 def delivery_speed(row: dict) -> float:

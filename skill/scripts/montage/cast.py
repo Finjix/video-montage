@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 
 from montage.common import sha
+from montage.media.mix import final_frames
 
 POLICY = "selected-celebrities/v3"
 DEFAULT_NAMEPLATE_FRAMES = 192
@@ -162,7 +163,7 @@ def nameplate_windows(output: dict, shots: list[dict]) -> list[dict]:
                     break
                 limit = next_shot["output_out_frame_exclusive"]
             end = min(start + DEFAULT_NAMEPLATE_FRAMES, limit)
-            if (end * 5 + 5) // 6 - (start * 5 + 5) // 6 < MIN_FINAL_NAMEPLATE_FRAMES:
+            if final_frames(end) - final_frames(start) < MIN_FINAL_NAMEPLATE_FRAMES:
                 raise ValueError("first-appearance nameplate reads for less than 0.8 final seconds")
             windows.append({"person_id": person, "start_frame": start, "end_frame_exclusive": end})
         seen.update(people)
@@ -170,11 +171,11 @@ def nameplate_windows(output: dict, shots: list[dict]) -> list[dict]:
         raise ValueError("nameplate timeline must cover the actual selected cast")
     for current, following in zip(windows, windows[1:]):
         # ceil(clean * 5/6) maps visibility to the final 1.2x/60 fps timeline.
-        next_final = (following["start_frame"] * 5 + 5) // 6
+        next_final = final_frames(following["start_frame"])
         last_allowed_final = next_final - MIN_FINAL_NAMEPLATE_GAP_FRAMES
         current["end_frame_exclusive"] = min(current["end_frame_exclusive"], last_allowed_final * 6 // 5)
-        if ((current["end_frame_exclusive"] * 5 + 5) // 6
-                - (current["start_frame"] * 5 + 5) // 6 < MIN_FINAL_NAMEPLATE_FRAMES):
+        if (final_frames(current["end_frame_exclusive"])
+                - final_frames(current["start_frame"]) < MIN_FINAL_NAMEPLATE_FRAMES):
             raise ValueError("nameplate blank gap would leave less than 0.8 final seconds; reselect first appearance")
     return windows
 

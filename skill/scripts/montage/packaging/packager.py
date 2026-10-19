@@ -92,8 +92,8 @@ def speed_clean(input_path: Path, output: Path) -> dict:
     partial = output.with_suffix(".partial.mp4")
     try:
         run([str(FFMPEG), "-v", "error", "-nostdin", "-y", "-i", str(input_path),
-             "-map", "0:v:0", "-map", "0:a:0", "-vf", "setpts=(PTS-STARTPTS)/1.2,fps=60:round=up",
-             "-af", "asetpts=PTS-STARTPTS,atempo=1.2,apad",
+             "-map", "0:v:0", "-map", "0:a:0", "-vf", f"setpts=(PTS-STARTPTS)/{FINAL_SPEED},fps=60:round=up",
+             "-af", f"asetpts=PTS-STARTPTS,atempo={FINAL_SPEED},apad",
              "-frames:v", str(frames), "-r", "60", "-fps_mode", "cfr",
              "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
              "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
@@ -505,13 +505,13 @@ def render_one(row: dict, output_dir: Path) -> dict:
                 filters.append(f"{current}[flowers]overlay=0:{track['y']}:format={encoding['overlay_format']}:eof_action=pass[flowered]")
                 current = "[flowered]"
                 index += 1
-            filters.append(f"{current}format={encoding['pixel_format']},setpts=(PTS-STARTPTS)/1.2,fps=60:round=up[vout]")
+            filters.append(f"{current}format={encoding['pixel_format']},setpts=(PTS-STARTPTS)/{FINAL_SPEED},fps=60:round=up[vout]")
             if row["bgm"]:
                 command += ["-stream_loop", "-1", "-i", row["bgm"]["path"]]
                 filters.append(f"[{index}:a]volume={row['bgm']['gain_db']}dB[bgm]")
-                filters.append("[0:a][bgm]amix=inputs=2:duration=first:normalize=0,asetpts=PTS-STARTPTS,atempo=1.2,apad[aout]")
+                filters.append(f"[0:a][bgm]amix=inputs=2:duration=first:normalize=0,asetpts=PTS-STARTPTS,atempo={FINAL_SPEED},apad[aout]")
             else:
-                filters.append("[0:a]asetpts=PTS-STARTPTS,atempo=1.2,apad[aout]")
+                filters.append(f"[0:a]asetpts=PTS-STARTPTS,atempo={FINAL_SPEED},apad[aout]")
             frames = final_frames(row["spec"]["frames"])
             command += ["-filter_complex", ";".join(filters), "-map", "[vout]", "-map", "[aout]", "-frames:v", str(frames),
                         "-r", "60", "-fps_mode", "cfr", "-c:v", "libx264", "-preset", "veryfast", "-crf", str(encoding["crf"]),

@@ -10,9 +10,9 @@ with variety, cast mix or any other target, coherence wins. Reasonable reuse of 
 
 ## Duration, shots and people
 
-- Select at natural speed. The clean render must be 1296–2160 frames at 60 fps (21.6–36 s); after the
-  final 1.2x it must be 1080–1800 frames (18–30 s). Planning and rendering share the same rounding
-  (`round(frames × fps_den / fps_num × 60)` per render segment); 21.5 s cannot reach 18 s and fails.
+- Select at natural speed. The clean render and the final delivery must both be 1020–1800 frames at
+  60 fps (17–30 s), with no final speed-up. Planning and rendering share the same rounding
+  (`round(frames × fps_den / fps_num × 60)` per render segment); 16.5 s cannot reach 17 s and fails.
 - At least four real visual shots, no maximum. A real camera, angle or shot-size change inside one
   source counts when native frames prove it; splitting one continuous shot, its text, IDs or range
   does not. Each shot lasts at least 48 clean frames (0.8 s); the longest and shortest differ by at

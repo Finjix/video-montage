@@ -11,8 +11,8 @@ from montage import content_gate as semantic
 from montage.media import renderer
 
 POLICY = "semantic-continuity/v2"
-CLEAN_FRAME_RANGE = (1296, 2160)
-FINAL_FRAME_RANGE = (1080, 1800)
+CLEAN_FRAME_RANGE = (1020, 1800)
+FINAL_FRAME_RANGE = (1020, 1800)
 
 
 def frame_errors(count: int, *, final: bool = False) -> list[str]:

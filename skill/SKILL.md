@@ -38,14 +38,11 @@ policy marker to pass a gate. Jobs from earlier versions of this skill are not s
    as are ranges in `assets/rejected-source-intervals.json` (matched by source hash
    and frames; renaming never bypasses them). Sources must decode at a constant frame rate from
    timestamp 0; otherwise create a traceable CFR copy and prepare again.
-4. **Edit shape.** Clean input 1296–2160 frames (21.6–36 s at 60 fps, natural speed); final delivery
-   1080–1800 frames (18–30 s); at least four real visual shots. No freezes, slow motion, repeated
+4. **Edit shape.** Clean input and final delivery are both 1020–1800 frames (17–30 s at 60 fps,
+   natural speed); at least four real visual shots. No freezes, slow motion, repeated
    source frames, half sentences or filler.
-5. **Final 1.2x, once.** After editing and packaging, and before final evidence, speed
-   up the whole video 1.2x: picture and full mix together, pitch preserved, burned subtitles and
-   overlays in sync, 60 fps kept. Keep unaccelerated clean inputs and editable timing for reburns;
-   never accelerate an accelerated file. Final ASR, audio, frames, manifests and hashes describe the
-   accelerated output. Unpackaged deliveries are accelerated too.
+5. **Final delivery, no speed-up.** The packaged video keeps the clean timeline (speed 1.0); picture
+   and mix are never accelerated. Final ASR, audio, frames, manifests and hashes describe the output.
 6. **Full packaging by default.** A request to run a batch means complete packaged finished videos
    (subtitles, nameplates, text pins, disclaimer, BGM from the asset pack); never ask the user whether
    to package, and never ask for confirmation of defaults. Deliver unpackaged videos only when the

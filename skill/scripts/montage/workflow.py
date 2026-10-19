@@ -905,8 +905,8 @@ def final_editing_evidence(job: Path, value: dict, output: dict, path: Path, cou
     summary = EDITING.summary(output)
     summary["final_frames"] = count
     for shot in summary["visual_shots"]:
-        shot["final_in_frame"] = (shot["output_in_frame"] * 5 + 5) // 6
-        shot["final_out_frame_exclusive"] = (shot["output_out_frame_exclusive"] * 5 + 5) // 6
+        shot["final_in_frame"] = final_frames(shot["output_in_frame"])
+        shot["final_out_frame_exclusive"] = final_frames(shot["output_out_frame_exclusive"])
     return {"editing": summary, "continuous_visual": final_continuous_visual(job, value, path, count)}
 
 
@@ -2065,8 +2065,8 @@ def complete(args) -> None:
         expected = EDITING.summary(output)
         expected["final_frames"] = count
         for shot in expected["visual_shots"]:
-            shot["final_in_frame"] = (shot["output_in_frame"] * 5 + 5) // 6
-            shot["final_out_frame_exclusive"] = (shot["output_out_frame_exclusive"] * 5 + 5) // 6
+            shot["final_in_frame"] = final_frames(shot["output_in_frame"])
+            shot["final_out_frame_exclusive"] = final_frames(shot["output_out_frame_exclusive"])
         if (row.get("editing") != expected
                 or finding.get("continuous_visual_sha256") != row.get("continuous_visual", {}).get("sha256")):
             errors.append("FINAL_EDITING_EVIDENCE_CHANGED")

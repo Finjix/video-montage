@@ -6,7 +6,7 @@ configuration needs a per-output agent-written [design](packaging-design.md); th
 random-flower fallback and `subtitle_srt` is not read.
 
 Rendering composes subtitles, flowers, overlays and audio on the unaccelerated timeline, then applies the
-single 1.2x (picture and mix together, pitch kept, 60 fps) and encodes. All outputs of the batch are
+delivery at natural speed (no speed-up, 60 fps) and encodes. All outputs of the batch are
 encoded (in parallel) before anything is published; a replacement error rolls back. Encoding: H.264
 `yuv420p` CRF 18 by default; when `fire1` flower text is actually used, RGB composition and `yuv444p`
 CRF 8 keep its thin red edge (larger files; some hardware players lack 4:4:4). The manifest records
@@ -49,7 +49,7 @@ Reading rules (`semantic-reading/v1`):
   flower width instead of equal character counts. Never attach the tail of one clause to the start of
   the next, separate a number from its classifier, split a word or game name, or start a cue with a
   dependent particle (的, 了…; real words like 的确, 了解 are fine). Keep short complete speech together.
-- Aim for 1.2–2.5 s per cue after the 1.2x; revise cues under 0.8 s. A flagged short cue that cannot be
+- Aim for 1.2–2.5 s per cue; revise cues under 0.8 s. A flagged short cue that cannot be
   merged needs a concrete `short_cue_reason`; a flagged legitimate head word (地形, 得分, 过瘾…) needs
   `head_word`, a concrete `head_word_reason` and evidence quoting that word. Isolated particles never
   pass this way.

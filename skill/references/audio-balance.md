@@ -1,6 +1,6 @@
 # Segment loudness balance (`segment-loudness-balance/v1`)
 
-Enabled by default for new clean renders. Packaging, the final 1.2x and subtitle reburns reuse the
+Enabled by default for new clean renders. Packaging, the final delivery and subtitle reburns reuse the
 balanced clean track; existing MP4s and completed jobs are not rewritten (a full clean re-render is
 needed to apply it).
 

@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 
 from montage.common import ROOT
+from montage.media.mix import FINAL_SPEED
 from montage.packaging import fonts as subtitle_fonts
 from montage.packaging import segmentation as subtitle_segmentation
 
@@ -199,7 +200,7 @@ def prepare(value: dict, cues: list[dict], subtitle_sha256: str, layers: list[di
             if normalized(cue["text"]) in {normalized(name) for name in names}:
                 standalone_games.append(style)
                 interval = cue["end_ms"] - cue["start_ms"]
-                if interval / 1.2 < 800 or (interval - style["entrance"]["duration_ms"]) / 1.2 < 600:
+                if interval / FINAL_SPEED < 800 or (interval - style["entrance"]["duration_ms"]) / FINAL_SPEED < 600:
                     raise ValueError("standalone game name needs 800ms final display and 600ms settled reading")
         if len(standalone_games) > 1:
             raise ValueError("choose at most one standalone game-name cue per video")
