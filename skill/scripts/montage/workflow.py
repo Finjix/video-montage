@@ -33,6 +33,7 @@ from montage.common import (FFMPEG, FFPROBE, MODEL_ROOT, OUTPUT_ROOT, ROOT, back
 from montage.media import asr as ASR
 from montage.media import audio_balance as BALANCE
 from montage.media import audio_cleanup as AUDIO
+from montage.media import bgm as BGM
 from montage.media import frame_plan as FRAME_GATE
 from montage.media import remaster as REMASTER
 from montage.media import renderer as RENDERER
@@ -1530,6 +1531,8 @@ def package(args) -> None:
     plan_by_id = {output["plan_id"]: output for output in plan["outputs"]}
     require_cast_binding(value, plan)
     for prepared in PACKAGER.prepared_rows(args.config.resolve()):
+        if prepared["bgm"]:
+            BGM.require_authorized(job, Path(value["asset_root"]), prepared["bgm"])
         output = plan_by_id[prepared["plan_id"]]
         CAST.verify_nameplates(output, EDITING.summary(output)["visual_shots"], prepared["nameplates"], value["celebrities"])
         PACKAGER.packaging_design.verify_sources(prepared["subtitle_design"], prepared["cues"], asset_copy,
@@ -2298,6 +2301,24 @@ def remaster_audio(args) -> None:
                       "report": str(args.delivery_dir.resolve() / "临时文件" / "reports" / "audio_remaster.json")}))
 
 
+def bgm_assets(args) -> None:
+    """List the asset pack's audio and the licensed downloads; download_required says whether to fetch one."""
+    value = state(args.job_dir.resolve())
+    print(json.dumps(BGM.status(args.job_dir.resolve(), Path(value["asset_root"])), ensure_ascii=False, indent=2))
+
+
+def fetch_bgm(args) -> None:
+    """Download a commercial-use BGM (the asset pack has none) and record its license evidence."""
+    job = args.job_dir.resolve()
+    entry = BGM.acquire(job, Path(state(job)["asset_root"]), url=args.url, file=args.file, license=args.license,
+                        license_url=args.license_url, license_evidence=args.license_evidence,
+                        source_page=args.source_page, title=args.title, creator=args.creator,
+                        instrumental=args.instrumental, asset_audio_unsuitable=args.asset_audio_unsuitable)
+    print(json.dumps({"bgm": {"path": entry["path"], "sha256": entry["sha256"]}, "license": entry["license"],
+                      "duration_seconds": entry["duration_seconds"], "registry": str(BGM.registry_path(job))},
+                     ensure_ascii=False))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
@@ -2326,6 +2347,20 @@ def main() -> None:
             action.add_argument("--subtitle-dir", type=Path, help="complete batch of subtitle-<plan_id>.txt files")
         if name == "repair":
             action.add_argument("--reason", required=True)
+    assets_parser = sub.add_parser("bgm-assets", help="list asset-pack audio and licensed BGM downloads")
+    assets_parser.add_argument("--job-dir", type=Path, required=True)
+    fetch_parser = sub.add_parser("fetch-bgm", help="download/register a commercial-use BGM when the asset pack has none")
+    fetch_parser.add_argument("--job-dir", type=Path, required=True)
+    fetch_parser.add_argument("--url", help="direct audio link")
+    fetch_parser.add_argument("--file", type=Path, help="audio already downloaded elsewhere")
+    fetch_parser.add_argument("--license", required=True, help="cc0 | public-domain | pixabay | mixkit")
+    fetch_parser.add_argument("--license-url", required=True)
+    fetch_parser.add_argument("--license-evidence", required=True, help="license statement quoted from the source page")
+    fetch_parser.add_argument("--source-page", required=True)
+    fetch_parser.add_argument("--title", required=True)
+    fetch_parser.add_argument("--creator", required=True)
+    fetch_parser.add_argument("--instrumental", action="store_true", help="confirm the track has no vocals")
+    fetch_parser.add_argument("--asset-audio-unsuitable", help="why the pack's own audio cannot be the BGM")
     digest_parser = sub.add_parser("review-digest", help="print batch_review.report_digest of an evidence file")
     digest_parser.add_argument("--evidence", type=Path, required=True)
     diff_parser = sub.add_parser("speech-diff", help="print the correction spans for observed -> reviewed text")
@@ -2335,7 +2370,7 @@ def main() -> None:
     remaster_parser.add_argument("--delivery-dir", type=Path, required=True)
     args = parser.parse_args()
     helpers = {"review-digest": review_digest, "speech-diff": speech_diff, "batch-check": batch_check,
-               "remaster-audio": remaster_audio}
+               "remaster-audio": remaster_audio, "bgm-assets": bgm_assets, "fetch-bgm": fetch_bgm}
     if args.command in helpers:
         helpers[args.command](args)
         return

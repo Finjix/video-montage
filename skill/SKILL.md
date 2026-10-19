@@ -44,10 +44,11 @@ policy marker to pass a gate. Jobs from earlier versions of this skill are not s
 5. **Final delivery, no speed-up.** The packaged video keeps the clean timeline (speed 1.0); picture
    and mix are never accelerated. Final ASR, audio, frames, manifests and hashes describe the output.
 6. **Full packaging by default.** A request to run a batch means complete packaged finished videos
-   (subtitles, nameplates, text pins, disclaimer, BGM from the asset pack); never ask the user whether
-   to package, and never ask for confirmation of defaults. Deliver unpackaged videos only when the
+   (subtitles, nameplates, text pins, disclaimer, BGM); never ask the user whether
+   to package, and never ask for confirmation of defaults. BGM comes from the asset pack; when the pack
+   has no audio, download a commercial-use track yourself ([packaging](references/packaging.md#bgm)). Deliver unpackaged videos only when the
    user explicitly says no packaging. Packaging writes a separate output and preserves the clean video;
-   subtitles are burned into the picture only. Add extra audio or overlays beyond the asset pack only
+   subtitles are burned into the picture only. Add extra audio or overlays beyond the asset pack (and that one BGM fallback) only
    when the user asks.
 7. **Whole batch.** Deliver exactly the requested count; coherent, logical before-and-after meaning
    comes first, and the permitted reasonable reuse (never ask the user for it) is used whenever the

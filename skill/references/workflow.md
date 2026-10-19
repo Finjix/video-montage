@@ -25,6 +25,7 @@ the phase and `last_failures`. Read evidence files directly from the paths the c
 | 10 | `clean-speech-review --review <json>` | clean speech review | `clean_validated` |
 
 Packaging is the default; use the unpackaged path only when the user explicitly asks for no packaging.
+Before `package`, run `bgm-assets`; if the asset pack has no audio, download one with `fetch-bgm` ([BGM](packaging.md#bgm)).
 Then, **without packaging**: `final-evidence --clean` → `complete --review <json>`.
 **With packaging** ([packaging workflow](packaging.md)): `subtitle-draft [--subtitle-dir <dir>]`
 → `subtitle-review --review <json>` → `package --config <json>` → `final-evidence` → `complete --review <json>`.

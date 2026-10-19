@@ -73,7 +73,7 @@ Write the config into `<job_dir>/config/`; relative paths resolve from the confi
                     "start_frame": 0, "end_frame_exclusive": 192}],
     "text_pins": [{"path": "<asset path>", "sha256": "<sha256>", "start_frame": 0, "end_frame_exclusive": 1800}],
     "disclaimer": {"path": "<asset path>"},
-    "bgm": {"path": "<asset path>"}
+    "bgm": {"path": "<asset-pack audio, or the path printed by fetch-bgm>"}
   }]
 }
 ```
@@ -88,7 +88,7 @@ Write the config into `<job_dir>/config/`; relative paths resolve from the confi
   coverage seen in the encoded frames.
 - **Nameplates**: copy the windows from the plan evidence ([selected celebrities](celebrities.md)).
 - **Disclaimer**: covers the whole video. Overlays are 9:16 PNGs with transparency.
-- **BGM** loops to the end; speech is not ducked, and final evidence requires the voice to stay at least
+- **BGM** ([source rules](#bgm)) loops to the end; speech is not ducked, and final evidence requires the voice to stay at least
   4 dB above the music. Omit `gain_db` (recommended): the gain is computed per video from the balanced
   clean voice so the music is as loud as that gate allows (4 dB at the quietest speech
   windows), which puts the finished video at about -23 LUFS. An explicit `gain_db` (-60..0) overrides it.
@@ -98,6 +98,39 @@ Write the config into `<job_dir>/config/`; relative paths resolve from the confi
 or packaging request), nameplates and pins, then renders. When the config is supplied from elsewhere,
 the stored copy in `临时文件/config/` points to absolute paths and the `字幕/` copies, so its hash may
 differ; the manifest binds both. Then run `final-evidence` and `complete` ([workflow](workflow.md)).
+
+## BGM
+
+Every packaged video carries one BGM. `package` accepts only two origins and rejects any other path:
+
+1. **Audio in the asset pack** (`asset_root`, any `.mp3/.wav/.m4a/.aac/.flac/.ogg/.opus`). Use it.
+2. **A licensed download**, only when the pack has no audio. Never ask the user for music.
+
+`bgm-assets --job-dir <job_dir>` lists both and prints `download_required`. When it is `true`:
+
+1. Search the web yourself (WebSearch/WebFetch/curl) for one instrumental track, 20 s or longer, calm enough
+   to sit under speech, whose license allows commercial use **without attribution, share-alike or
+   no-derivatives terms** (the video has nowhere to credit anyone). Accepted licenses: `cc0`,
+   `public-domain`, `pixabay` (Pixabay Content License), `mixkit` (Mixkit License). CC BY, BY-SA, NC, ND,
+   "free for personal use", "royalty-free" without a stated license and unknown terms are rejected.
+   Read the license on the track's own page, not just a site-wide claim. Candidate sources (check each track's license yourself):
+   Internet Archive and Wikimedia Commons (CC0/public domain items), Free Music Archive (CC0 filter),
+   Pixabay Music and Mixkit (pages may need a browser download). Availability depends on the network
+   (e.g. Openverse is unreachable from some regions); try another source instead of stopping.
+2. Register it. This downloads (or copies), proves it decodes as audio, is at least 20 s and not silent,
+   and writes the license evidence to `config/bgm/bgm_licenses.json`:
+
+```text
+assets/dependencies/python/python.exe scripts/video_montage.py fetch-bgm --job-dir <job_dir>   --url <direct audio link> --license cc0 --license-url <license page>   --license-evidence "<license statement quoted from the page>" --source-page <track page>   --title "<track title>" --creator "<artist>" --instrumental
+```
+
+   Use `--file <path>` instead of `--url` for a track you downloaded another way. It refuses when the pack
+   has audio unless `--asset-audio-unsuitable "<concrete reason>"` explains why none of it works (for
+   example only sound effects). `--instrumental` asserts that you checked the track has no vocals.
+3. Put the printed `{"path": ..., "sha256": ...}` into `outputs[].bgm`. One track may serve the whole batch;
+   different tracks are fine. The registry and the file stay in `config/` after completion, so reburns
+   and `remaster-audio` keep working. If no source is reachable, keep trying other sources and search
+   terms; only a failure of every route to the internet is a blocker (report what was tried).
 
 ## Subtitle display
 
