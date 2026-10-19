@@ -1,7 +1,7 @@
 # Packaging workflow
 
 Packaging is the default for every batch (skip it only when the user explicitly asks for unpackaged videos). Input is a validated clean video (1440×2560, 60 fps, with
-audio); the packaged copy goes to `成片/` and the clean video is kept. Every package, render and reburn
+audio); the packaged copy goes to the delivery folder as `<plan_id>.mp4` and the clean video is kept in `temp/clean/`. Every package, render and reburn
 configuration needs a per-output agent-written [design](packaging-design.md); there is no fixed-yellow, random-font or
 random-flower fallback and `subtitle_srt` is not read.
 
@@ -15,7 +15,7 @@ one audio stream and no subtitle track.
 
 ## Subtitles (autonomous)
 
-1. `subtitle-draft` writes `字幕/subtitle-<plan_id>.txt` from the agent-reviewed shot words and keeps an
+1. `subtitle-draft` writes `temp/subtitles/subtitle-<plan_id>.txt` from the agent-reviewed shot words and keeps an
    immutable snapshot. The TXT uses SRT blocks (`index`, `HH:MM:SS,mmm --> HH:MM:SS,mmm`, text) on the
    unaccelerated clean timeline.
 2. To resegment, write the complete batch of `subtitle-<plan_id>.txt` files into a directory and run
@@ -96,10 +96,16 @@ Write the config into `<job_dir>/config/`; relative paths resolve from the confi
 
 `package --config <json>` checks the design sources (game names must appear in the speech, asset copy
 or packaging request), nameplates and pins, then renders. When the config is supplied from elsewhere,
-the stored copy in `临时文件/config/` points to absolute paths and the `字幕/` copies, so its hash may
+the stored copy in `temp/config/` points to absolute paths and the `temp/subtitles/` copies, so its hash may
 differ; the manifest binds both. Then run `final-evidence` and `complete` ([workflow](workflow.md)).
 
 ## BGM
+
+**Style: never pick a track at random.** The BGM must sound like a commercial ad: light, playful, fashionable, with a
+strong groove and a clear beat (reference: about 115-125 BPM, punchy, mastered loud, e.g. dance-pop, synthpop,
+funk, disco, upbeat house). Calm, ambient, chillout, lounge, piano, orchestral or children's tracks are wrong even
+when they are licensed and quiet. Check genre/mood tags, measure the tempo and loudness of every candidate, and
+state in the delivery summary why each track fits; the speech-over-music gate (voice at least 4 dB above) still applies.
 
 Every packaged video carries one BGM, and **no single track may serve more than 67% of the batch's videos**
 (`package` rejects it; 3 videos need at least 2 tracks, 5 need 2, 6 need 2, a lone video needs 1). `package` accepts only two origins and rejects any other path:
@@ -114,8 +120,7 @@ Every packaged video carries one BGM, and **no single track may serve more than 
 
 `bgm-assets --job-dir <job_dir>` lists both and prints `download_required` (true when the pack is empty, or short and you were authorized). When it is `true`:
 
-1. Search the web yourself (WebSearch/WebFetch/curl) for one instrumental track, 20 s or longer, calm enough
-   to sit under speech, whose license allows commercial use **without attribution, share-alike or
+1. Search the web yourself (WebSearch/WebFetch/curl) for one instrumental track, 20 s or longer, whose license allows commercial use **without attribution, share-alike or
    no-derivatives terms** (the video has nowhere to credit anyone). Accepted licenses: `cc0`,
    `public-domain`, `pixabay` (Pixabay Content License), `mixkit` (Mixkit License). CC BY, BY-SA, NC, ND,
    "free for personal use", "royalty-free" without a stated license and unknown terms are rejected.

@@ -106,13 +106,13 @@ def remaster_one(row: dict, stage: Path) -> dict:
 
 def remaster(delivery: Path) -> dict:
     delivery = delivery.resolve()
-    job = delivery / "临时文件"
+    job = delivery / "temp"
     manifest_path = job / "manifests" / "packaging_manifest.json"
     manifest = read(manifest_path)
     rows = manifest["results"]
     targets = [Path(row["output_path"]).resolve() for row in rows]
-    if not rows or any(path.parent != (delivery / "成片").resolve() for path in targets):
-        raise ValueError("packaging manifest does not describe this delivery's 成片 directory")
+    if not rows or any(path.parent != delivery for path in targets):
+        raise ValueError("packaging manifest does not describe this delivery's videos")
     report = job / "reports" / "audio_remaster.json"
     stage = job / "remaster"
     stage.mkdir(parents=True, exist_ok=True)

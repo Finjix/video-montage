@@ -319,7 +319,7 @@ def init(args) -> None:
         output = job.parent
         if (output.parent != parent or not PACKAGER.OUTPUT_NAME.fullmatch(output.name)
                 or job != PACKAGER.runtime_directory(output)):
-            raise ValueError("job-dir must be <output_root>/自动化混剪_xx/临时文件")
+            raise ValueError("job-dir must be <output_root>/自动化混剪_xx/temp")
     else:
         output = parent / ("自动化混剪_" + datetime.now(timezone(timedelta(hours=8))).strftime("%Y%m%d_%H%M%S"))
         job = PACKAGER.runtime_directory(output)
@@ -1145,7 +1145,7 @@ def render_clean(args) -> None:
             fail_round(job, value, "clean_render_constraints", [f"{pid}:{error}" for error in errors])
         rows.append({"plan_id": pid, "output": ref(target), "render_evidence": ref(evidence_path),
                      "expected_text": "".join(segment["text"] for segment in output["segments"])})
-    clean = processing_dir(value) / "临时文件" / "manifests" / "clean_delivery.json"
+    clean = PACKAGER.runtime_directory(processing_dir(value)) / "manifests" / "clean_delivery.json"
     write(clean, {"schema": "video-montage-autonomous-clean/v260929", "decision": "pending_qc",
                   "plan": value["plan"], "plan_review": value["plan_review"], "results": rows,
                   "planning_policy": EDITING.POLICY, "plan_sha256": value["plan"]["sha256"]})
@@ -1715,7 +1715,7 @@ def clean_final_evidence(job: Path, value: dict) -> None:
 
     def accelerate(row: dict) -> dict:
         source = require_ref(row["output"], "clean output")
-        delivery = PACKAGER.speed_clean(source, processing_dir(value) / "临时文件" / "final_clean" / f"{row['plan_id']}.mp4")
+        delivery = PACKAGER.speed_clean(source, PACKAGER.runtime_directory(processing_dir(value)) / "final_clean" / f"{row['plan_id']}.mp4")
         delivery["plan_id"] = row["plan_id"]
         return delivery
 
@@ -1838,7 +1838,7 @@ def reburn(args) -> None:
     PACKAGER.require_design_config(config)
     if sha(Path(previous["config_snapshot_path"])) != previous["config_snapshot_sha256"]:
         raise ValueError("reburn configuration changed")
-    config_path = pending / "临时文件" / "config" / "reburn_config.json"
+    config_path = PACKAGER.runtime_directory(pending) / "config" / "reburn_config.json"
     write(config_path, config)
     value["reburn_config"] = ref(config_path)
     (job / "video_montage_autonomous_completion.json").unlink(missing_ok=True)
@@ -1855,7 +1855,7 @@ def publish_delivery(job: Path, value: dict) -> list[dict]:
     clean, qc = require_clean_qc(value)
     staging = job / f"attempt-{value['repair_round'] + 1:02d}" / "publication"
     staging.mkdir(parents=True, exist_ok=True)
-    target_manifests = delivery / "临时文件" / "manifests"
+    target_manifests = PACKAGER.runtime_directory(delivery) / "manifests"
     copies = []
 
     def relocate(item):
@@ -1914,7 +1914,7 @@ def publish_delivery(job: Path, value: dict) -> list[dict]:
         final["clean_delivery"] = clean_ref
         outputs = []
         for row in final["results"]:
-            target = PACKAGER.delivery_category(delivery, "clean") / f"{row['plan_id']}.mp4"
+            target = PACKAGER.delivery_category(delivery, "video") / f"{row['plan_id']}.mp4"
             copies.append((Path(row["output_path"]), target))
             row["output_path"] = str(target)
             row["input"] = next(item["output"] for item in published_clean["results"] if item["plan_id"] == row["plan_id"])
@@ -2171,7 +2171,7 @@ def compact_delivery(job: Path, value: dict) -> None:
         for key in ("final_evidence", "final_review", "packaging_technical"):
             if completion.get(key):
                 keep.add(require_ref(completion[key], key).resolve())
-    for folder in (root / "config", root / "manifests"):
+    for folder in (root / "config", root / "manifests", root / "clean", root / "subtitles"):
         if folder.exists():
             keep.update(path.resolve() for path in folder.rglob("*") if path.is_file())
     # Reburn's render gate still needs the bound clean manifest and its QC receipt.
@@ -2305,7 +2305,7 @@ def remaster_audio(args) -> None:
     """Rebuild the packaged audio of a finished delivery at the current loudness policy (picture copied)."""
     record = REMASTER.remaster(args.delivery_dir)
     print(json.dumps({"decision": record["decision"], "outputs": len(record["results"]),
-                      "report": str(args.delivery_dir.resolve() / "临时文件" / "reports" / "audio_remaster.json")}))
+                      "report": str(args.delivery_dir.resolve() / "temp" / "reports" / "audio_remaster.json")}))
 
 
 def bgm_assets(args) -> None:

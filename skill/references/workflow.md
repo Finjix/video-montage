@@ -6,7 +6,7 @@ Entry point (from the suite root):
 assets/dependencies/python/python.exe scripts/video_montage.py <command> --job-dir <job_dir> [options]
 ```
 
-`job_dir` is `<output_root>/自动化混剪_YYYYMMDD_HHMMSS/临时文件`, returned by `init`. `status --job-dir` prints
+`job_dir` is `<output_root>/自动化混剪_YYYYMMDD_HHMMSS/temp`, returned by `init`. `status --job-dir` prints
 the phase and `last_failures`. Read evidence files directly from the paths the commands write or print.
 
 ## Stages
@@ -168,8 +168,8 @@ and `text_pin_policy` when packaged. Then:
 - `batch_review`: recomputed `report_digest` from the final evidence file.
 
 `complete` re-runs the technical validator, publishes the batch and compacts the job directory. An
-unpackaged delivery puts the accelerated videos in `混剪（无包装）/` and keeps the unaccelerated inputs in
-`临时文件/manifests/clean_inputs/`.
+unpackaged delivery puts the accelerated videos directly in the delivery folder and keeps the unaccelerated inputs in
+`temp/manifests/clean_inputs/`.
 
 ## Recovering from a rejection
 

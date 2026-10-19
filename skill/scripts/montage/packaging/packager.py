@@ -120,10 +120,13 @@ DRAFT_PROTECTED_WORD = "无尽冬日"  # never split across draft caption lines
 OUTPUT_NAME = re.compile(r"自动化混剪_\d{8}_\d{6}(?:_\d{6})?\Z")
 
 
+TEMP_NAME = "temp"
+
+
 def runtime_directory(root: Path) -> Path:
-    """Keep each delivery's audit/state files in its temporary directory."""
+    """Keep each delivery's audit/state files in its temp directory."""
     root = root.resolve()
-    return root / "临时文件"
+    return root / TEMP_NAME
 
 
 def delivery_category(root: Path, kind: str) -> Path:
@@ -131,8 +134,10 @@ def delivery_category(root: Path, kind: str) -> Path:
     if OUTPUT_NAME.fullmatch(root.name):
         if kind in {"manifests", "reports"}:
             return runtime_directory(root) / {"manifests": "manifests", "reports": "reports"}[kind]
-        return root / {"video": "成片", "clean": "混剪（无包装）",
-                       "subtitles": "字幕", "config": "临时文件/config"}[kind]
+        # The finished videos sit directly in the delivery folder; everything else lives in temp/.
+        if kind == "video":
+            return root
+        return runtime_directory(root) / {"clean": "clean", "subtitles": "subtitles", "config": "config"}[kind]
     return root if kind == "video" else root / kind
 
 
@@ -145,8 +150,8 @@ def ensure_delivery_layout(root: Path) -> None:
     generated_prefix = "修改本目录 subtitle-*.txt 的文字或时间码后，把本输出目录交给 AI，要求重新烧录。"
     if not marker.exists() or marker.read_text(encoding="utf-8").startswith(generated_prefix):
         marker.write_text(generated_prefix + "\n"
-                          "保留混剪（无包装）和临时文件/config，AI 使用配置重新烧录并校验。\n"
-                          "重新烧录在本目录覆盖成片、字幕和配置，不新建交付文件夹；通过校验后清理运行记录和证据，只保留二次修改必要文件。\n", encoding="utf-8")
+                          "保留 temp/clean 和 temp/config，AI 使用配置重新烧录并校验。\n"
+                          "重新烧录在输出目录覆盖成片、字幕和配置，不新建交付文件夹；通过校验后清理运行记录和证据，只保留二次修改必要文件。\n", encoding="utf-8")
 
 
 def invalidate_delivery_receipts(root: Path) -> None:
@@ -462,7 +467,7 @@ def prescaled_overlay(source: Path, target: Path) -> Path:
 
 def render_one(row: dict, output_dir: Path) -> dict:
     plan_id = row["plan_id"]
-    temporary_dir = output_dir / "临时文件" if OUTPUT_NAME.fullmatch(output_dir.name) else output_dir
+    temporary_dir = runtime_directory(output_dir) if OUTPUT_NAME.fullmatch(output_dir.name) else output_dir
     output_dir = delivery_category(output_dir, "video")
     output = output_dir / f"{plan_id}.mp4"
     partial = temporary_dir / f"{plan_id}.partial.mp4"
@@ -541,7 +546,7 @@ def render(config_path: Path, output_dir: Path, manifest_path: Path, clean_deliv
            clean_qc: Path | None = None, *, overwrite: bool = False, resume: bool = False) -> dict:
     if (OUTPUT_NAME.fullmatch(output_dir.name) and manifest_path.resolve().is_relative_to(output_dir.resolve())
             and not manifest_path.resolve().is_relative_to(runtime_directory(output_dir))):
-        raise ValueError("packaging records inside the delivery must be in 临时文件")
+        raise ValueError("packaging records inside the delivery must be in temp")
     if manifest_path.exists() and not overwrite:
         raise FileExistsError(manifest_path)
     if bool(clean_delivery) != bool(clean_qc):
@@ -737,10 +742,10 @@ def validate(manifest_path: Path, report_path: Path, autonomous_evidence: Path |
     manifest = read(manifest_path)
     for row in manifest.get("results", []):
         output = Path(row.get("output_path", "")).resolve()
-        delivery = output.parent.parent if output.parent.name == "成片" else output.parent
+        delivery = output.parent
         if (OUTPUT_NAME.fullmatch(delivery.name) and report_path.resolve().is_relative_to(delivery)
                 and not report_path.resolve().is_relative_to(runtime_directory(delivery))):
-            raise ValueError("validation reports inside the delivery must be in 临时文件")
+            raise ValueError("validation reports inside the delivery must be in temp")
     failures = []
     if bool(autonomous_evidence) != bool(autonomous_review):
         raise ValueError("final evidence and its agent review must be provided together")

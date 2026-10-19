@@ -41,7 +41,7 @@ The finished packaged video targets **-23 LUFS** with a tolerance of **±1 LU** 
 of a finished packaged delivery to this rule without touching the picture: it scales the clean voice,
 mixes the BGM at its automatic gain, measures the encoded result, corrects the voice gain once when it
 is more than 0.5 LU off, and publishes only when every output passes (report:
-`临时文件/reports/audio_remaster.json`). It does not issue a completion receipt, and the unpackaged
+`temp/reports/audio_remaster.json`). It does not issue a completion receipt, and the unpackaged
 clean videos keep their old level.
 
 ## Encoded verification

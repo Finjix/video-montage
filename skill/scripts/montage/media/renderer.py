@@ -102,8 +102,9 @@ def render(plan_path: Path, output: Path, evidence: Path, width: int = 1440, hei
     if errors:
         raise ValueError("frame plan rejected: " + "; ".join(errors))
     partial = output.with_suffix(".partial.mp4")
-    if output.parent.name == "混剪（无包装）" and output.parent.parent.name.startswith("自动化混剪_"):
-        partial = output.parent.parent / "临时文件" / partial.name
+    if (output.parent.name == "clean" and output.parent.parent.name == "temp"
+            and output.parent.parent.parent.name.startswith("自动化混剪_")):
+        partial = output.parent.parent / partial.name
     require_render_paths(output, evidence, [plan_path, *(Path(segment["source_path"]) for segment in plan["segments"])],
                          partial=partial)
     if partial.exists() or (output.exists() and not overwrite):

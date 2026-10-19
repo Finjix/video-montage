@@ -1,8 +1,6 @@
 ---
 name: video-montage
 description: Produce, repair and reburn batches of Chinese spoken-word celebrity montage videos with native-frame editing, agent-driven speech, semantic and visual review, subtitle and overlay packaging (default) and post-encode QC.
-metadata:
-  version: "0.0.1"
 ---
 
 # Video montage
@@ -47,6 +45,7 @@ policy marker to pass a gate. Jobs from earlier versions of this skill are not s
    (subtitles, nameplates, text pins, disclaimer, BGM); never ask the user whether
    to package, and never ask for confirmation of defaults. BGM comes from the asset pack; when the pack
    has no audio, download a commercial-use track yourself ([packaging](references/packaging.md#bgm)).
+   BGM must be a light, playful, fashionable, strongly grooving commercial-ad style track, never calm or ambient.
    One track may serve at most 67% of the batch's videos (for 3 videos, at most 2): use more tracks.
    When the pack has audio but too few tracks for that limit, ask the user whether you may add licensed downloads. Deliver unpackaged videos only when the
    user explicitly says no packaging. Packaging writes a separate output and preserves the clean video;
@@ -73,12 +72,10 @@ New jobs deliver to `<Desktop>/自动化混剪_YYYYMMDD_HHMMSS/` (the user's Des
 
 | Path | Content |
 | --- | --- |
-| `成片/` | packaged MP4s |
-| `混剪（无包装）/` | clean MP4s (unaccelerated reburn inputs when packaged; the accelerated delivery when not) |
-| `字幕/` | editable `subtitle-<plan_id>.txt` and the extensionless file `修改字幕后让AI重新烧录` |
-| `临时文件/` | the job directory (`job_dir`): state, work order, `config/`, `manifests/`, evidence, reviews, reports |
+| `<plan_id>.mp4` | the finished videos (packaged; the accelerated clean videos when not packaged), directly in the delivery folder so opening it shows them at once |
+| `temp/` | the only other entry: the job directory (`job_dir`) with state, work order, `config/`, `manifests/`, evidence, reviews, reports, `clean/` (unaccelerated clean MP4s, reburn inputs) and `subtitles/` (editable `subtitle-<plan_id>.txt` and the extensionless file `修改字幕后让AI重新烧录`) |
 
-- All subdirectories of `临时文件/` use English names. Never write loose files next to the
+- Never put anything but the finished MP4s and `temp/` in the delivery folder. All subdirectories of `temp/` use English names. Never write loose files next to the
   batch directories: put helper scripts in `<job_dir>/scripts/`, input JSON in `<job_dir>/config/`,
   previews, contact sheets and scans in `<job_dir>/evidence/`, and logs in an English subdirectory.
   Before a job exists, pass the work order to `init --work-order -` on stdin. Resolve helper paths
