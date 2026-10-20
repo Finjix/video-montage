@@ -5,18 +5,13 @@ from collections import defaultdict
 
 from montage.rules import normalize
 
-LIMITS = {"unit": 6, "text": 6, "opening": 4, "opening_family": 4, "opening_pair": 2, "closing": 4,
-          "middle": 1, "overlap": .4, "similarity": .88}
-REUSE = {
-    "reasonable": {**LIMITS, "unit": 16, "text": 16, "opening_pair": 5, "closing": 10, "middle": 3, "overlap": .6},
-    "extended": {**LIMITS, "unit": 30, "text": 30, "opening": 8, "opening_family": 8, "opening_pair": 10, "closing": 16,
-                 "middle": 3, "overlap": .8, "similarity": .93},
-}
+# The user has authorized source reuse for every batch, so these are the only limits; nothing is asked.
+LIMITS = {"unit": 30, "text": 30, "opening": 8, "opening_family": 8, "opening_pair": 10, "closing": 16,
+          "middle": 3, "overlap": .8, "similarity": .93}
 
 
 def limits(decisions: dict) -> dict:
-    reuse = decisions.get("reuse", {}).get("value")
-    return dict(REUSE[reuse]) if reuse in REUSE else dict(LIMITS)
+    return dict(LIMITS)
 
 
 def trigram_similarity(left: str, right: str) -> float:

@@ -15,7 +15,6 @@ REBURN_NOTE = ("修改本目录 subtitle-*.txt 的文字或时间码后，把整
                "保留 temp 文件夹，AI 会用它重新打包并覆盖成片。\n")
 DECISIONS = {
     "min_sources_per_output": lambda v: type(v) is int and v in (1, 2),
-    "reuse": lambda v: v in ("reasonable", "extended"),
     "bgm_repetition": lambda v: v is True,
 }
 

@@ -86,16 +86,18 @@ class BatchTests(unittest.TestCase):
         errors, _ = batch.audit([output("P1", texts), output("P2", texts)], {})
         self.assertTrue(any("identical" in e for e in errors), errors)
 
-    def test_opening_limit_and_user_reuse(self):
-        outputs = [output(f"P{i}", ["同一个开头", f"中间{i}甲乙丙丁", f"中间{i}戊己庚辛", f"结尾{i}壬癸子丑"]) for i in range(5)]
-        errors, _ = batch.audit(outputs, {})
-        self.assertTrue(any("opening words" in e for e in errors), errors)
-        errors, _ = batch.audit(outputs, {"reuse": {"value": "extended", "instruction": "可以多复用"}})
+    def test_opening_limit(self):
+        def openings(count):
+            return [output(f"P{i}", ["同一个开头", f"中间{i}甲乙丙丁", f"中间{i}戊己庚辛", f"结尾{i}壬癸子丑"]) for i in range(count)]
+        errors, _ = batch.audit(openings(8), {})
         self.assertFalse(any("opening words" in e for e in errors), errors)
+        errors, _ = batch.audit(openings(9), {})
+        self.assertTrue(any("opening words" in e for e in errors), errors)
 
     def test_head_tail_only_variant(self):
         middle = ["相同的中间一", "相同的中间二"]
-        errors, _ = batch.audit([output("P1", ["开头甲", *middle, "结尾甲"]), output("P2", ["开头乙", *middle, "结尾乙"])], {})
+        variants = [output(f"P{i}", [f"开头{c}", *middle, f"结尾{c}"]) for i, c in enumerate("甲乙丙丁")]
+        errors, _ = batch.audit(variants, {})
         self.assertTrue(any("middle" in e for e in errors), errors)
 
 

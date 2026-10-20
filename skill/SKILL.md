@@ -40,7 +40,8 @@ editorial rules; [packaging](references/packaging.md) before `package`.
    inferences and their basis in the final summary. Never ask the user for a transcript and never put words in a
    speaker's mouth (no ad copy, no invented lines).
 3. **Spoken word first.** The product is a talking-to-the-viewer video: celebrities speak the message to camera.
-   Acted scenes and skit dialogue are not the product: a video contains none. Mark every beat `talk` or
+   Acted scenes (reactions, gags, banter, role-play) are not the product: a video contains none. A reply to another
+   character is fine when it stands alone as a message to the viewer. Mark every beat `talk` or
    `scene` honestly (see editing); scene beats can never be planned.
 4. **Edit shape.** Each video is 17-30 s at natural speed, built from complete sentences with at least four real
    camera shots; no freezes, slow motion, repeated frames, half sentences or filler. `check` enforces the
@@ -51,9 +52,9 @@ editorial rules; [packaging](references/packaging.md) before `package`.
    missing. When coherence conflicts with variety, cast mix or a batch limit, coherence wins: ask the user (rule 6)
    instead of padding a batch with weak joins.
 6. **Whole batch.** Deliver exactly the requested count. Every video uses at least three different source files,
-   and the batch stays within the reuse limits. When the footage cannot make that many coherent videos within a
-   limit, stop and ask the user once with the numbers; record only their answer with `decide`. Never grant yourself
-   an exception.
+   and the batch stays within the batch limits. The user has already allowed source reuse up to those limits: never
+   ask about reuse. When the footage still cannot make that many coherent videos within them, do not weaken joins and
+   do not ask: deliver every coherent video you can, and state the count and the shortfall in the final summary.
 7. **Packaged by default.** A batch request means finished packaged videos (subtitles, nameplates, one text pin,
    disclaimer, BGM). Never ask whether to package. Deliver unpackaged (`package --clean`) only when the user says so.
    BGM is the pack's audio. One track serves at most eight videos of a batch (40 videos need at least five tracks);

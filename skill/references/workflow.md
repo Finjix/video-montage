@@ -37,10 +37,9 @@ User decisions (only after the user answered; `decide` adds them later):
 | Key | Value | Effect |
 | --- | --- | --- |
 | `min_sources_per_output` | `1` or `2` | fewer than 3 source files per video |
-| `reuse` | `"reasonable"` or `"extended"` | higher batch reuse limits ([editing](editing.md#batch-limits)) |
 | `bgm_repetition` | `true` | one BGM track may serve more than eight videos |
 
-In the work order: `"decisions": {"reuse": {"value": "reasonable", "instruction": "<the user's words>"}}`.
+In the work order: `"decisions": {"min_sources_per_output": {"value": 2, "instruction": "<the user's words>"}}`.
 
 ## Catalog (`prepare`)
 

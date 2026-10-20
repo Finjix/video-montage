@@ -34,7 +34,7 @@ MAX_HEAD, MAX_TAIL = 0.45, 0.55  # longest pause kept before / after the speech 
 STRONG = "。！？!?…"
 WEAK = "，、；：,;:"
 SHEET_TILE = (135, 240)
-BEAT_KINDS = ("talk", "scene")                 # talk: a person speaking to the viewer; scene: acted dialogue or plot
+BEAT_KINDS = ("talk", "scene")                 # talk: a message that stands alone for the viewer; scene: acting that needs the other lines
 BEAT_ROLES = ("hook", "body", "payoff", "cta")  # position in a video: opener, middle, result, call to action
 UNIT_RANGE = re.compile(r"U\d+(?:\.\d+)?(?:-U\d+(?:\.\d+)?)?")
 

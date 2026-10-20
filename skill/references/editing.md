@@ -24,11 +24,13 @@ to an offstage partner, replies, gags), and joins such as "百分之九十九的
 2. **Cut every source into beats** (`beats` in `annotate`). A beat is the smallest run of whole units that is a
    self-contained thought; a clip is one or more whole consecutive beats, so what you leave outside a beat can never
    be planned. For each beat set:
-   - `kind`: `talk` when the speaker informs, asserts or invites the viewer and the beat still reads that way if every
-     other character's line is deleted (to camera, or to an unseen audience); `scene` when it only works inside an acted
-     exchange (an answer to another character, a question put to someone on screen, a reaction, a gag, a story). When in
-     doubt it is `scene`. A skit's side of a conversation is `scene` even if the actor faces the lens; the same
-     skit's later monologue to the viewer can be `talk`.
+   - `kind`: `talk` when a viewer who has not seen the rest hears the speaker informing, asserting, explaining or
+     inviting, and the beat still makes sense with every other character's line deleted. That includes an answer to
+     another character when it stands alone as a statement or explanation ("这个号很稳，三天就能升满" answering "怎么玩的？"):
+     the question is not needed to follow it. `scene` only when the beat is acting: it needs the other line to make
+     sense (a bare "对！", "不是我", "那怎么办"), is a reaction, a gag or banter, a question put to someone on screen, or
+     role-play inside a story. When in doubt, choose `talk` if the words alone are a complete message to a viewer, and
+     `scene` if they only work as a reply.
    - `role`: `hook` (opens a video by itself: a question, claim or provocation that does not need earlier context),
      `body` (explains, shows how, proves, adds a point), `payoff` (the result, benefit or punchline that closes a
      thought), `cta` (gift code, download or click, sign-off).
@@ -49,7 +51,7 @@ to an offstage partner, replies, gags), and joins such as "百分之九十九的
 6. Plan the batch as a whole: vary openings, cameras, routes and closings across outputs within the limits below,
    but never trade a join's sense for variety. Reuse coherent material rather than forcing weak joins, and never
    cycle the same edit with tiny changes. If the footage cannot make the requested count of coherent videos within
-   the limits, stop and ask the user with the numbers (reuse level, fewer sources) instead of weakening joins.
+   the limits, deliver the coherent ones and report the shortfall instead of weakening joins; never ask about reuse.
 
 ## Read-through (after every `check`)
 
@@ -113,22 +115,22 @@ actually links the two clips (at least 12 letters; "coherent", "same game" or "s
 
 ## Batch limits
 
-Identity is the source file plus the normalized words; renaming or retiming never makes new content.
+Identity is the source file plus the normalized words; renaming or retiming never makes new content. The user has
+allowed reuse up to these limits, so use them freely instead of forcing weak joins.
 
-| Limit (per batch) | Default | `reuse: reasonable` | `reuse: extended` |
-| --- | --- | --- | --- |
-| identical clip sequence / identical speech | 1 | 1 | 1 |
-| same unit, same words | 6 | 16 | 30 |
-| same opening words, same opening camera | 4 | 4 | 8 |
-| same first two cameras | 2 | 5 | 10 |
-| same closing words | 4 | 10 | 16 |
-| same middle clips (only head/tail changed) | 1 | 3 | 3 |
-| same clip at the same position (pairwise) | 40% | 60% | 80% |
-| whole-speech trigram similarity (pairwise) | 0.88 | 0.88 | 0.93 |
+| Limit (per batch) | Max |
+| --- | --- |
+| identical clip sequence / identical speech | 1 |
+| same unit, same words | 30 |
+| same opening words, same opening camera | 8 |
+| same first two cameras | 10 |
+| same closing words | 16 |
+| same middle clips (only head/tail changed) | 3 |
+| same clip at the same position (pairwise) | 80% |
+| whole-speech trigram similarity (pairwise) | 0.93 |
 
-So N videos need at least N/4 different openings. If the inventory cannot reach the requested count under these
-limits (or the 3-source minimum) with coherent joins, ask the user with the numbers whether to allow reuse or fewer
-sources.
+So N videos need at least N/8 different openings. If the inventory cannot reach the requested count under these
+limits with coherent joins, deliver the coherent videos and report the shortfall; do not ask about reuse.
 
 ## Visual review
 
