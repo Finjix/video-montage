@@ -1,29 +1,83 @@
 # Editing rules
 
+## What a finished video is
+
+One person (or two or three) talks to the viewer for 17-30 s and makes one point: an opening that stands on its
+own, a body that explains it, a payoff or call to action. Reference shape (two videos the user holds up as the
+standard): about four clips, each a run of whole sentences from one source, every clip a speaker on camera addressing
+the viewer, the second clip continuing what the first said, the last clip a gift code and "无需下载，点击即玩".
+
+```text
+body    一上来就给你几个逃难的幸存者，你得收留他们，安排他们砍树、打猎、挖矿。      (source A)
+body    就你们广告里刷到的，开局一个小熔炉，收集幸存者，建设城镇，那些玩法这儿全都有。  (source B, same flow)
+cta     输入我的专属礼包码，大聪666，大聪888，快来上线领资源吧。                    (source C)
+```
+
+What the user rejected: videos stitched from four unrelated 3-second snippets, dialogue lines of skits (questions put
+to an offstage partner, replies, gags), and joins such as "百分之九十九的冰雪末日生存文都写错了" followed by "我在无尽冬日等你"
+(a teaser with no explanation, then a sign-off).
+
 ## How to compose
 
-1. Read every source's whole transcript in the catalog and look at its sheet before planning: who speaks, to whom,
-   in which scene, and which sentences depend on earlier context.
-2. Build each video as a short argument: an opening that stands on its own (a question, a claim, a hook), then
-   steps that each add something new, then a payoff (a result, benefit, punchline or call to action of at least 2 s).
-3. Join clips only when the second follows from the first (answer, cause, next step, contrast...). A shared game
+1. Read every source's whole transcript in the catalog and look at its sheet before annotating: who speaks, to whom,
+   in which scene, which sentences depend on earlier ones.
+2. **Cut every source into beats** (`beats` in `annotate`). A beat is the smallest run of whole units that is a
+   self-contained thought; a clip is one or more whole consecutive beats, so what you leave outside a beat can never
+   be planned. For each beat set:
+   - `kind`: `talk` when the speaker informs, asserts or invites the viewer and the beat still reads that way if every
+     other character's line is deleted (to camera, or to an unseen audience); `scene` when it only works inside an acted
+     exchange (an answer to another character, a question put to someone on screen, a reaction, a gag, a story). When in
+     doubt it is `scene`. A skit's side of a conversation is `scene` even if the actor faces the lens; the same
+     skit's later monologue to the viewer can be `talk`.
+   - `role`: `hook` (opens a video by itself: a question, claim or provocation that does not need earlier context),
+     `body` (explains, shows how, proves, adds a point), `payoff` (the result, benefit or punchline that closes a
+     thought), `cta` (gift code, download or click, sign-off).
+   - `gist`: one English sentence: what the beat says and what it does for a video.
+   Cut beats where the thought ends: never separate a question from its answer, a "three things" setup from its list,
+   a "why" from its "because", a teaser from its explanation, a "so/then/this/they" line from the line it refers to.
+   Leave out units that are noise, greetings aimed at someone else, names of other people, and anything you would
+   not want a viewer to hear alone.
+3. Compose each video as a script from beats in this order: at most one `hook`, one or more `body`, at most one
+   `payoff`, at most one `cta`; it ends on a payoff or a cta. Prefer long runs (two or three beats from one source) to many
+   short clips: fewer joins, fewer chances to lose the thread.
+4. Join clips only when the second follows from the first (answer, cause, next step, proof, contrast...). A shared game
    name or keyword is not a link. Repeating the same claim, cutting a sentence in half or ending on a bare method
-   step ("把资源拿来升级熔炉") is not acceptable.
-4. Plan whole sentences (`|` in the catalog). Use a clause-level start or end only when the clause is complete
-   on its own.
-5. Plan the batch as a whole: vary openings, cameras, routes and closings across outputs within the limits below.
-   Reuse coherent material rather than forcing weak joins, but never cycle the same edit with tiny changes.
+   step ("把资源拿来升级熔炉") is not acceptable. Change the person talking only where the new speaker's first line
+   stands on its own (a payoff, a call to action, or a hand-over such as "接下来听我说").
+5. Plan whole sentences (`|` in the catalog) in whole beats. Use a clause-level start or end only when the beat
+   boundary says so.
+6. Plan the batch as a whole: vary openings, cameras, routes and closings across outputs within the limits below,
+   but never trade a join's sense for variety. Reuse coherent material rather than forcing weak joins, and never
+   cycle the same edit with tiny changes. If the footage cannot make the requested count of coherent videos within
+   the limits, stop and ask the user with the numbers (reuse level, fewer sources) instead of weakening joins.
+
+## Read-through (after every `check`)
+
+Open `temp/reports/scripts.md` and read each video once as a viewer who has seen nothing else. For every join ask:
+1. Does clip B's first sentence answer, continue, prove or pay off clip A's last sentence, with nothing missing?
+2. Is anything left hanging at the end of clip A (a question, a "三件事", a teaser, "why") that B does not resolve?
+3. Does any word in B refer to something only the source's earlier lines supply (这, 那, 他们, 所以, 但是, 还有)?
+4. Is a sign-off, greeting, self-introduction or call to action sitting anywhere but its place?
+5. Do the two speakers' claims fit together (a first-person result from one person following another's story is a break)?
+Any "no" means changing the clip, not the `reason`. Write the `reason` after you have passed the read-through; it names
+the words in A and B that connect them.
 
 ## Machine-checked (`check`)
 
 Edit shape:
 - 1020-1800 frames (17-30 s at 60 fps), natural speed, at least 4 camera shots, every shot at least 48 frames
-  (0.8 s), longest minus shortest shot at most 180 frames (3 s). Long single-camera clips break the 3 s spread;
+  (0.8 s), longest minus shortest shot at most 300 frames (5 s). Long single-camera clips break the 5 s spread;
   keep clips of similar length or pick clips that contain camera changes.
 - Two adjacent clips cut inside one camera shot are a jump cut, not a new shot.
 - Every clip starts and ends in clean silence on a stable picture (`in`/`out` in the catalog); the pause kept at a
   cut is at most 0.45 s before and 0.55 s after the speech (the catalog's `in`/`out` already include this). User-rejected intervals are refused.
 - At least 3 different source files per video (unless the user decided otherwise).
+
+Talk and structure:
+- Clips are whole beats of one source; units outside every beat and sources without beats cannot be planned.
+- At most 5 clips; every clip is talk: a clip containing a `scene` beat is refused.
+- Beat roles run hook, body, payoff, cta in that order: a hook only first, at most one cta, at least one body, and the
+  last beat is a payoff or a cta.
 
 Cast:
 - Every shot shows at least one registered celebrity; supporting actors may appear beside them, and offscreen
@@ -47,7 +101,8 @@ Text (per video):
   `speaker_experience`. Two different speakers' first-person accounts cannot form one cause and result: use
   `speaker_experience`, `contrast`, `counterpoint`, `explanation`, `claim_support` or `proof`.
 
-These checks catch known mistakes; passing them does not make an edit coherent. That judgment stays yours.
+These checks catch known mistakes; passing them does not make an edit coherent. That judgment stays yours, and the
+read-through above is how you exercise it.
 
 ## Transitions
 
@@ -72,11 +127,12 @@ Identity is the source file plus the normalized words; renaming or retiming neve
 | whole-speech trigram similarity (pairwise) | 0.88 | 0.88 | 0.93 |
 
 So N videos need at least N/4 different openings. If the inventory cannot reach the requested count under these
-limits (or the 3-source minimum), ask the user with the numbers whether to allow reuse or fewer sources.
+limits (or the 3-source minimum) with coherent joins, ask the user with the numbers whether to allow reuse or fewer
+sources.
 
 ## Visual review
 
 On each cut sheet compare the last frame before a cut with the first frame after it: similar subject position and
 size read as one flow; a large jump in framing of the same person, a half-finished gesture, a frame from another
 shot, a flash or a transition effect means changing the clip choice. Check that the people you tagged are the ones
-in the frames.
+in the frames, and that every `talk` beat shows the speaker alone in frame, addressing the viewer.

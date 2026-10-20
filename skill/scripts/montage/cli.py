@@ -61,9 +61,12 @@ def cmd_annotate(args) -> int:
     write(job / "config/annotations.json", value)
     catalog = CATALOG.build(job, state)
     missing = [s["id"] for s in catalog["sources"] if not s["annotated"]]
+    unbeaten = [s["id"] for s in catalog["sources"] if not s["beats"]]
     edited = sum(1 for s in catalog["sources"] for u in s["units"] if u.get("edited"))
-    show([f"catalog updated: {job / 'catalog/catalog.md'} ({edited} corrected units)"]
-         + ([f"not annotated yet: {', '.join(missing)}"] if missing else []) + ["next: check --plan <plan.json>"])
+    beats = sum(len(s["beats"]) for s in catalog["sources"])
+    show([f"catalog updated: {job / 'catalog/catalog.md'} ({edited} corrected units, {beats} beats)"]
+         + ([f"not annotated yet: {', '.join(missing)}"] if missing else [])
+         + ([f"no beats yet (unusable in plans): {', '.join(unbeaten)}"] if unbeaten else []) + ["next: check --plan <plan.json>"])
     return 0
 
 
@@ -72,6 +75,8 @@ def resolve(job: Path, state: dict, plan_path: Path) -> tuple[dict, list[dict], 
     outputs, errors, summary = PLAN.resolve(plan, job, state)
     report = {"outputs": outputs, "errors": errors, "batch": summary}
     write(job / "reports/check.json", report)
+    scripts = [line for output in outputs for line in (*PLAN.script(output), "")]
+    (job / "reports/scripts.md").write_text("\n".join(scripts), encoding="utf-8")
     return plan, outputs, errors, summary
 
 
@@ -90,7 +95,9 @@ def cmd_check(args) -> int:
     job = args.job_dir.resolve()
     state = JOB.load(job)
     _, outputs, errors, summary = resolve(job, state, args.plan)
-    show(summary_lines(outputs, errors, summary) + ([] if errors else ["plan ok; next: render --plan <plan.json>"]))
+    show(summary_lines(outputs, errors, summary)
+         + [f"scripts (read every video as a viewer hears it): {job / 'reports/scripts.md'}"]
+         + ([] if errors else ["plan ok; next: render --plan <plan.json>"]))
     return RULE_FAILURE if errors else 0
 
 
@@ -175,8 +182,7 @@ def cmd_decide(args) -> int:
 def cmd_bgm_assets(args) -> int:
     job = args.job_dir.resolve()
     state = JOB.load(job)
-    status = BGM.status(job, Path(state["order"]["asset_root"]), state["order"]["requested_outputs"],
-                        state.get("decisions", {}).get("bgm_downloads"))
+    status = BGM.status(job, Path(state["order"]["asset_root"]), state["order"]["requested_outputs"])
     print(json.dumps(status, ensure_ascii=False, indent=1))
     return 0
 
@@ -184,7 +190,7 @@ def cmd_bgm_assets(args) -> int:
 def cmd_fetch_bgm(args) -> int:
     job = args.job_dir.resolve()
     state = JOB.load(job)
-    entry = BGM.acquire(job, Path(state["order"]["asset_root"]), extension=state.get("decisions", {}).get("bgm_downloads"),
+    entry = BGM.acquire(job, Path(state["order"]["asset_root"]), outputs=state["order"]["requested_outputs"],
                         url=args.url, file=args.file, license=args.license, license_url=args.license_url,
                         license_evidence=args.license_evidence, source_page=args.source_page, title=args.title,
                         creator=args.creator, instrumental=args.instrumental, asset_audio_unsuitable=args.asset_audio_unsuitable)

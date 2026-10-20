@@ -1,8 +1,190 @@
-{"sources": {
-  "S01": {"people": ["person:wu-yue"], "shots": {"2": {"people": ["person:wu-yue", "person:crew"]}, "3": {"people": ["person:wu-yue", "person:crew"]},
-          "4": {"people": ["person:wu-yue", "person:crew"]}, "6": {"people": ["person:wu-yue", "person:crew"]}, "7": {"people": ["person:wu-yue", "person:crew"]},
-          "9": {"people": ["person:wu-yue", "person:crew"]}, "10": {"people": ["person:wu-yue", "person:crew"]}, "11": {"people": ["person:wu-yue", "person:crew"]}},
-          "text": {"U12": "樾哥，", "U30": "称霸冰原，"}},
-  "S02": {"people": ["person:wu-yue"]}, "S03": {"people": ["person:wu-yue"]}, "S04": {"people": ["person:wu-yue"]}, "S05": {"people": ["person:wu-yue"]},
-  "S06": {"people": ["person:lin-zi-cong"]}, "S07": {"people": ["person:lin-zi-cong"]},
-  "S08": {"people": ["person:xu-jun-cong"]}, "S09": {"people": ["person:xu-jun-cong"]}, "S10": {"people": ["person:xu-jun-cong"]}}}
+{
+ "sources": {
+  "S01": {
+   "people": [
+    "person:wu-yue"
+   ],
+   "shots": {
+    "2": {
+     "people": [
+      "person:wu-yue",
+      "person:crew"
+     ]
+    },
+    "3": {
+     "people": [
+      "person:wu-yue",
+      "person:crew"
+     ]
+    },
+    "4": {
+     "people": [
+      "person:wu-yue",
+      "person:crew"
+     ]
+    },
+    "6": {
+     "people": [
+      "person:wu-yue",
+      "person:crew"
+     ]
+    },
+    "7": {
+     "people": [
+      "person:wu-yue",
+      "person:crew"
+     ]
+    },
+    "9": {
+     "people": [
+      "person:wu-yue",
+      "person:crew"
+     ]
+    },
+    "10": {
+     "people": [
+      "person:wu-yue",
+      "person:crew"
+     ]
+    },
+    "11": {
+     "people": [
+      "person:wu-yue",
+      "person:crew"
+     ]
+    }
+   },
+   "text": {
+    "U12": "樾哥，",
+    "U30": "称霸冰原，"
+   },
+   "beats": [
+    {
+     "units": "U33-U38",
+     "kind": "talk",
+     "role": "body",
+     "gist": "playing the game is the stress reliever of middle-aged men, three-minute rounds, very satisfying"
+    }
+   ]
+  },
+  "S02": {
+   "people": [
+    "person:wu-yue"
+   ],
+   "beats": [
+    {
+     "units": "U25-U30",
+     "kind": "talk",
+     "role": "body",
+     "gist": "remember: to get rich chop trees first, feed the furnace, temperature climbs and survivors live"
+    }
+   ]
+  },
+  "S03": {
+   "people": [
+    "person:wu-yue"
+   ]
+  },
+  "S04": {
+   "people": [
+    "person:wu-yue"
+   ],
+   "beats": [
+    {
+     "units": "U18-U20",
+     "kind": "talk",
+     "role": "cta",
+     "gist": "no download needed, click and play"
+    }
+   ]
+  },
+  "S05": {
+   "people": [
+    "person:wu-yue"
+   ],
+   "beats": [
+    {
+     "units": "U34-U35",
+     "kind": "talk",
+     "role": "cta",
+     "gist": "no download needed, click and play"
+    }
+   ]
+  },
+  "S06": {
+   "people": [
+    "person:lin-zi-cong"
+   ]
+  },
+  "S07": {
+   "people": [
+    "person:lin-zi-cong"
+   ]
+  },
+  "S08": {
+   "people": [
+    "person:xu-jun-cong"
+   ],
+   "beats": [
+    {
+     "units": "U04-U05",
+     "kind": "talk",
+     "role": "hook",
+     "gist": "promises to teach furnace level thirty and power fifty million"
+    },
+    {
+     "units": "U14-U18",
+     "kind": "talk",
+     "role": "body",
+     "gist": "from the start chop trees, mine coal, upgrade the furnace and push the temperature up"
+    },
+    {
+     "units": "U32-U35",
+     "kind": "talk",
+     "role": "payoff",
+     "gist": "that is right, it is this simple: one minute to learn, three minutes to get hooked"
+    }
+   ],
+   "text": {
+    "U04": "今天大聪手把手教你熔炉三十级战力五千万，"
+   }
+  },
+  "S09": {
+   "people": [
+    "person:xu-jun-cong"
+   ],
+   "beats": [
+    {
+     "units": "U03-U04",
+     "kind": "talk",
+     "role": "body",
+     "gist": "at minus seventy in the ice age, with wood you can do whatever you like"
+    }
+   ]
+  },
+  "S10": {
+   "people": [
+    "person:xu-jun-cong"
+   ],
+   "shots": {
+    "6": {
+     "merge": true
+    }
+   },
+   "beats": [
+    {
+     "units": "U06-U10",
+     "kind": "talk",
+     "role": "body",
+     "gist": "to be the boss chop trees first, then upgrade the furnace, the higher its level the faster the power grows"
+    },
+    {
+     "units": "U12-U14",
+     "kind": "talk",
+     "role": "cta",
+     "gist": "click the bottom left of the screen, no download, tap and play"
+    }
+   ]
+  }
+ }
+}

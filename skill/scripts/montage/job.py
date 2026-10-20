@@ -16,7 +16,6 @@ REBURN_NOTE = ("修改本目录 subtitle-*.txt 的文字或时间码后，把整
 DECISIONS = {
     "min_sources_per_output": lambda v: type(v) is int and v in (1, 2),
     "reuse": lambda v: v in ("reasonable", "extended"),
-    "bgm_downloads": lambda v: v is True,
     "bgm_repetition": lambda v: v is True,
 }
 

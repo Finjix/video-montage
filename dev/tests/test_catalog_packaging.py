@@ -50,6 +50,37 @@ class CatalogTests(unittest.TestCase):
         self.assertEqual(spans, [[1, 3], [7, 8], [10, 10]])
         self.assertEqual(CATALOG.expand(spans), [1, 2, 3, 7, 8, 10])
 
+    def test_beat_annotations_are_validated(self):
+        state = {"sources": [{"id": "S01"}]}
+        good = {"units": "U01-U03", "kind": "talk", "role": "body", "gist": "explains how to warm the camp up"}
+        CATALOG.check_annotations({"sources": {"S01": {"beats": [good, {**good, "units": "U04"}]}}}, state)
+        for bad in ({**good, "kind": "skit"}, {**good, "role": "ending"}, {**good, "units": "U01-10"}, {**good, "gist": "short"},
+                    {"units": "U01", "kind": "talk", "role": "body"}, {**good, "extra": 1}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                CATALOG.check_annotations({"sources": {"S01": {"beats": [bad]}}}, state)
+
+    def test_beats_resolve_to_ordered_unit_runs(self):
+        units = [{"id": f"U{n:02d}"} for n in range(1, 8)] + [{"id": "U08.1"}, {"id": "U08.2"}]
+        spec = lambda units_, role="body": {"units": units_, "kind": "talk", "role": role, "gist": "a complete thought of the speaker"}
+        beats = CATALOG.resolve_beats("S01", units, [spec("U05-U07", "payoff"), spec("U01-U03", "hook"), spec("U08.1-U08.2")])
+        self.assertEqual([(b["id"], b["units"][0], b["units"][-1], b["role"]) for b in beats],
+                         [("B01", "U01", "U03", "hook"), ("B02", "U05", "U07", "payoff"), ("B03", "U08.1", "U08.2", "body")])
+        for bad in ([spec("U03-U05"), spec("U05-U06")], [spec("U08")], [spec("U03-U01")]):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                CATALOG.resolve_beats("S01", units, bad)
+
+    def test_markdown_shows_beats_and_sources_without_them(self):
+        import helpers
+        sources = helpers.standard_sources()
+        sources[1]["beats"] = []
+        text = CATALOG.markdown({"sources": sources}, {"person:wu-yue"})
+        self.assertIn(">> B01 U01-U01 talk/hook: a complete thought", text)
+        self.assertEqual(text.count("Beats: none yet"), 1)
+        sources[0]["units"][0]["in_frames"] = []
+        sources[0]["units"][0]["out_frames"] = []
+        text = CATALOG.markdown({"sources": sources}, {"person:wu-yue"})
+        self.assertIn(">> B01 U01-U01 talk/hook (cannot start a clip, cannot end a clip; join a neighbour):", text)
+
     def test_stability_windows(self):
         adjacent = np.full(200, 0.004, np.float32)
         endpoint = np.full(200, 0.01, np.float32)

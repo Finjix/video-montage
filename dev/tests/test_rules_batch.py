@@ -48,6 +48,32 @@ class RuleTests(unittest.TestCase):
         self.assertFalse(rules.output_errors(clips, [link("speaker_experience")], ["无尽冬日"]))
 
 
+def beat_clip(role, kind="talk", frames=300):
+    return {"beats": [{"id": "B01", "role": role, "kind": kind, "gist": "x"}], "kind": kind, "frames": frames}
+
+
+class StructureTests(unittest.TestCase):
+    def test_talk_first_narrative_passes(self):
+        clips = [beat_clip("hook"), beat_clip("body"), beat_clip("body"), beat_clip("cta")]
+        self.assertEqual(rules.structure_errors(clips), [])
+        self.assertEqual(rules.structure_errors([beat_clip("body"), beat_clip("body"), beat_clip("payoff")]), [])
+
+    def test_order_and_ending(self):
+        self.assertTrue(rules.structure_errors([beat_clip("body"), beat_clip("hook"), beat_clip("cta")]))
+        self.assertTrue(any("cta" in e for e in rules.structure_errors([beat_clip("hook"), beat_clip("cta"), beat_clip("body")])))
+        self.assertTrue(any("needs at least one body" in e for e in rules.structure_errors([beat_clip("hook"), beat_clip("cta")])))
+        self.assertTrue(any("must end" in e for e in rules.structure_errors([beat_clip("hook"), beat_clip("body")])))
+        self.assertTrue(any("more than one cta" in e for e in rules.structure_errors([beat_clip("body"), beat_clip("cta"), beat_clip("cta")])))
+
+    def test_scene_beats_are_refused(self):
+        base = [beat_clip("hook"), beat_clip("body"), beat_clip("body"), beat_clip("payoff")]
+        self.assertTrue(any("acted scene" in e for e in rules.structure_errors(base[:1] + [beat_clip("body", "scene")] + base[2:])))
+
+    def test_clip_limit(self):
+        clips = [beat_clip("hook")] + [beat_clip("body")] * 4 + [beat_clip("payoff")]
+        self.assertTrue(any("at most 5" in e for e in rules.structure_errors(clips)))
+
+
 def output(pid, texts, sources=("a", "b", "c"), families=None):
     clips = [{"sha256": sources[i % len(sources)], "unit_texts": [t], "text": t} for i, t in enumerate(texts)]
     shots = [{"family": f} for f in (families or [f"{pid}:{i}" for i in range(len(texts))])]

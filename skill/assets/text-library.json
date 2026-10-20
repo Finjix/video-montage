@@ -4,6 +4,7 @@
     {"id": "game:wu-jin-dong-ri", "category": "game", "text": "无尽冬日"},
     {"id": "person:wu-yue", "category": "person", "text": "吴樾"},
     {"id": "person:lin-zi-cong", "category": "person", "text": "林子聪"},
-    {"id": "person:xu-jun-cong", "category": "person", "text": "许君聪"}
+    {"id": "person:xu-jun-cong", "category": "person", "text": "许君聪"},
+    {"id": "term:da-cong", "category": "term", "text": "大聪"}
   ]
 }

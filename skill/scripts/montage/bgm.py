@@ -1,7 +1,8 @@
 """Background music: the asset pack's own audio, or a commercial-use track the agent downloads.
 
 Downloads are registered with `fetch-bgm` (license evidence kept in config/bgm/); `package` accepts
-only those two origins and spreads the batch so no track serves more than 67% of the videos.
+only those two origins and spreads the batch over every available track, one track serving at most
+eight videos.
 """
 
 from __future__ import annotations
@@ -32,7 +33,7 @@ ALIASES = {"cc0": "cc0", "cc01": "cc0", "cc010": "cc0", "cczero": "cc0",
            "publicdomain": "public-domain", "pd": "public-domain", "pdm": "public-domain", "pdm10": "public-domain",
            "pixabay": "pixabay", "pixabaylicense": "pixabay", "pixabaycontentlicense": "pixabay",
            "mixkit": "mixkit", "mixkitlicense": "mixkit"}
-MAX_TRACK_SHARE = 0.67  # no single track on more than 67% of a batch's videos
+MAX_VIDEOS_PER_TRACK = 8  # one track serves at most eight videos of a batch
 FORMAT_SUFFIX = {"mp3": ".mp3", "wav": ".wav", "flac": ".flac", "ogg": ".ogg", "aac": ".aac", "mov": ".m4a"}
 
 
@@ -75,24 +76,24 @@ def duration(path: Path) -> float:
 
 
 def max_uses(outputs: int) -> int:
-    """Most videos one track may serve (a single video cannot be diversified)."""
-    return outputs if outputs < 2 else max(1, math.floor(outputs * MAX_TRACK_SHARE + 1e-9))
+    """Most videos one track may serve."""
+    return max(1, min(outputs, MAX_VIDEOS_PER_TRACK))
 
 
 def tracks_needed(outputs: int) -> int:
-    return 1 if outputs < 2 else math.ceil(outputs / max_uses(outputs))
+    return max(1, math.ceil(outputs / MAX_VIDEOS_PER_TRACK))
 
 
 def require_distribution(shas: list[str], waiver) -> None:
-    """Reject a batch where one BGM covers more than 67% of the videos, unless the user accepted it."""
-    if waiver or len(shas) < 2:
+    """Reject a batch where one BGM serves more than eight videos, unless the user accepted it."""
+    if waiver or not shas:
         return
     worst = max(shas.count(item) for item in set(shas))
-    if worst > max_uses(len(shas)):
-        raise ValueError(f"BGM repetition: one track serves {worst} of {len(shas)} videos (limit {max_uses(len(shas))}, "
-                         f"{MAX_TRACK_SHARE:.0%}); use at least {tracks_needed(len(shas))} different tracks. "
-                         "If the pack has too few, ask the user whether you may add licensed downloads "
-                         "(record the answer with `decide --key bgm_downloads` or `--key bgm_repetition`)")
+    if worst > MAX_VIDEOS_PER_TRACK:
+        raise ValueError(f"BGM repetition: one track serves {worst} of {len(shas)} videos (limit {MAX_VIDEOS_PER_TRACK}); "
+                         f"use at least {tracks_needed(len(shas))} different tracks: download the missing ones with `fetch-bgm` "
+                         "(several different sources) instead of repeating a track. Only the user's own yes "
+                         "(`decide --key bgm_repetition`) allows more than eight videos per track")
 
 
 def available(job: Path, asset_root: Path) -> list[dict]:
@@ -105,17 +106,15 @@ def available(job: Path, asset_root: Path) -> list[dict]:
     return rows
 
 
-def status(job: Path, asset_root: Path, outputs: int = 1, extension=None) -> dict:
+def status(job: Path, asset_root: Path, outputs: int = 1) -> dict:
     pack = asset_audio(asset_root)
     downloads = load_registry(job)
     have = len({row["sha256"] for row in pack} | {row["sha256"] for row in downloads})
     need = tracks_needed(outputs)
-    short = have < need
-    # An empty pack is filled by the agent; a non-empty but too small pack needs the user's yes first.
-    return {"asset_audio": pack, "licensed_downloads": downloads,
-            "download_required": not pack or (short and extension is not None),
+    # Whatever the pack lacks for the eight-videos-per-track limit, the agent downloads itself.
+    return {"asset_audio": pack, "licensed_downloads": downloads, "download_required": have < need,
             "tracks_available": have, "tracks_needed": need, "max_videos_per_track": max_uses(outputs),
-            "ask_user_before_adding_tracks": short and bool(pack) and extension is None, "accepted_licenses": LICENSES}
+            "accepted_licenses": LICENSES}
 
 
 def download(url: str, target: Path) -> None:
@@ -131,18 +130,18 @@ def download(url: str, target: Path) -> None:
             stream.write(block)
 
 
-def acquire(job: Path, asset_root: Path, *, extension=None, url: str | None, file: Path | None, license: str, license_url: str,
+def acquire(job: Path, asset_root: Path, *, outputs: int = 1, url: str | None, file: Path | None, license: str, license_url: str,
             license_evidence: str, source_page: str, title: str, creator: str, instrumental: bool,
             asset_audio_unsuitable: str | None = None) -> dict:
     """Download (or take a local copy of) one BGM, check it and record its license evidence."""
     if bool(url) == bool(file):
         raise ValueError("give exactly one of --url (direct audio link) or --file (already downloaded)")
     pack = asset_audio(asset_root)
-    if pack and not extension and not (asset_audio_unsuitable or "").strip():
-        raise ValueError("the asset pack already has audio; use it as the BGM, or state in "
-                         f"--asset-audio-unsuitable why none of it can be (found: {[row['path'] for row in pack]}). "
-                         "When the pack has too few tracks for the 67% repetition limit, ask the user whether you may "
-                         "add licensed downloads; only their yes (`decide --key bgm_downloads`) allows it")
+    pack_tracks = len({row["sha256"] for row in pack})
+    if pack_tracks >= tracks_needed(outputs) and not (asset_audio_unsuitable or "").strip():
+        raise ValueError(f"the asset pack already has {pack_tracks} audio track(s), enough for {outputs} video(s) at "
+                         f"{MAX_VIDEOS_PER_TRACK} per track; use them as the BGM, or state in --asset-audio-unsuitable why none "
+                         f"of it can be (found: {[row['path'] for row in pack]})")
     chosen = license_id(license)
     for label, value in (("--license-url", license_url), ("--source-page", source_page)):
         if urllib.parse.urlparse(value or "").scheme not in {"http", "https"}:

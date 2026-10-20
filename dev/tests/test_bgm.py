@@ -75,12 +75,18 @@ class BgmTests(unittest.TestCase):
         self.assertEqual(BGM.load_registry(self.job), [])
         self.assertEqual(list((self.job / "config" / "bgm").glob("*.partial")), [])
 
-    def test_pack_audio_blocks_download_unless_unsuitable_or_allowed(self):
+    def test_pack_audio_blocks_download_unless_unsuitable_or_too_few(self):
         tone(self.pack / "sfx.wav", 25)
         with self.assertRaises(ValueError):
-            self.fetch()
+            self.fetch()   # one pack track already covers one video
         self.assertEqual(self.fetch(asset_audio_unsuitable="only sound effects")["asset_audio_unsuitable"], "only sound effects")
-        self.assertTrue(self.fetch("good.wav", extension={"value": True, "instruction": "可以下载"}))
+        self.assertTrue(self.fetch("good.wav", outputs=9))   # nine videos need two tracks: the agent adds one itself
+
+    def test_status_reports_the_shortfall(self):
+        tone(self.pack / "bgm.mp3", 25)
+        status = BGM.status(self.job, self.pack, outputs=40)
+        self.assertEqual((status["tracks_available"], status["tracks_needed"], status["download_required"]), (1, 5, True))
+        self.assertFalse(BGM.status(self.job, self.pack, outputs=8)["download_required"])
 
     def test_authorization(self):
         tone(self.pack / "bgm.wav", 25)
@@ -95,13 +101,22 @@ class BgmTests(unittest.TestCase):
 
 
 class TestBgmRepetition(unittest.TestCase):
-    def test_share_limit(self):
-        self.assertEqual([BGM.max_uses(n) for n in (1, 2, 3, 5, 10)], [1, 1, 2, 3, 6])
-        self.assertEqual([BGM.tracks_needed(n) for n in (1, 2, 3, 40)], [1, 2, 2, 2])
-        BGM.require_distribution(["a", "a", "b"], None)
-        with self.assertRaises(ValueError):
-            BGM.require_distribution(["a", "a", "a"], None)
-        BGM.require_distribution(["a", "a", "a"], {"value": True, "instruction": "可以重复"})
+    def test_one_track_serves_at_most_eight_videos(self):
+        self.assertEqual([BGM.max_uses(n) for n in (1, 2, 3, 8, 9, 40)], [1, 2, 3, 8, 8, 8])
+        self.assertEqual([BGM.tracks_needed(n) for n in (1, 3, 8, 9, 40, 41)], [1, 1, 1, 2, 5, 6])
+        BGM.require_distribution(["a"] * 8 + ["b"] * 8, None)
+        BGM.require_distribution(["a", "a", "a"], None)
+        with self.assertRaises(ValueError) as caught:
+            BGM.require_distribution(["a"] * 9 + ["b"] * 31, None)
+        self.assertIn("at least 5", str(caught.exception))
+        BGM.require_distribution(["a"] * 20 + ["b"] * 20, {"value": True, "instruction": "可以重复"})
+
+    def test_round_robin_assignment_respects_the_limit(self):
+        from montage import package as PACKAGE
+        tracks = [f"t{i}" for i in range(BGM.tracks_needed(40))]
+        shas = [PACKAGE.pick(tracks, ordinal) for ordinal in range(40)]
+        BGM.require_distribution(shas, None)
+        self.assertEqual({shas.count(t) for t in tracks}, {8})
 
     def test_available_lists_pack_then_downloads(self):
         directory = tempfile.TemporaryDirectory()

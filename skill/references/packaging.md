@@ -67,18 +67,18 @@ and dependent heads are reported as notes.
 punchy: dance-pop, synth-pop, funk, disco, upbeat house). Calm, ambient, chill, lounge, piano, orchestral or
 children's music is wrong even when licensed. State in the summary why each track fits.
 
-**Share:** one track may serve at most 67% of the batch's videos (3 videos need 2 tracks).
+**Repeats:** one track serves at most eight videos of a batch (9-16 videos need 2 tracks, 40 need 5). `package`
+hands the tracks out round-robin over every available track, so more tracks mean less repetition.
 
 **Origins:** only the pack's own audio or a registered download. `bgm-assets` prints the inventory,
-`tracks_needed` and whether a download is required:
-
-- Pack has no audio: download one or more tracks yourself, never ask the user for music.
-- Pack has audio but too few tracks for the 67% rule: ask the user whether you may add downloads
-  (`decide --key bgm_downloads`) or reuse the pack's track (`decide --key bgm_repetition`).
+`tracks_needed` and whether a download is required. The agent fills any shortfall itself and never asks the user for
+music: pack has no audio or fewer tracks than `tracks_needed`: download the missing tracks (the user's standing
+permission), taking them from several different sources and creators rather than one site or one artist. Only the
+user's own yes (`decide --key bgm_repetition`) lets a track serve more than eight videos.
 
 **Licenses:** commercial use with no attribution, share-alike or no-derivatives terms: `cc0`, `public-domain`,
 `pixabay` (Pixabay Content License), `mixkit` (Mixkit License). Read the license on the track's own page. Sources to
-try: Mixkit, Pixabay Music, Free Music Archive (CC0 filter), Internet Archive, Wikimedia Commons. Register each
+try (mix them): Mixkit, Pixabay Music, Free Music Archive (CC0 filter), Internet Archive, Wikimedia Commons. Register each
 track (the file is checked for audio, length >= 20 s and level, and the license evidence is kept in `config/bgm/`):
 
 ```text

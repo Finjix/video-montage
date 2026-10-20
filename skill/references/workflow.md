@@ -8,8 +8,8 @@ problems, fix the input and run the same command again. Every command can be re-
 | --- | --- | --- |
 | `init --work-order -` | validates the order (JSON on stdin or a file), creates the delivery folder and job dir | seconds |
 | `prepare` | frame clock, camera cuts, speech recognition, units with clean cut points, sheets (a re-run keeps the speech and unit IDs; `--fresh` recognizes again) | about 1 min per 10 sources |
-| `annotate --file <json>` | applies people, speakers and transcript fixes; rewrites the catalog | seconds (+10 s when text changed) |
-| `check --plan <json>` | resolves exact cut frames and checks every rule; writes `reports/check.json` | < 1 s |
+| `annotate --file <json>` | applies people, speakers, transcript fixes and beats; rewrites the catalog | seconds (+10 s when text changed) |
+| `check --plan <json>` | resolves exact cut frames and checks every rule; writes `reports/check.json` and `reports/scripts.md` (every video's words, beats and joins) | < 1 s |
 | `render --plan <json>` | clean videos, QC, subtitle drafts, cut sheets (changed outputs only) | ~15 s per 3 videos |
 | `package [--config <json>]` | designs, encodes, checks and publishes (changed outputs only) | ~15-40 s per video, 4 in parallel |
 | `package --clean` | publishes the clean videos unpackaged (explicit user request only) | seconds |
@@ -38,8 +38,7 @@ User decisions (only after the user answered; `decide` adds them later):
 | --- | --- | --- |
 | `min_sources_per_output` | `1` or `2` | fewer than 3 source files per video |
 | `reuse` | `"reasonable"` or `"extended"` | higher batch reuse limits ([editing](editing.md#batch-limits)) |
-| `bgm_downloads` | `true` | download extra BGM beside the pack's own audio |
-| `bgm_repetition` | `true` | one BGM track may serve more than 67% of the videos |
+| `bgm_repetition` | `true` | one BGM track may serve more than eight videos |
 
 In the work order: `"decisions": {"reuse": {"value": "reasonable", "instruction": "<the user's words>"}}`.
 
@@ -48,7 +47,7 @@ In the work order: `"decisions": {"reuse": {"value": "reasonable", "instruction"
 `temp/catalog/catalog.md` lists each source (S01...) with its camera shots and its speech units (U01...).
 A unit is a clause; `|` marks a sentence end. `in` means a clip may start at this unit, `out` that it may end
 after it (both need a clean pause and a stable picture). `x` excluded, `R` overlaps a user-rejected interval,
-`*` corrected text. `S01.jpg` shows the middle frame of every shot (`S01 #3 f574-681` = shot 3, native frames);
+`*` corrected text. `>> Bnn` opens a beat (kind/role and gist, see Annotations; "cannot start/end a clip" means that beat's first/last unit has no clean cut, so a clip must continue into or begin with its neighbour). `S01.jpg` shows the middle frame of every shot (`S01 #3 f574-681` = shot 3, native frames);
 `assets.jpg` shows every overlay PNG of the asset pack.
 
 ## Annotations (`annotate`)
@@ -63,6 +62,10 @@ One file for all sources; re-run `annotate` with the complete file whenever you 
           "speaker": "person:wu-yue", "speakers": {"U07": "person:crew-1"},
           "text": {"U12": "樾哥，", "U20": "", "U31": ["第一句，", "第二句。"]},
           "exclude": ["U09"],
+          "beats": [{"units": "U02-U05", "kind": "talk", "role": "hook", "gist": "asks who still fails at the cold start and promises the fix"},
+                    {"units": "U06-U10", "kind": "talk", "role": "body", "gist": "chop trees first, feed the furnace, temperature rises"},
+                    {"units": "U11-U12", "kind": "scene", "role": "body", "gist": "friend asks why the furnace never lights (a scene beat: kept for the record, never planned)"},
+                    {"units": "U30-U31", "kind": "talk", "role": "cta", "gist": "no download needed, click to play"}],
           "notes": "U12 is 樾哥 (context: he is addressed by name)"}}}
 ```
 
@@ -75,6 +78,10 @@ One file for all sources; re-run `annotate` with the complete file whenever you 
 - `text`: the corrected text of a unit; `""` deletes it (noise, hallucination); a list splits it into
   `U31.1`, `U31.2`... The aligner re-times corrected text, so keep the words in spoken order.
 - `exclude`: units that must not be used (off-topic, broken audio, wrong person speaking...).
+- `beats`: the only material a plan may use. Each is a run of whole units (`"U06-U10"`, split units as
+  `"U31.1-U31.2"`) with `kind` (`talk` / `scene`), `role` (`hook` / `body` / `payoff` / `cta`) and an English `gist`
+  of at least 12 letters. Beats may not overlap; units in no beat are unusable. How to cut them and what the kinds
+  and roles mean: [editing](editing.md#how-to-compose). A source with no beats cannot be planned.
 
 ## Plan (`check`, `render`)
 
@@ -88,12 +95,14 @@ One file for all sources; re-run `annotate` with the complete file whenever you 
 ```
 
 - `plan_id`: letters, digits, `-` and `_`; one output per requested video.
-- A clip is a contiguous unit range of one source (`"U07-U09"`). The program chooses the exact in/out frames
+- A clip is a contiguous unit range of one source (`"U07-U09"`) made of whole beats. The program chooses the exact in/out frames
   inside the clean pauses so that duration, shot lengths and silent cuts hold, and maps the shots, cast and
   nameplates itself.
 - `transitions`: one per adjacent clip pair, with a relation from [editing](editing.md#transitions) and a concrete
   reason (what links the two clips).
-- `check` prints one line per output (frames, shot lengths, sources, cast) and every problem with its numbers.
+- `check` prints one line per output (frames, shot lengths, sources, talk share, cast) and every problem with its
+  numbers, and writes `reports/scripts.md`: per output each clip's source, beats, spoken words and beat gists with the
+  relation and reason of every join. Read it before `render` ([read-through](editing.md#read-through-after-every-check)).
   `render` runs the same check first and renders nothing while problems remain.
 
 ## After `render`

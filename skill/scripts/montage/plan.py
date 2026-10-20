@@ -11,7 +11,7 @@ from montage import batch, catalog as CATALOG, rules
 from montage.common import read
 
 MIN_FRAMES, MAX_FRAMES = 1020, 1800      # 17-30 s at 60 fps, clean and final (no speed change)
-MIN_SHOTS, MIN_SHOT, MAX_SPREAD = 4, 48, 180
+MIN_SHOTS, MIN_SHOT, MAX_SPREAD = 4, 48, 300   # shots >= 0.8 s, longest minus shortest <= 300 frames (5 s)
 NAMEPLATE_FRAMES, MIN_NAMEPLATE, NAMEPLATE_GAP = 192, 48, 18
 IN_PAD, OUT_PAD = 0.10, 0.12             # preferred silence beyond the muted edge
 SAMPLES_PER_EDGE = 14
@@ -101,7 +101,7 @@ def repair(feasible: list[list[dict]]) -> list[dict] | None:
 
 
 def solve(options: list[list[dict]]) -> list[dict] | None:
-    """One option per clip: every shot in [L, L+180] with L >= 48, 17-30 s, >= 4 shots, least padding."""
+    """One option per clip: every shot in [L, L+300] with L >= 48, 17-30 s, >= 4 shots, least padding."""
     usable = [[o for o in row if min(o["pieces"]) >= MIN_SHOT] for row in options]
     if any(not row for row in usable):
         return None
@@ -143,7 +143,7 @@ def explain(source_rows: list[tuple[dict, list[dict]]], options: list[list[dict]
     if not reasons:
         spans = [f"clip {i}: {min(min(o['pieces']) for o in row)}-{max(max(o['pieces']) for o in row)}"
                  for i, row in enumerate(options, 1)]
-        reasons.append("shot lengths cannot all fit within one 48..(+180) frame band (3 s spread); "
+        reasons.append("shot lengths cannot all fit within one 48..(+300) frame band (5 s spread); "
                        f"possible shot lengths per clip: {'; '.join(spans)}. Split long shots with more clips or shorten them")
     return reasons
 
@@ -177,17 +177,41 @@ def nameplates(shots: list[dict], registered: set[str]) -> tuple[list[dict], lis
     return windows, errors
 
 
+def clip_beats(source: dict, units: list[dict]) -> tuple[list[dict], list[str]]:
+    """The beats a clip covers; a clip is whole beats of one source, nothing outside a beat and no half beat."""
+    beats = source.get("beats") or []
+    if not beats:
+        return [], [f"{source['id']} has no beats; annotate them first (beats are the only material a plan may use)"]
+    ids = {unit["id"] for unit in units}
+    covered, problems = [], []
+    for beat in beats:
+        members = [unit_id for unit_id in beat["units"] if unit_id in ids]
+        if not members:
+            continue
+        if len(members) != len(beat["units"]):
+            problems.append(f"{source['id']} cuts through beat {beat['id']} ({beat['units'][0]}-{beat['units'][-1]}); take the "
+                            "whole beat, or split the beat in the annotations")
+        covered.append(beat)
+    loose = [unit["id"] for unit in units if not any(unit["id"] in beat["units"] for beat in covered)]
+    if loose:
+        problems.append(f"{source['id']} {', '.join(loose)} belong to no beat (cannot be planned)")
+    return [{key: beat[key] for key in ("id", "kind", "role", "gist")} for beat in covered], problems
+
+
 def resolve_output(output: dict, sources: dict, registered: set[str], games: list[str], min_sources: int) -> tuple[dict, list[str]]:
     pid = output.get("plan_id")
     clips_spec = output.get("clips")
     if not isinstance(clips_spec, list) or not clips_spec:
         raise PlanError("clips must be a non-empty list")
-    rows, errors = [], []
+    rows, errors, beat_rows = [], [], []
     for number, clip in enumerate(clips_spec, 1):
         if not isinstance(clip, dict) or clip.get("source") not in sources:
             raise PlanError(f"clip {number}: unknown source {clip.get('source') if isinstance(clip, dict) else clip!r}")
         source = sources[clip["source"]]
         units = unit_slice(source, clip.get("units", ""))
+        covered, problems = clip_beats(source, units)
+        errors += [f"clip {number}: {problem}" for problem in problems]
+        beat_rows.append(covered)
         for unit in units:
             if unit["excluded"]:
                 errors.append(f"clip {number}: {source['id']} {unit['id']} is excluded in the annotations")
@@ -196,6 +220,9 @@ def resolve_output(output: dict, sources: dict, registered: set[str], games: lis
         if not units[-1]["out_frames"]:
             errors.append(f"clip {number}: {source['id']} {units[-1]['id']} cannot end a clip (no clean silence or stable picture after it)")
         rows.append((source, units))
+    if not errors:
+        errors += rules.structure_errors([{"beats": covered, "kind": "scene" if any(b["kind"] == "scene" for b in covered) else "talk"}
+                                          for covered in beat_rows])
     if errors:
         return {}, errors
     options = [clip_options(source, units) for source, units in rows]
@@ -207,13 +234,14 @@ def resolve_output(output: dict, sources: dict, registered: set[str], games: lis
     if choice is None:
         return {}, explain(rows, options)
     clips, shots, cursor = [], [], 0
-    for number, ((source, units), option) in enumerate(zip(rows, choice), 1):
+    for number, ((source, units), option, covered) in enumerate(zip(rows, choice, beat_rows), 1):
         start, end = option["in"], option["out"]
         hits = CATALOG.rejected_hits(source, start, end)
         if hits:
             errors.append(f"clip {number}: overlaps user-rejected interval {', '.join(hits)}")
         clip = {"source": source["id"], "path": source["path"], "sha256": source["sha256"],
                 "fps_num": source["fps_num"], "fps_den": source["fps_den"],
+                "beats": covered, "kind": "scene" if any(beat["kind"] == "scene" for beat in covered) else "talk",
                 "units": [unit["id"] for unit in units], "unit_texts": [unit["text"] for unit in units],
                 "text": "".join(unit["text"] for unit in units), "in": start, "out": end,
                 "protect": [units[0]["protect"][0], units[-1]["protect"][1]],
@@ -244,6 +272,7 @@ def resolve_output(output: dict, sources: dict, registered: set[str], games: lis
     used = len({clip["sha256"] for clip in clips})
     if used < min_sources:
         errors.append(f"uses {used} source files; needs >= {min_sources} (ask the user before accepting fewer)")
+    errors += rules.structure_errors(clips)
     errors += rules.output_errors(clips, output.get("transitions") or [], games)
     resolved = {"plan_id": pid, "clips": clips, "shots": shots, "frames": cursor, "nameplates": windows,
                 "protagonists": sorted({p for shot in shots for p in shot["people"] if p in registered}),
@@ -295,5 +324,20 @@ def describe(output: dict) -> str:
     lengths = ",".join(str(shot["frames"]) for shot in output["shots"])
     clips = " + ".join(f"{clip['source']}:{clip['units'][0]}" + (f"-{clip['units'][-1]}" if len(clip["units"]) > 1 else "")
                        for clip in output["clips"])
+    talk = sum(clip["frames"] for clip in output["clips"] if clip["kind"] == "talk") / output["frames"]
     return (f"{output['plan_id']}: {output['frames']} frames ({output['frames'] / 60:.1f} s), {len(output['shots'])} shots "
-            f"[{lengths}], {sources} sources, cast {','.join(p.split(':', 1)[1] for p in output['protagonists'])} :: {clips}")
+            f"[{lengths}], {sources} sources, talk {talk:.0%}, cast {','.join(p.split(':', 1)[1] for p in output['protagonists'])} :: {clips}")
+
+
+def script(output: dict) -> list[str]:
+    """The video as the viewer hears it: each clip's words with its beats, and what the next clip claims to follow from."""
+    lines = [f"## {output['plan_id']} ({output['frames'] / 60:.1f} s)" + (f" - {output['note']}" if output.get("note") else "")]
+    for number, clip in enumerate(output["clips"], 1):
+        if number > 1:
+            link = output["transitions"][number - 2]
+            lines.append(f"   -> {link.get('relation')}: {link.get('reason')}")
+        beats = ", ".join(f"{beat['id']} {beat['kind']}/{beat['role']}" for beat in clip["beats"])
+        lines.append(f"{number}. {clip['source']} {clip['units'][0]}-{clip['units'][-1]} [{beats}] {clip['duration']:.1f} s")
+        lines.append(f"   {clip['text']}")
+        lines += [f"   ({beat['gist']})" for beat in clip["beats"]]
+    return lines

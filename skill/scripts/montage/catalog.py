@@ -6,6 +6,7 @@ corrections (corrected text is re-timed by the forced aligner) and rewrites the 
 from __future__ import annotations
 
 import math
+import re
 import subprocess
 import time
 from collections import deque
@@ -33,6 +34,9 @@ MAX_HEAD, MAX_TAIL = 0.45, 0.55  # longest pause kept before / after the speech 
 STRONG = "。！？!?…"
 WEAK = "，、；：,;:"
 SHEET_TILE = (135, 240)
+BEAT_KINDS = ("talk", "scene")                 # talk: a person speaking to the viewer; scene: acted dialogue or plot
+BEAT_ROLES = ("hook", "body", "payoff", "cta")  # position in a video: opener, middle, result, call to action
+UNIT_RANGE = re.compile(r"U\d+(?:\.\d+)?(?:-U\d+(?:\.\d+)?)?")
 
 
 # ----------------------------------------------------------------------------------- media analysis
@@ -414,12 +418,25 @@ def check_annotations(value: dict, state: dict) -> dict:
     if not isinstance(value, dict) or not isinstance(value.get("sources", {}), dict):
         raise ValueError("annotations need {\"sources\": {\"S01\": {...}}}")
     known = {row["id"] for row in state["sources"]}
-    allowed = {"people", "speaker", "shots", "cameras", "text", "speakers", "exclude", "notes"}
+    allowed = {"people", "speaker", "shots", "cameras", "text", "speakers", "exclude", "notes", "beats"}
     for sid, row in value["sources"].items():
         if sid not in known:
             raise ValueError(f"unknown source {sid}")
         if not isinstance(row, dict) or set(row) - allowed:
             raise ValueError(f"{sid}: allowed fields are {sorted(allowed)}")
+        beats = row.get("beats", [])
+        if not isinstance(beats, list):
+            raise ValueError(f"{sid}: beats is a list of {{units, kind, role, gist}}")
+        for number, beat in enumerate(beats, 1):
+            where = f"{sid} beat {number}"
+            if not isinstance(beat, dict) or set(beat) != {"units", "kind", "role", "gist"}:
+                raise ValueError(f"{where}: a beat has exactly units, kind, role and gist")
+            if not isinstance(beat["units"], str) or not UNIT_RANGE.fullmatch(beat["units"]):
+                raise ValueError(f"{where}: units look like \"U06-U10\" or \"U06\", got {beat['units']!r}")
+            if beat["kind"] not in BEAT_KINDS or beat["role"] not in BEAT_ROLES:
+                raise ValueError(f"{where}: kind is one of {list(BEAT_KINDS)}, role one of {list(BEAT_ROLES)}")
+            if not isinstance(beat["gist"], str) or len(rules.normalize(beat["gist"])) < 12:
+                raise ValueError(f"{where}: gist must say in a sentence what the beat says and does for the video")
         for person in [*row.get("people", []), *[p for shot in row.get("shots", {}).values() for p in shot.get("people", [])],
                        *([row["speaker"]] if row.get("speaker") else []), *row.get("speakers", {}).values()]:
             if not rules.person_id(person):
@@ -482,6 +499,29 @@ def apply_text(sid: str, units: list[dict], edits: dict, samples, model_factory,
     return result
 
 
+def resolve_beats(sid: str, units: list[dict], specs: list[dict]) -> list[dict]:
+    """The agent's beats as ordered, non-overlapping runs of unit IDs (IDs B01... follow the order in the source)."""
+    ids = [unit["id"] for unit in units]
+    found = []
+    for number, spec in enumerate(specs, 1):
+        first, _, last = spec["units"].partition("-")
+        last = last or first
+        missing = [value for value in (first, last) if value not in ids]
+        if missing:
+            raise ValueError(f"{sid} beat {number} ({spec['units']}): no unit {', '.join(missing)} (a corrected or split unit "
+                             "has its own ID; check the catalog)")
+        a, b = ids.index(first), ids.index(last)
+        if b < a:
+            raise ValueError(f"{sid} beat {number} ({spec['units']}): units out of order")
+        found.append((a, b, spec))
+    found.sort(key=lambda row: row[0])
+    for (a, b, spec), (c, _, other) in zip(found, found[1:]):
+        if c <= b:
+            raise ValueError(f"{sid}: beats {spec['units']} and {other['units']} overlap")
+    return [{"id": f"B{number:02d}", "units": ids[a:b + 1], "kind": spec["kind"], "role": spec["role"], "gist": spec["gist"].strip()}
+            for number, (a, b, spec) in enumerate(found, 1)]
+
+
 def build(job: Path, state: dict, *, model=None) -> dict:
     """Recompute units from raw ASR plus annotations and write catalog.json / catalog.md."""
     directory = job / "catalog"
@@ -525,14 +565,18 @@ def build(job: Path, state: dict, *, model=None) -> dict:
                           "family": cameras.get(number, f"{sid}:shot{number}")})
         speaker_default = note.get("speaker") or (people_default[0] if len([p for p in people_default if p in registered]) == 1 else None)
         excluded = set(note.get("exclude", []))
+        beats = resolve_beats(sid, units, note.get("beats", []))
+        beat_of = {unit_id: beat["id"] for beat in beats for unit_id in beat["units"]}
         for unit in units:
             unit["speaker"] = note.get("speakers", {}).get(unit["id"], speaker_default)
             unit["excluded"] = unit["id"] in excluded
+            unit["beat"] = beat_of.get(unit["id"])
             fps = source["fps_num"] / source["fps_den"]
             unit["rejected"] = rejected_hits(source, math.floor(unit["protect"][0] * fps), math.ceil(unit["protect"][1] * fps))
         catalog.append({key: source[key] for key in ("id", "path", "name", "sha256", "fps_num", "fps_den", "frames",
                                                       "duration", "width", "height", "sheet")}
-                       | {"cuts": cuts, "shots": shots, "units": units, "annotated": sid in annotations["sources"]})
+                       | {"cuts": cuts, "shots": shots, "units": units, "beats": beats,
+                          "annotated": sid in annotations["sources"]})
     write(cache_path, cache)
     value = {"sources": catalog, "annotations_digest": digest(annotations)}
     write(directory / "catalog.json", value)
@@ -543,7 +587,8 @@ def build(job: Path, state: dict, *, model=None) -> dict:
 def markdown(catalog: dict, registered: set[str]) -> str:
     lines = ["# Source catalog", "",
              "Units are clauses; `|` marks a sentence end. `in`/`out`: the clip may start before / end after this unit",
-             "(clean silence and a stable picture). `x` excluded, `R` user-rejected interval, `*` corrected text.", ""]
+             "(clean silence and a stable picture). `x` excluded, `R` user-rejected interval, `*` corrected text.",
+             "`>> Bnn` opens a beat the agent defined (kind/role: gist); units outside every beat cannot be planned.", ""]
     for source in catalog["sources"]:
         fps = source["fps_num"] / source["fps_den"]
         lines.append(f"## {source['id']} {source['name']}")
@@ -555,8 +600,18 @@ def markdown(catalog: dict, registered: set[str]) -> str:
         lines.append(f"Shots: {shots}")
         if not source["annotated"]:
             lines.append("People: not annotated yet")
+        if not source.get("beats"):
+            lines.append("Beats: none yet (the source cannot be planned until its beats are annotated)")
         lines.append("")
+        beats = {beat["units"][0]: beat for beat in source.get("beats", [])}
+        by_id = {unit["id"]: unit for unit in source["units"]}
         for unit in source["units"]:
+            if unit["id"] in beats:
+                beat = beats[unit["id"]]
+                limits = [text for text, ok in (("cannot start a clip", by_id[beat["units"][0]]["in_frames"]),
+                                                ("cannot end a clip", by_id[beat["units"][-1]]["out_frames"])) if not ok]
+                lines.append(f">> {beat['id']} {beat['units'][0]}-{beat['units'][-1]} {beat['kind']}/{beat['role']}"
+                             + (f" ({', '.join(limits)}; join a neighbour)" if limits else "") + f": {beat['gist']}")
             first = math.floor(unit["start"] * fps)
             last = math.ceil(unit["end"] * fps)
             shot_numbers = [shot["number"] for shot in source["shots"] if shot["start"] < last and shot["end"] > first]

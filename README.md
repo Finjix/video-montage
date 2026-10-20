@@ -6,14 +6,14 @@
 
 - `skill/`：完整技能，包含 `SKILL.md`、`agents/`、`scripts/`、`references/` 和 `assets/`（含运行依赖与模型）。
   - `scripts/video_montage.py`：唯一入口（`<command> --job-dir ...`）；`scripts/verify_runtime.py`：运行时自检。
-  - `scripts/montage/`：核心包。`cli` 命令行，`job` 任务与用户决定，`catalog` 素材分析（镜头切点、语音单元、可剪点、联系表），
-    `plan` 计划解析与剪点求解，`rules`/`batch` 编辑与整批规则，`render` 无包装渲染与质检，`package` 包装、校验与发布，
+  - `scripts/montage/`：核心包。`cli` 命令行，`job` 任务与用户决定，`catalog` 素材分析（镜头切点、语音单元、可剪点、联系表、口播段落 beats），
+    `plan` 计划解析与剪点求解，`rules`/`batch` 编辑规则（口播占比、段落顺序）与整批规则，`render` 无包装渲染与质检，`package` 包装、校验与发布，
     `asr`/`audio`/`bgm` 语音识别、响度与背景音乐；`packaging/` 为字幕设计与花字动画渲染。
   - `references/`：`workflow`（命令与文件格式）、`editing`（编辑规则）、`packaging`（包装、BGM、字幕）。
   - `assets/`：文本库、用户否决区间、包装素材与 `dependencies/` 运行依赖。
 - `dev/`：本地开发专用目录（测试、调试脚本）。
 
-流程：`init` → `prepare`（约 1–2 分钟）→ `annotate` → `check`（不到 1 秒，反复修改计划）→ `render` → `package`（发布）。
+流程：`init` → `prepare`（约 1–2 分钟）→ `annotate`（人物、字幕修正、口播段落 beats）→ `check`（不到 1 秒，反复修改计划；写出 `reports/scripts.md` 供通读成片文案）→ `render` → `package`（发布）。
 成片直接放在当前用户桌面的 `自动化混剪_YYYYMMDD_HHMMSS/`，旁边只有 `temp/`（任务目录，可在工单中用 `output_root` 指定其他位置）。
 修改字幕后重新运行 `package` 即可重新烧录，只重做有变化的成片。
 
