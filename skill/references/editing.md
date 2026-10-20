@@ -41,17 +41,25 @@ to an offstage partner, replies, gags), and joins such as "百分之九十九的
    not want a viewer to hear alone.
 3. Compose each video as a script from beats in this order: at most one `hook`, one or more `body`, at most one
    `payoff`, at most one `cta`; it ends on a payoff or a cta. Prefer long runs (two or three beats from one source) to many
-   short clips: fewer joins, fewer chances to lose the thread.
+   short clips: fewer joins, fewer chances to lose the thread. Build each video from one celebrity's beats; cross to a
+   second celebrity only when a join genuinely needs the hand-over (rule 4) or that celebrity's own beats cannot
+   complete the script — do not mix celebrities inside a video by default, vary the batch instead by which celebrity
+   leads each output. A payoff built as a quick tally or parallel pair ("一分钟上手，三分钟上头" and the like) still
+   carries forward in cadence even though the sentence is grammatically complete: it can close a video only when no
+   other output in the batch uses that same beat purely as a lead-in to a `cta`; otherwise give it a `cta` to land on.
 4. Join clips only when the second follows from the first (answer, cause, next step, proof, contrast...). A shared game
    name or keyword is not a link. Repeating the same claim, cutting a sentence in half or ending on a bare method
-   step ("把资源拿来升级熔炉") is not acceptable. Change the person talking only where the new speaker's first line
-   stands on its own (a payoff, a call to action, or a hand-over such as "接下来听我说").
+   step ("把资源拿来升级熔炉") is not acceptable. A clip opening with 然后/接着/随后/这样/这 continues a specific action
+   or cause the previous clip actually named (a first step such as "先砍树", a stated cause); a general claim ("攻略都
+   给你整理好了", "这游戏不一般") is not that step, so 然后 after it is a non sequitur even when both clips share a
+   topic — pick a clip that states the concrete step, or drop the connective. Change the person talking only where the
+   new speaker's first line stands on its own (a payoff, a call to action, or a hand-over such as "接下来听我说").
 5. Plan whole sentences (`|` in the catalog) in whole beats. Use a clause-level start or end only when the beat
    boundary says so.
 6. Plan the batch as a whole: vary openings, cameras, routes and closings across outputs within the limits below,
    but never trade a join's sense for variety. Reuse coherent material rather than forcing weak joins, and never
-   cycle the same edit with tiny changes. If the footage cannot make the requested count of coherent videos within
-   the limits, deliver the coherent ones and report the shortfall instead of weakening joins; never ask about reuse.
+   cycle the same edit with tiny changes. The requested count is mandatory: [reaching the count](#reaching-the-count)
+   says what to do when the first routes you find are fewer; never ask about reuse.
 
 ## Read-through (after every `check`)
 
@@ -61,6 +69,9 @@ Open `temp/reports/scripts.md` and read each video once as a viewer who has seen
 3. Does any word in B refer to something only the source's earlier lines supply (这, 那, 他们, 所以, 但是, 还有)?
 4. Is a sign-off, greeting, self-introduction or call to action sitting anywhere but its place?
 5. Do the two speakers' claims fit together (a first-person result from one person following another's story is a break)?
+6. Does the last clip's last line sound finished — a settled statement, a rhetorical question or a `cta` — rather than
+   a brisk tally or parallel pair that still implies a next line, especially a beat the batch otherwise only ever uses
+   as a lead-in to a `cta`?
 Any "no" means changing the clip, not the `reason`. Write the `reason` after you have passed the read-through; it names
 the words in A and B that connect them.
 
@@ -68,11 +79,13 @@ the words in A and B that connect them.
 
 Edit shape:
 - 1020-1800 frames (17-30 s at 60 fps), natural speed, at least 4 camera shots, every shot at least 48 frames
-  (0.8 s), longest minus shortest shot at most 300 frames (5 s). Long single-camera clips break the 5 s spread;
-  keep clips of similar length or pick clips that contain camera changes.
+  (0.8 s), longest minus shortest shot at most 480 frames (8 s). A very long single-camera clip (over 9 s) breaks
+  the spread beside short-cut clips; pair it with clips of similar shot length or clips that contain camera changes.
 - Two adjacent clips cut inside one camera shot are a jump cut, not a new shot.
-- Every clip starts and ends in clean silence on a stable picture (`in`/`out` in the catalog); the pause kept at a
-  cut is at most 0.45 s before and 0.55 s after the speech (the catalog's `in`/`out` already include this). User-rejected intervals are refused.
+- Every clip starts and ends in clean silence (`in`/`out` in the catalog) with no dissolve, flash or fast motion at the
+  edge; the pause kept at a cut is at most 0.45 s before and 0.55 s after the speech (the catalog's `in`/`out` already
+  include this). A plain camera cut near the edge is fine as long as the edge shot keeps its 48 frames. User-rejected
+  intervals are refused.
 - At least 3 different source files per video (unless the user decided otherwise).
 
 Talk and structure:
@@ -129,8 +142,34 @@ allowed reuse up to these limits, so use them freely instead of forcing weak joi
 | same clip at the same position (pairwise) | 80% |
 | whole-speech trigram similarity (pairwise) | 0.93 |
 
-So N videos need at least N/8 different openings. If the inventory cannot reach the requested count under these
-limits with coherent joins, deliver the coherent videos and report the shortfall; do not ask about reuse.
+So N videos need at least N/8 different openings. If the routes you have found do not reach the requested count under
+these limits, continue with [reaching the count](#reaching-the-count); do not ask about reuse.
+
+## Reaching the count
+
+The count the user asked for is the deliverable. A first pass that yields fewer coherent videos is a signal to dig,
+not to stop, and not to ask. Work down this ladder, re-running `annotate` and `check` after each rung, until you have
+every video:
+
+1. **Annotate every source.** A source without people and beats contributes nothing. `annotate` lists `no beats yet`
+   sources: finish them all before concluding anything about the footage. Fast talkers have few clean pauses, but most
+   sources still have several cuttable runs (`in`/`out` marks in the catalog); look for them.
+2. **Cut finer beats.** The smallest self-contained thought is often one sentence or one answer. More, shorter beats
+   are more routes, and a clip may join two or three consecutive beats back together. Give each beat its honest `role`:
+   a body beat that closes a thought is a `payoff`; a standalone opening claim is a `hook`.
+3. **Recombine.** One beat serves many videos in different routes and different company (hook A + body B + cta C, then
+   hook A + body D + cta C...), up to the batch limits. Recombine within one celebrity's own beats first; cross to a
+   second celebrity only once that celebrity's beats are exhausted or a join needs the hand-over. Put each opening,
+   body run and closing in as many coherent combinations as the limits allow before you decide a route is missing.
+4. **Pair shots of like length.** `check` prints the possible shot lengths per clip: pair a 10 s single-shot beat with
+   other long-shot beats, a fast-cut beat with fast-cut beats, and split a beat at a clean in/out pair only where both
+   halves are complete thoughts.
+5. **Weak routes, labelled.** Only when rungs 1-4 are exhausted, fill the remaining slots with the least-weak routes:
+   every clip complete and on the same topic, the link no stronger than "also about this". A dangling question,
+   teaser, pronoun without its referent or a misplaced sign-off is a break, never a weak route. Deliver them, and list
+   each by `plan_id` as weaker in the final summary so the user can swap them when more footage arrives.
+
+Never edit `requested_outputs` (a count mismatch blocks `render` on purpose) and never end with "only N fit".
 
 ## Visual review
 

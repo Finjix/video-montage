@@ -94,12 +94,27 @@ class PlanTests(unittest.TestCase):
 
     def test_spread_violation_is_explained(self):
         sources = helpers.standard_sources()
-        long_unit = helpers.unit("U05", "这是一个非常非常长的句子用来测试镜头时长的均衡规则对不对呀。", 17.0, 26.0)
+        long_unit = helpers.unit("U05", "这是一个非常非常长的句子用来测试镜头时长的均衡规则对不对呀。", 17.0, 29.0)
         sources[2]["units"].append(long_unit)
         sources[2]["beats"].append(helpers.beat("B05", ["U05"], "payoff"))
-        bad = clips(("S01", "U01"), ("S01", "U02"), ("S02", "U01-U02"), ("S03", "U01"), ("S03", "U05"))
+        bad = clips(("S01", "U01"), ("S01", "U02"), ("S02", "U01"), ("S03", "U05"))
         _, errors, _ = self.resolve([self.output(bad)], sources)
         self.assertTrue(any("frame band" in e for e in errors["P01"]), errors)
+        long_unit_ok = helpers.unit("U05", "这是一个非常非常长的句子用来测试镜头时长的均衡规则对不对呀。", 17.0, 26.0)
+        sources[2]["units"][-1] = long_unit_ok          # a 9 s single shot beside 4 s shots is inside the 8 s spread
+        _, errors, _ = self.resolve([self.output(bad)], sources)
+        self.assertNotIn("P01", errors)
+
+    def test_short_edge_shot_is_explained(self):
+        sources = helpers.standard_sources()
+        # a camera cut 0.2 s after the only possible start of S01 U01: every start option leaves a 12-frame first shot
+        sources[0]["units"][0] = helpers.unit("U01", "玩无尽冬日最重要的是什么？", 1.0, 3.6)
+        sources[0]["units"][0]["in_frames"] = [[48, 54]]
+        sources[0]["cuts"] = [66, *sources[0]["cuts"][1:]]
+        sources[0]["shots"][0]["end"] = 66
+        sources[0]["shots"][1]["start"] = 66
+        _, errors, _ = self.resolve([self.output(GOOD)], sources)
+        self.assertTrue(any("within" in e and "camera cut" in e for e in errors["P01"]), errors)
 
     def test_clip_must_be_whole_beats(self):
         sources = helpers.standard_sources()

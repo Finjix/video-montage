@@ -11,7 +11,7 @@ from montage import batch, catalog as CATALOG, rules
 from montage.common import read
 
 MIN_FRAMES, MAX_FRAMES = 1020, 1800      # 17-30 s at 60 fps, clean and final (no speed change)
-MIN_SHOTS, MIN_SHOT, MAX_SPREAD = 4, 48, 300   # shots >= 0.8 s, longest minus shortest <= 300 frames (5 s)
+MIN_SHOTS, MIN_SHOT, MAX_SPREAD = 4, 48, 480   # shots >= 0.8 s, longest minus shortest <= 480 frames (8 s)
 NAMEPLATE_FRAMES, MIN_NAMEPLATE, NAMEPLATE_GAP = 192, 48, 18
 IN_PAD, OUT_PAD = 0.10, 0.12             # preferred silence beyond the muted edge
 SAMPLES_PER_EDGE = 14
@@ -131,6 +131,11 @@ def explain(source_rows: list[tuple[dict, list[dict]]], options: list[list[dict]
         if short_inner:
             reasons.append(f"clip {index} ({source['id']} {units[0]['id']}-{units[-1]['id']}) contains a camera shot of "
                            f"{short_inner[0]} frames (< {MIN_SHOT}); start/end the clip on another unit or pick other footage")
+    for index, ((source, units), row) in enumerate(zip(source_rows, options), 1):
+        edge = max(min(o["pieces"][0], o["pieces"][-1]) for o in row)
+        if edge < MIN_SHOT:
+            reasons.append(f"clip {index} ({source['id']} {units[0]['id']}-{units[-1]['id']}) always starts or ends within {edge} "
+                           f"frames of a camera cut (< {MIN_SHOT}); cut the beat at another unit or pick other footage")
     totals = [(min(o["total"] for o in row), max(o["total"] for o in row)) for row in options]
     low, high = sum(t[0] for t in totals), sum(t[1] for t in totals)
     if high < MIN_FRAMES:
@@ -143,7 +148,7 @@ def explain(source_rows: list[tuple[dict, list[dict]]], options: list[list[dict]
     if not reasons:
         spans = [f"clip {i}: {min(min(o['pieces']) for o in row)}-{max(max(o['pieces']) for o in row)}"
                  for i, row in enumerate(options, 1)]
-        reasons.append("shot lengths cannot all fit within one 48..(+300) frame band (5 s spread); "
+        reasons.append(f"shot lengths cannot all fit within one {MIN_SHOT}..(+{MAX_SPREAD}) frame band ({MAX_SPREAD // 60} s spread); "
                        f"possible shot lengths per clip: {'; '.join(spans)}. Split long shots with more clips or shorten them")
     return reasons
 
@@ -300,7 +305,8 @@ def resolve(plan: dict, job, state: dict) -> tuple[list[dict], dict[str, list[st
     if len({str(pid).casefold() for pid in ids}) != len(ids):
         errors.setdefault("plan", []).append("plan_id values must be unique")
     if len(rows) != state["order"]["requested_outputs"]:
-        errors.setdefault("plan", []).append(f"plan has {len(rows)} outputs; the request is {state['order']['requested_outputs']}")
+        errors.setdefault("plan", []).append(f"plan has {len(rows)} outputs; the request is {state['order']['requested_outputs']} "
+                                                  "(the count is the user's: plan every requested video, never edit requested_outputs)")
     for row in rows:
         pid = row.get("plan_id") if isinstance(row, dict) else None
         try:

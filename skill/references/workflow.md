@@ -93,7 +93,8 @@ One file for all sources; re-run `annotate` with the complete file whenever you 
    "note": "optional one-line narrative"}]}
 ```
 
-- `plan_id`: letters, digits, `-` and `_`; one output per requested video.
+- `plan_id`: letters, digits, `-` and `_`; one output per requested video. The count is the user's: never edit
+  `requested_outputs` in `job.json`; a plan with fewer outputs is unfinished work, not a result.
 - A clip is a contiguous unit range of one source (`"U07-U09"`) made of whole beats. The program chooses the exact in/out frames
   inside the clean pauses so that duration, shot lengths and silent cuts hold, and maps the shots, cast and
   nameplates itself.

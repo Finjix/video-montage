@@ -90,6 +90,19 @@ class CatalogTests(unittest.TestCase):
         self.assertFalse(CATALOG.tail_stable(adjacent, endpoint, 75))
         self.assertTrue(CATALOG.tail_stable(adjacent, endpoint, 60))
 
+    def test_camera_cuts_do_not_make_an_edge_unstable(self):
+        adjacent = np.full(200, 0.004, np.float32)
+        endpoint = np.full(200, 0.01, np.float32)
+        adjacent[60] = 0.2                       # a detected camera cut
+        endpoint[48:60] = 0.4                    # every 13-frame window containing it compares two shots
+        adjacent[120] = 0.2                      # a flash or fast motion that is not a detected cut
+        masked = CATALOG.mask_cuts(adjacent, endpoint, [60])
+        self.assertTrue(CATALOG.head_stable(*masked, 40))     # the solver keeps the short first shot out, not the catalog
+        self.assertTrue(CATALOG.tail_stable(*masked, 75))
+        self.assertFalse(CATALOG.head_stable(*masked, 100))
+        self.assertFalse(CATALOG.tail_stable(*masked, 140))
+        self.assertAlmostEqual(float(adjacent[60]), 0.2, places=5)   # the input series is not modified
+
 
 class RenderHelperTests(unittest.TestCase):
     def test_video_seek_is_exact_frame_start_rounded_up(self):

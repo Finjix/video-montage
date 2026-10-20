@@ -23,7 +23,7 @@ from montage.common import FFMPEG, FFPROBE, FONT, REJECTED, digest, log, pool, p
 THUMB_W, THUMB_H = 64, 114
 CUT_DIFFERENCE = 0.07       # adjacent-frame mean difference that marks a camera cut / unstable edge
 ENDPOINT_DIFFERENCE = 0.12  # 13-frame endpoint distance at a clip edge (dissolves, fast zooms)
-EDGE_FRAMES = 30            # frames at each clip edge that must stay stable
+EDGE_FRAMES = 30            # frames at each clip edge that must stay free of dissolves, flashes and fast motion
 HOP = 0.01                  # energy envelope resolution (seconds)
 CLAUSE_PAUSE = 0.35         # a pause this long always ends a unit
 SENTENCE_PAUSE = 0.6
@@ -116,6 +116,16 @@ def camera_cuts(adjacent: np.ndarray) -> list[int]:
     return cuts
 
 
+def mask_cuts(adjacent: np.ndarray, endpoint: np.ndarray, cuts: list[int]) -> tuple[np.ndarray, np.ndarray]:
+    """A plain camera cut near a clip edge is not instability: it only makes the edge shot short, and the plan
+    solver already keeps every shot of a video at least MIN_SHOT frames long."""
+    adjacent, endpoint = adjacent.copy(), endpoint.copy()
+    for cut in cuts:
+        adjacent[cut] = 0.0
+        endpoint[max(0, cut - 12):cut] = 0.0    # endpoint[i] compares frames i and i + 12
+    return adjacent, endpoint
+
+
 def head_stable(adjacent: np.ndarray, endpoint: np.ndarray, frame: int) -> bool:
     """A clip may start at `frame`: no transition inside its first frames."""
     end = min(len(adjacent), frame + EDGE_FRAMES)
@@ -198,7 +208,7 @@ def finish_units(units: list[dict], env: np.ndarray, clock: dict, series: tuple[
         upper = units[index + 1]["words"][0]["start"] if index + 1 < len(units) else clock["duration"]
         lo, hi = island(env, limit, words[0]["start"], words[-1]["end"], lower, upper)
         unit["protect"] = [round(max(lower, lo - LEAD), 3), round(min(upper, hi + TAIL), 3)]
-    adjacent, endpoint = series
+    adjacent, endpoint = mask_cuts(*series, clock["cuts"])
     for index, unit in enumerate(units):
         before = units[index - 1]["protect"][1] if index else 0.0
         after = units[index + 1]["protect"][0] if index + 1 < len(units) else clock["duration"]

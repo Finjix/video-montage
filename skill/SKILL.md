@@ -49,19 +49,22 @@ editorial rules; [packaging](references/packaging.md) before `package`.
 5. **Coherence first.** A video is one short spoken argument: opening, body, payoff or call to action. Every join
    must make sense to a viewer who has not seen the sources: the second clip answers, continues, proves or pays off
    the first. Clips are whole beats; a question, teaser or sign-off never lands where its answer or setting is
-   missing. When coherence conflicts with variety, cast mix or a batch limit, coherence wins: ask the user (rule 6)
-   instead of padding a batch with weak joins.
-6. **Whole batch.** Deliver exactly the requested count. Every video uses at least three different source files,
-   and the batch stays within the batch limits. The user has already allowed source reuse up to those limits: never
-   ask about reuse. When the footage still cannot make that many coherent videos within them, do not weaken joins and
-   do not ask: deliver every coherent video you can, and state the count and the shortfall in the final summary.
+   missing. When coherence conflicts with variety, cast mix or a batch limit, coherence wins; find another route
+   through the beats (rule 6) instead of padding a batch with broken joins.
+6. **Whole batch: the count is not negotiable.** Deliver exactly the requested count. Never stop short, never edit
+   `requested_outputs`, never offer the user a smaller batch or a menu of rules to loosen. Every video uses at least
+   three different source files and the batch stays within the batch limits; the user has already allowed source reuse
+   up to those limits, so never ask about reuse. When you have found fewer coherent videos than the count, you have not
+   finished: work down the ladder in [editing](references/editing.md#reaching-the-count) (annotate every source, cut
+   finer beats, recombine them, pair shots of like length) until the count is met. Weak joins are the last rung, not
+   the first; deliver them labelled, never silently and never instead of the count.
 7. **Packaged by default.** A batch request means finished packaged videos (subtitles, nameplates, one text pin,
    disclaimer, BGM). Never ask whether to package. Deliver unpackaged (`package --clean`) only when the user says so.
    BGM is the pack's audio. One track serves at most eight videos of a batch (40 videos need at least five tracks);
    when the pack has none or too few, download the missing licensed commercial-ad style tracks yourself, from several
    different sources, without asking.
 8. **Persist.** Keep fixing and re-running until every requested video is published. Ask the user only for an
-   absolute blocker (say what you tried and the minimum you need). Uncertain speech, long processing or a failed
-   check are never blockers.
+   absolute blocker (say what you tried and the minimum you need). Uncertain speech, long processing, a failed check
+   or too few coherent routes so far are never blockers.
 9. **Delivery folder.** It holds only `<plan_id>.mp4` files and `temp/`. Keep your inputs in `temp/config/` and
    any scratch work in `temp/`; leave nothing elsewhere. Revisions and subtitle reburns reuse the same folder.
