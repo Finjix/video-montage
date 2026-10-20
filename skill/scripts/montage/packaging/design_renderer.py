@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import threading
 from functools import lru_cache
 from pathlib import Path
 
@@ -11,7 +12,7 @@ import cv2
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 
-from montage.common import ROOT, sha
+from montage.common import ROOT
 from montage.packaging import design, dynamic_flowers, flower_effects
 from montage.packaging import fonts as subtitle_fonts
 from montage.packaging.reference_animation import Animation, vertical_blur
@@ -142,6 +143,28 @@ def fit_sprite(sprite: Image.Image, layout: dict, *, expansion=1.0) -> Image.Ima
 
 
 
+@lru_cache(maxsize=64)
+def animation(effect: str, text: str) -> Animation:
+    return Animation(effect, text)
+
+
+_FRAMES: dict[tuple, tuple] = {}
+_LOCKS: dict[tuple, threading.Lock] = {}
+_GUARD = threading.Lock()
+
+
+def reference_frame(effect: str, text: str, n: int) -> tuple[Image.Image, float, float]:
+    """Calibrated animation frames are deterministic per effect and text: render each once per process,
+    even when parallel packaging workers ask for the same frame."""
+    key = (effect, text, n)
+    with _GUARD:
+        lock = _LOCKS.setdefault(key, threading.Lock())
+    with lock:
+        if key not in _FRAMES:
+            _FRAMES[key] = reference_piece(animation(effect, text), n)
+        return _FRAMES[key]
+
+
 def reference_piece(animation, n: int) -> tuple[Image.Image, float, float]:
     sprite = animation.sprite
     if n >= 30:
@@ -169,7 +192,7 @@ def paint_event(event: dict, frame: int) -> tuple[Image.Image, int, int]:
     scale = 1.
     if "reference" in event:
         n = 30 if progress >= 1 else min(29, int(progress * 30))
-        image, rx, ry = reference_piece(event["reference"], n)
+        image, rx, ry = reference_frame(event["reference"].effect, event["text"], n)
         ratio = event["reference_scale"]
         sprite = image.resize((max(1, round(image.width * ratio)), max(1, round(image.height * ratio))), Image.Resampling.LANCZOS)
         x = event["base_x"] + rx * ratio
@@ -212,10 +235,7 @@ def paint_event(event: dict, frame: int) -> tuple[Image.Image, int, int]:
 
 
 def prepare_track(directory: Path, cues: list[dict], value: dict, font_path: str, frames: int) -> dict:
-    events, resources = [], {str(design.CATALOG): sha(design.CATALOG)}
-    for name in ("design_renderer.py", "design.py", "segmentation.py", "fonts.py", "reference_animation.py", "dynamic_flowers.py"):
-        path = Path(__file__).parent / name
-        resources[str(path)] = sha(path)
+    events = []
     for i, (cue, setting) in enumerate(zip(cues, value["cues"]), 1):
         size = subtitle_fonts.pixels(value["font"], setting["font_size"])
         spans = [dict(span, pixels=subtitle_fonts.pixels(value["font"], span.get("font_size", setting["font_size"]))) for span in setting["spans"]]
@@ -232,19 +252,18 @@ def prepare_track(directory: Path, cues: list[dict], value: dict, font_path: str
                  "end_frame_exclusive": round(cue["end_ms"] * FPS / 1000)}
         full_ice = next((s for s in spans if s["start"] == 0 and s["end"] == len(cue["text"]) and s.get("flower") == "ice2"), None)
         if value["font"] == "w8" and full_ice and len(cue["text"]) <= 32 and effect in ("bounce_up", "shout_wave", "ice_drift") and "\n" not in cue["text"]:
-            reference = Animation(effect, cue["text"])
+            reference = animation(effect, cue["text"])
             event["font_size"] = full_ice["pixels"]
             event["reference"] = reference
             event["sprite"] = rgba(reference.sprite.rgb)
         events.append(event)
-    resources[font_path] = sha(Path(font_path))
     for event in events:
         event["entrance_frames"] = round(event["entrance"]["duration_ms"] * FPS / 1000)
         effect = event["entrance"]["effect"]
         expansion = 2.4 if effect == "shout_wave" else 1.
         if "reference" in event:
             # Fit every calibrated frame, retaining its relative displacement.
-            pieces = [reference_piece(event["reference"], n) for n in range(31)]
+            pieces = [reference_frame(event["reference"].effect, event["text"], n) for n in range(31)]
             left = min(x for _, x, _ in pieces); top = min(y for _, _, y in pieces)
             right = max(x + image.width for image, x, _ in pieces)
             bottom = max(y + image.height for image, _, y in pieces)
@@ -267,30 +286,6 @@ def prepare_track(directory: Path, cues: list[dict], value: dict, font_path: str
         event["cx"], event["cy"] = event["layout"]["x"] * WIDTH, event["layout"]["y"] * HEIGHT
         event["base_x"] = round(event["cx"] - event["sprite"].width / 2)
         event["base_y"] = round(event["cy"] - event["sprite"].height / 2)
-        if effect in ("bounce_up", "shout_wave", "ice_drift"):
-            path = PARAMETERS / f"{effect}.json"
-            resources[str(path)] = sha(path)
-            if "reference" in event:
-                static_path = PARAMETERS / "static.json"
-                resources[str(static_path)] = sha(static_path)
-                def tables(item):
-                    if isinstance(item, dict):
-                        if "table_file" in item:
-                            path = PARAMETERS / item["table_file"]
-                            if sha(path) != item["table_sha256"]:
-                                raise ValueError("calibrated animation table changed")
-                            resources[str(path)] = item["table_sha256"]
-                        for child in item.values():
-                            tables(child)
-                    elif isinstance(item, list):
-                        for child in item:
-                            tables(child)
-                tables(event["reference"].parameters)
-                tables(json.loads(static_path.read_text(encoding="utf-8")))
-    for style_id in {s["flower"] for c in value["cues"] for s in c["spans"] if s.get("flower")} | {value["game_flower"]}:
-        if style_id in ("ice1", "ice2", "fire1"):
-            path = flower_effects.ASSET_ROOT / f"{style_id}.json"
-            resources[str(path)] = sha(path)
     boundaries = {0, frames}
     for event in events:
         boundaries.update((event["start_frame"], event["end_frame_exclusive"]))
@@ -348,10 +343,4 @@ def prepare_track(directory: Path, cues: list[dict], value: dict, font_path: str
     concat += [f"file '{last_name}'", "option framerate 60"]
     target = directory / "design-track.ffconcat"
     target.write_text("\n".join(concat) + "\n", encoding="utf-8")
-    return {"path": str(target), "y": band_top, "record": {"schema": "video-montage-rendered-design/v1",
-            "font": value["font"], "subtitle_sha256": value["subtitle_sha256"], "reason": value["reason"],
-            **({"reading_policy": value["reading_policy"]} if value.get("reading_policy") else {}),
-            "ordinary_outline": {"color": "#000000", "editor_width": subtitle_fonts.EDITOR_OUTLINE_WIDTH,
-                                 "radius_pixels": subtitle_fonts.OUTLINE_PIXELS, "flower_outline": "existing_effect"},
-            "events": records, "resources": [{"path": path, "sha256": sha} for path, sha in sorted(resources.items())],
-            "game_names": value["game_names"], "cues": value["cues"], "graphic_layers": value["graphic_layers"]}}
+    return {"path": str(target), "y": band_top, "record": {"font": value["font"], "events": records, "game_names": value["game_names"], "cues": value["cues"]}}

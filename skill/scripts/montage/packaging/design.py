@@ -1,17 +1,13 @@
-"""Validate selections from the installed effect library; no task-created effects."""
+"""Validate subtitle designs against the installed effect library; no task-created effects."""
 from __future__ import annotations
 
 import copy
 import math
 import re
-from pathlib import Path
 
-from montage.common import ROOT
-from montage.media.mix import FINAL_SPEED
 from montage.packaging import fonts as subtitle_fonts
 from montage.packaging import segmentation as subtitle_segmentation
 
-CATALOG = ROOT / "assets/packaging/design/catalog.json"
 COLORS = {"yellow": "#FFDE00", "white": "#FFFFFF"}
 FLOWERS = ("ice1", "ice2", "fire1")
 ENTRANCES = ("none", "bounce_up", "shout_wave", "ice_drift")
@@ -163,56 +159,39 @@ def batch_effects(designs: list[dict]) -> dict:
     return {"animation_counts": counts, "required_animation_types": required}
 
 
-def prepare(value: dict, cues: list[dict], subtitle_sha256: str, layers: list[dict], base: Path, frames: int) -> dict:
-    if isinstance(value, dict) and value.get("needs_design_review"):
-        raise ValueError("subtitle text changed; revise subtitle_design.cues and remove needs_design_review after review")
-    if not isinstance(value, dict) or value.get("subtitle_sha256") != subtitle_sha256:
-        raise ValueError("subtitle_design must bind the reviewed subtitle SHA-256")
-    allowed = {"subtitle_sha256", "font", "game_names", "game_flower", "game_font_size", "reason", "cues",
-               "protected_regions", "graphic_layers", "needs_design_review", "reading_policy"}
-    if set(value) - allowed:
-        raise ValueError("subtitle_design only selects existing library resources; unsupported design fields: "
-                         + ", ".join(sorted(set(value) - allowed)))
-    if not isinstance(value.get("font"), str) or value["font"] not in subtitle_fonts.FONTS:
-        raise ValueError("subtitle_design.font must explicitly select w8 or fangtang")
-    if not isinstance(value.get("reason"), str) or not value["reason"].strip():
-        raise ValueError("subtitle_design requires a concrete design reason")
-    names = value.get("game_names")
-    if (not isinstance(names, list) or any(not isinstance(n, str) or not n.strip() or "\n" in n for n in names)
-            or len(names) != len(set(names))):
-        raise ValueError("game_names must be distinct nonempty strings (or an empty list for a nongame video)")
+def prepare(value: dict, cues: list[dict], frames: int) -> dict:
+    """Validate one video's design against the library rules; returns the normalized design."""
+    allowed = {"font", "game_names", "game_flower", "game_font_size", "cues", "protected_regions"}
+    if not isinstance(value, dict) or set(value) - allowed:
+        raise ValueError("design fields: " + ", ".join(sorted(allowed)))
+    if value.get("font") not in subtitle_fonts.FONTS:
+        raise ValueError(f"font must be one of {sorted(subtitle_fonts.FONTS)}")
+    names = value.get("game_names", [])
+    if not isinstance(names, list) or any(not isinstance(n, str) or not n.strip() for n in names) or len(names) != len(set(names)):
+        raise ValueError("game_names must be distinct non-empty strings")
     game_flower = value.get("game_flower", "ice2")
     if game_flower not in FLOWERS:
         raise ValueError(f"game_flower must be one of {FLOWERS}")
     requested = value.get("cues")
     if (not isinstance(requested, list) or len(requested) != len(cues)
             or any(not isinstance(row, dict) or row.get("index") != i for i, row in enumerate(requested, 1))):
-        raise ValueError("subtitle_design.cues must cover every reviewed cue in order, using 1-based indices")
+        raise ValueError("design cues must cover every subtitle cue in order (1-based index)")
     game_size = font_size(value.get("game_font_size", 9), "game_font_size")
     if game_size == 8:
         raise ValueError("game_font_size must be 9")
     styles = [cue_style(row, cue, names, game_flower, game_size) for row, cue in zip(requested, cues)]
-    if "reading_policy" in value:
-        if value["reading_policy"] != subtitle_segmentation.POLICY:
-            raise ValueError("unsupported subtitle reading_policy")
-        standalone_games = []
-        for style, cue in zip(styles, cues):
-            if normalized(cue["text"]) in {normalized(name) for name in names}:
-                standalone_games.append(style)
-                interval = cue["end_ms"] - cue["start_ms"]
-                if interval / FINAL_SPEED < 800 or (interval - style["entrance"]["duration_ms"]) / FINAL_SPEED < 600:
-                    raise ValueError("standalone game name needs 800ms final display and 600ms settled reading")
-        if len(standalone_games) > 1:
-            raise ValueError("choose at most one standalone game-name cue per video")
-    # A split game name cannot satisfy the all-occurrences guarantee.
+    standalone = [style for style, cue in zip(styles, cues) if normalized(cue["text"]) in {normalized(n) for n in names}]
+    for style, cue in zip(styles, cues):
+        if style in standalone:
+            interval = cue["end_ms"] - cue["start_ms"]
+            if interval < 800 or interval - style["entrance"]["duration_ms"] < 600:
+                raise ValueError("a standalone game-name cue needs 800 ms on screen and 600 ms settled")
+    if len(standalone) > 1:
+        raise ValueError("at most one standalone game-name cue per video")
     for name in names:
         compact = [normalized(c["text"]) for c in cues]
         if "".join(compact).count(normalized(name)) != sum(text.count(normalized(name)) for text in compact):
-            raise ValueError(f"game name is split across subtitle cues; revise subtitles before packaging: {name}")
-    if not isinstance(layers, list):
-        raise ValueError("graphic_layers must be a list")
-    if layers:
-        raise ValueError("decorative graphic_layers have been removed; use reviewed subtitle styling only")
+            raise ValueError(f"game name split across subtitle cues: {name}")
     protected = value.get("protected_regions", [])
     if not isinstance(protected, list):
         raise ValueError("protected_regions must be a list")
@@ -225,49 +204,5 @@ def prepare(value: dict, cues: list[dict], subtitle_sha256: str, layers: list[di
         start, end = region.get("start_frame", 0), region.get("end_frame_exclusive", frames)
         if type(start) is not int or type(end) is not int or not 0 <= start < end <= frames:
             raise ValueError("protected region interval is invalid")
-    return {**copy.deepcopy(value), "game_flower": game_flower, "game_font_size": game_size, "cues": styles,
-            "graphic_layers": [], "protected_regions": protected}
-
-
-def verify_sources(design: dict, cues: list[dict], asset_copy: dict, speech: str, request: str = "") -> None:
-    """Check declared copy against already hash-bound agent asset evidence."""
-    assets = {row["sha256"]: row.get("text", "") for row in asset_copy.get("assets", [])}
-    known = [speech, request, *assets.values()]
-    for name in design["game_names"]:
-        if not any(name in text for text in known):
-            raise ValueError(f"game name lacks verified source evidence: {name}")
-
-def refresh(design: dict, cues: list[dict], subtitle_sha256: str) -> dict:
-    """Keep unchanged decisions. Changed text needs new explicit design decisions."""
-    result = copy.deepcopy(design)
-    old = result.get("cues", [])
-    if len(old) != len(cues) or any(row.get("text") != cue["text"] for row, cue in zip(old, cues)):
-        result["needs_design_review"] = True
-    result["subtitle_sha256"] = subtitle_sha256
-    return result
-
-
-def evidence_frames(record: dict, speed: float, output_frames: int) -> list[int]:
-    frames = set()
-    for event in record.get("events", []):
-        start = event["start_frame"] / speed
-        end = event["end_frame_exclusive"] / speed
-        settle = (event["start_frame"] + event["entrance_frames"]) / speed
-        motion_end = min(end, settle)
-        frames.update(range(max(0, math.floor(start) - 1), min(output_frames, math.ceil(motion_end) + 2)))
-        frames.update([max(0, min(output_frames - 1, math.floor((settle + end) / 2))),
-                       max(0, min(output_frames - 1, math.ceil(end) - 1)),
-                       max(0, min(output_frames - 1, math.ceil(end)))])
-    # Intersections include entrances and static overlaps between independent layers.
-    events = record.get("events", [])
-    for i, a in enumerate(events):
-        for b in events[:i]:
-            left, right = max(a["start_frame"], b["start_frame"]), min(a["end_frame_exclusive"], b["end_frame_exclusive"])
-            if left < right:
-                frames.add(min(output_frames - 1, round((left + right) / 2 / speed)))
-    return sorted(frames)
-
-
-def review_ok(record: dict | None, finding: dict | None) -> bool:
-    return not record or bool(finding and finding.get("design_pass") is True
-                             and isinstance(finding.get("design_reason"), str) and finding["design_reason"].strip())
+    return {**copy.deepcopy(value), "game_names": names, "game_flower": game_flower, "game_font_size": game_size,
+            "cues": styles, "protected_regions": protected}

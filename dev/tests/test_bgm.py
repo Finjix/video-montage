@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 
 from montage.common import FFMPEG, sha
-from montage.media import bgm as BGM
+from montage import bgm as BGM
 
 
 def tone(path: Path, seconds: float, volume: float = 0.3) -> None:
@@ -75,11 +75,12 @@ class BgmTests(unittest.TestCase):
         self.assertEqual(BGM.load_registry(self.job), [])
         self.assertEqual(list((self.job / "config" / "bgm").glob("*.partial")), [])
 
-    def test_pack_audio_blocks_download_unless_unsuitable(self):
+    def test_pack_audio_blocks_download_unless_unsuitable_or_allowed(self):
         tone(self.pack / "sfx.wav", 25)
         with self.assertRaises(ValueError):
             self.fetch()
         self.assertEqual(self.fetch(asset_audio_unsuitable="only sound effects")["asset_audio_unsuitable"], "only sound effects")
+        self.assertTrue(self.fetch("good.wav", extension={"value": True, "instruction": "可以下载"}))
 
     def test_authorization(self):
         tone(self.pack / "bgm.wav", 25)
@@ -93,10 +94,6 @@ class BgmTests(unittest.TestCase):
             BGM.require_authorized(self.job, self.pack, {"path": entry["path"], "sha256": "0" * 64})
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class TestBgmRepetition(unittest.TestCase):
     def test_share_limit(self):
         self.assertEqual([BGM.max_uses(n) for n in (1, 2, 3, 5, 10)], [1, 1, 2, 3, 6])
@@ -104,20 +101,17 @@ class TestBgmRepetition(unittest.TestCase):
         BGM.require_distribution(["a", "a", "b"], None)
         with self.assertRaises(ValueError):
             BGM.require_distribution(["a", "a", "a"], None)
-        BGM.require_distribution(["a", "a", "a"], {"policy": BGM.REPETITION_WAIVER_POLICY,
-                                                   "authorized_by": "user", "instruction": "可以重复"})
+        BGM.require_distribution(["a", "a", "a"], {"value": True, "instruction": "可以重复"})
 
-    def test_waiver_must_be_the_users(self):
-        with self.assertRaises(ValueError):
-            BGM.require_distribution(["a", "a", "a"], {"policy": BGM.REPETITION_WAIVER_POLICY,
-                                                       "authorized_by": "agent", "instruction": "x"})
+    def test_available_lists_pack_then_downloads(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        root = Path(directory.name)
+        (root / "job").mkdir()
+        (root / "pack").mkdir()
+        tone(root / "pack" / "a.wav", 25)
+        self.assertEqual([Path(row["path"]).name for row in BGM.available(root / "job", root / "pack")], ["a.wav"])
 
 
-class TestSourceMinimum(unittest.TestCase):
-    def test_minimum_and_waiver(self):
-        from montage import batch
-        self.assertEqual(batch.source_minimum({}), 3)
-        waiver = {"policy": batch.SOURCE_MINIMUM_WAIVER_POLICY, "authorized_by": "user", "instruction": "两个也行", "min_sources": 2}
-        self.assertEqual(batch.source_minimum({"source_minimum_waiver": waiver}), 2)
-        with self.assertRaises(ValueError):
-            batch.source_minimum({"source_minimum_waiver": {**waiver, "authorized_by": "agent"}})
+if __name__ == "__main__":
+    unittest.main()

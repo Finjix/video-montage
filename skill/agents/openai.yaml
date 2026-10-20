@@ -1,6 +1,6 @@
 interface:
   display_name: "Video Montage"
-  short_description: "Autonomous Chinese spoken-word montage batches with subtitle packaging and final QC"
-  default_prompt: "Use $video-montage to produce or repair this video montage batch."
+  short_description: "Chinese spoken-word celebrity montage batches with subtitles, overlays and BGM"
+  default_prompt: "Use $video-montage to produce or revise this video montage batch."
 policy:
   allow_implicit_invocation: true

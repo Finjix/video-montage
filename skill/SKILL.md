@@ -1,101 +1,56 @@
 ---
 name: video-montage
-description: Produce, repair and reburn batches of Chinese spoken-word celebrity montage videos with native-frame editing, agent-driven speech, semantic and visual review, subtitle and overlay packaging (default) and post-encode QC.
+description: Produce, revise and reburn batches of Chinese spoken-word celebrity montage videos (17-30 s, 1440x2560, 60 fps) from source footage, with subtitles, nameplates, text pins, disclaimer and BGM.
 ---
 
 # Video montage
 
 ## Runtime
 
-- Run every script with the bundled `assets/dependencies/python/python.exe`. The suite root is the
-  directory containing this file; resolve scripts, assets and dependencies from it.
-- Never substitute system Python, task-local renderers, hand-edited state or plans, or direct
-  replacement of delivered files.
-- Independent FFmpeg work (clean renders, packaging encodes, frame evidence) runs concurrently,
-  by default `min(4, CPU cores / 4)` jobs. Set `VIDEO_MONTAGE_WORKERS=1` on low-memory machines.
+- Run everything with the bundled Python from this folder (the suite root):
+  `assets/dependencies/python/python.exe scripts/video_montage.py <command> --job-dir <job_dir> ...`
+- The scripts do all media work, timing and checks. Your job is the editorial judgment: read the catalog and
+  sheets, correct the transcript, tag people, compose the plan and the packaging choices. Never write your own
+  search, render or review scripts; `check` answers in under a second, so iterate with it.
+- Write every file you author (annotations, plan, packaging config) in English, except speech and subtitle text.
+  Reply to the user in the user's language.
 
 ## Workflow
 
-Run every job through `scripts/video_montage.py <command>`; read the
-[workflow](references/workflow.md) first. `init` binds the current policy versions into
-the work order, state, source index, plan, evidence and reviews; never delete, rename or change a
-policy marker to pass a gate. Jobs from earlier versions of this skill are not supported.
+Read [workflow](references/workflow.md) for commands and file formats; [editing](references/editing.md) for the
+editorial rules; [packaging](references/packaging.md) before `package`.
 
-## Non-negotiable rules
+1. `init --work-order -` (JSON on stdin) creates `<Desktop>/自动化混剪_YYYYMMDD_HHMMSS/temp` (the job dir).
+2. `prepare` (about 1-2 min) writes `temp/catalog/catalog.md`, one sheet per source and `assets.jpg`.
+3. Read the whole catalog and every sheet, then `annotate --file` with people per source/shot and transcript fixes.
+4. Write the plan and run `check --plan` until it reports no problems.
+5. `render --plan` makes the clean videos, subtitle drafts and one cut sheet per output. Look at every cut sheet
+   and subtitle file; fix the plan or the subtitle files and re-run (only changed outputs are redone).
+6. `package [--config]` packages, checks and publishes every video into the delivery folder. Look at the packaged
+   sheets; adjust the config and re-run if a layout covers a face or a cue reads badly.
 
-1. **Honest review.** The agent itself inspects the actual ASR, native frames, asset copy, candidate
-   evidence and final encoded evidence, and signs reviews with `reviewer_role: "agent"`. Never claim
-   an independent reviewer, human listening or forced alignment. Booleans and keyword matches are
-   not judgments: every finding needs a concrete reason.
-2. **ASR is a draft.** Keep raw ASR immutable and review real speech separately. When wording cannot
-   be fully confirmed, infer the most likely words from ASR, adjacent dialogue, scene context and
-   fixed spellings, record the inference and its basis, and continue. Never ask the user for a
-   transcript, and never replace real speech with ad copy.
-3. **Frame authority.** Every source segment binds original-source SHA-256, integer native frame
-   bounds and source FPS. Seconds-only cuts, stale evidence and incomplete speech are hard failures,
-   as are ranges in `assets/rejected-source-intervals.json` (matched by source hash
-   and frames; renaming never bypasses them). Sources must decode at a constant frame rate from
-   timestamp 0; otherwise create a traceable CFR copy and prepare again.
-4. **Edit shape.** Clean input and final delivery are both 1020–1800 frames (17–30 s at 60 fps,
-   natural speed); at least four real visual shots. No freezes, slow motion, repeated
-   source frames, half sentences or filler.
-5. **Final delivery, no speed-up.** The packaged video keeps the clean timeline (speed 1.0); picture
-   and mix are never accelerated. Final ASR, audio, frames, manifests and hashes describe the output.
-6. **Full packaging by default.** A request to run a batch means complete packaged finished videos
-   (subtitles, nameplates, text pins, disclaimer, BGM); never ask the user whether
-   to package, and never ask for confirmation of defaults. BGM comes from the asset pack; when the pack
-   has no audio, download a commercial-use track yourself ([packaging](references/packaging.md#bgm)).
-   BGM must be a light, playful, fashionable, strongly grooving commercial-ad style track, never calm or ambient.
-   One track may serve at most 67% of the batch's videos (for 3 videos, at most 2): use more tracks.
-   When the pack has audio but too few tracks for that limit, ask the user whether you may add licensed downloads. Deliver unpackaged videos only when the
-   user explicitly says no packaging. Packaging writes a separate output and preserves the clean video;
-   subtitles are burned into the picture only. Add extra audio or overlays beyond the asset pack (and that one BGM fallback) only
-   when the user asks.
-7. **Whole batch.** Deliver exactly the requested count; coherent, logical before-and-after meaning
-   comes first. Every output draws on at least **three** distinct original files. When the inventory truly
-   cannot meet a limit (the three-source minimum, the batch reuse limits, the BGM share), stop and ask the user
-   whether to allow reuse / fewer sources / more BGM; record only their answer in the work order and never grant
-   it yourself ([batch review](references/batch-review.md)). There is no single/multi-celebrity ratio. Never report a partial batch as complete,
-   invent approvals, or bypass a gate.
-8. **Persist until done.** Once a task starts, keep repairing and rebuilding until every requested
-   video passes; there is no retry ceiling and no need to ask permission to continue. A rejected
-   command or review means "fix and continue". Stop when the user says so. Ask the user only when an
-   absolute blocker prevents all remaining useful work after repairs and alternatives are exhausted;
-   then report the blocker, what was tried and the minimum input needed. Insufficient footage or BGM under rule 7 is
-   such a case: ask once with the numbers, then continue with the user's answer. Uncertain speech, ASR
-   disagreement, being unable to listen, a failed round or long processing are never blockers.
+## Rules
 
-## Delivery layout
-
-New jobs deliver to `<Desktop>/自动化混剪_YYYYMMDD_HHMMSS/` (the user's Desktop, or the work order's
-`output_root`; Beijing time; a same-second collision is refused, never overwritten):
-
-| Path | Content |
-| --- | --- |
-| `<plan_id>.mp4` | the finished videos (packaged; the accelerated clean videos when not packaged), directly in the delivery folder so opening it shows them at once |
-| `temp/` | the only other entry: the job directory (`job_dir`) with state, work order, `config/`, `manifests/`, evidence, reviews, reports, `clean/` (unaccelerated clean MP4s, reburn inputs) and `subtitles/` (editable `subtitle-<plan_id>.txt` and the extensionless file `修改字幕后让AI重新烧录`) |
-
-- Never put anything but the finished MP4s and `temp/` in the delivery folder. All subdirectories of `temp/` use English names. Never write loose files next to the
-  batch directories: put helper scripts in `<job_dir>/scripts/`, input JSON in `<job_dir>/config/`,
-  previews, contact sheets and scans in `<job_dir>/evidence/`, and logs in an English subdirectory.
-  Before a job exists, pass the work order to `init --work-order -` on stdin. Resolve helper paths
-  from explicit project/job roots, not the helper's own location.
-- Repairs and reburns reuse the same delivery directory. Work happens in staging; `complete`
-  publishes the whole approved batch at once, rolls back on a replacement error, and invalidates
-  stale completion receipts.
-- After a successful completion the workflow deletes disposable evidence and keeps the completion
-  receipt with its final findings, `config/`, the reburn `manifests/`, the work order and minimal
-  state. Delete your own disposable helpers too and confirm nothing was left outside the batch directory. Deleted
-  evidence is never reused; a full repair regenerates it.
-
-## References
-
-Read the workflow first; open the others when the stage needs them:
-
-- [workflow](references/workflow.md): commands, stage gates, review formats, recovery, repair, reburn
-- [speech review](references/speech-review.md) and [text library](references/text-library.md): source, candidate and clean speech reviews
-- [planning](references/planning.md): plan format and editorial rules
-- [batch review](references/batch-review.md): inventory, reuse limits, opening capacity
-- [celebrities](references/celebrities.md): cast, supporting actors, nameplates
-- [audio cleanup](references/audio-cleanup.md) and [audio balance](references/audio-balance.md)
-- [packaging](references/packaging.md) and [packaging design](references/packaging-design.md): needed for every packaged batch (the default)
+1. **Honest work.** Judge from the catalog, sheets and transcripts you actually read. Never claim you listened,
+   that a person reviewed, or that something passed that you did not check.
+2. **ASR is a draft.** Correct misrecognitions in `annotate` from context, the fixed spellings in
+   `assets/text-library.json` and the scene. When unsure, choose the most likely words and continue; list those
+   inferences and their basis in the final summary. Never ask the user for a transcript and never put words in a
+   speaker's mouth (no ad copy, no invented lines).
+3. **Edit shape.** Each video is 17-30 s at natural speed, built from complete sentences with at least four real
+   camera shots; no freezes, slow motion, repeated frames, half sentences or filler. `check` enforces the
+   frame-level rules (clean silent cuts, stable edges, shot lengths, user-rejected intervals).
+4. **Coherence first.** Every cut must make logical before-and-after sense. When coherence conflicts with
+   variety or cast mix, coherence wins. There is no single/multi-celebrity ratio.
+5. **Whole batch.** Deliver exactly the requested count. Every video uses at least three different source files,
+   and the batch stays within the reuse limits. When the footage truly cannot meet a limit, or the asset pack has
+   too few BGM tracks for the 67% share rule, stop and ask the user once with the numbers; record only their answer
+   with `decide`. Never grant yourself an exception.
+6. **Packaged by default.** A batch request means finished packaged videos (subtitles, nameplates, one text pin,
+   disclaimer, BGM). Never ask whether to package. Deliver unpackaged (`package --clean`) only when the user says so.
+   BGM is the pack's audio; if the pack has none, download a licensed commercial-ad style track yourself.
+7. **Persist.** Keep fixing and re-running until every requested video is published. Ask the user only for an
+   absolute blocker (say what you tried and the minimum you need). Uncertain speech, long processing or a failed
+   check are never blockers.
+8. **Delivery folder.** It holds only `<plan_id>.mp4` files and `temp/`. Keep your inputs in `temp/config/` and
+   any scratch work in `temp/`; leave nothing elsewhere. Revisions and subtitle reburns reuse the same folder.

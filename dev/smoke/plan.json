@@ -1,0 +1,173 @@
+{
+ "outputs": [
+  {
+   "plan_id": "P01",
+   "clips": [
+    {
+     "source": "S08",
+     "units": "U06"
+    },
+    {
+     "source": "S08",
+     "units": "U13"
+    },
+    {
+     "source": "S04",
+     "units": "U07"
+    },
+    {
+     "source": "S03",
+     "units": "U19"
+    },
+    {
+     "source": "S03",
+     "units": "U21"
+    },
+    {
+     "source": "S08",
+     "units": "U38-U39"
+    }
+   ],
+   "transitions": [
+    {
+     "relation": "question_answer",
+     "reason": "clip 2 answers what matters most in the game: temperature comes first"
+    },
+    {
+     "relation": "explanation",
+     "reason": "explains how to raise temperature: chopping trees lights the furnace"
+    },
+    {
+     "relation": "progression",
+     "reason": "然后 moves from the lit furnace to gathering survivors as the next step"
+    },
+    {
+     "relation": "cause_effect",
+     "reason": "more survivors make combat power climb, the result of the method"
+    },
+    {
+     "relation": "payoff",
+     "reason": "closes on the game name and its stress-relief benefit for middle-aged men"
+    }
+   ]
+  },
+  {
+   "plan_id": "P02",
+   "clips": [
+    {
+     "source": "S01",
+     "units": "U06"
+    },
+    {
+     "source": "S08",
+     "units": "U33"
+    },
+    {
+     "source": "S08",
+     "units": "U34-U35"
+    },
+    {
+     "source": "S08",
+     "units": "U26"
+    },
+    {
+     "source": "S04",
+     "units": "U19-U20"
+    },
+    {
+     "source": "S08",
+     "units": "U36"
+    },
+    {
+     "source": "S08",
+     "units": "U43-U44"
+    }
+   ],
+   "transitions": [
+    {
+     "relation": "question_answer",
+     "reason": "the question which game to play is answered with 无尽冬日 being simple"
+    },
+    {
+     "relation": "claim_support",
+     "reason": "one minute to learn and three to get hooked supports the simplicity claim"
+    },
+    {
+     "relation": "claim_support",
+     "reason": "one-tap idling when busy is a further concrete reason it is easy"
+    },
+    {
+     "relation": "benefit",
+     "reason": "no download and tap to play adds the access benefit"
+    },
+    {
+     "relation": "progression",
+     "reason": "after naming the access benefit it tells viewers where to tap right now"
+    },
+    {
+     "relation": "payoff",
+     "reason": "ends on the game name and the promise of instant fun"
+    }
+   ]
+  },
+  {
+   "plan_id": "P03",
+   "clips": [
+    {
+     "source": "S01",
+     "units": "U15"
+    },
+    {
+     "source": "S08",
+     "units": "U06"
+    },
+    {
+     "source": "S08",
+     "units": "U13"
+    },
+    {
+     "source": "S04",
+     "units": "U07"
+    },
+    {
+     "source": "S02",
+     "units": "U27"
+    },
+    {
+     "source": "S04",
+     "units": "U19-U20"
+    },
+    {
+     "source": "S08",
+     "units": "U43-U44"
+    }
+   ],
+   "transitions": [
+    {
+     "relation": "progression",
+     "reason": "after the three hundred million players hook it asks what matters most in the game"
+    },
+    {
+     "relation": "question_answer",
+     "reason": "answers the question: temperature is the top priority"
+    },
+    {
+     "relation": "explanation",
+     "reason": "explains that chopping trees lights the furnace which gives temperature"
+    },
+    {
+     "relation": "cause_effect",
+     "reason": "with the furnace lit the temperature keeps rising"
+    },
+    {
+     "relation": "benefit",
+     "reason": "adds the access benefit: no download needed, tap to play"
+    },
+    {
+     "relation": "payoff",
+     "reason": "closes on the game name and the promise of instant fun"
+    }
+   ]
+  }
+ ]
+}

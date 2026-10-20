@@ -17,20 +17,16 @@ REQUIRED = (
     "assets/dependencies/models/Qwen3-ASR-1.7B/config.json",
     "assets/dependencies/models/Qwen3-ForcedAligner-0.6B/model.safetensors",
     "assets/dependencies/models/Qwen3-ForcedAligner-0.6B/config.json",
-    "assets/dependencies/models/silero-vad/silero_vad_v6.onnx",
     "SKILL.md",
     "assets/text-library.json",
     "assets/rejected-source-intervals.json",
     "assets/packaging/design/catalog.json",
     *(f"assets/packaging/animations/parameters/{name}.json" for name in ("static", "bounce_up", "shout_wave", "ice_drift")),
     "scripts/video_montage.py",
-    *(f"scripts/montage/{name}.py" for name in ("common", "workflow", "planning", "cast", "batch", "speech",
-                                                 "text_library", "content_gate", "rejected_intervals")),
-    *(f"scripts/montage/media/{name}.py" for name in ("asr", "silero_vad", "timing", "frame_plan", "renderer",
-                                                       "audio_cleanup", "audio_balance", "mix")),
-    *(f"scripts/montage/packaging/{name}.py" for name in ("packager", "design", "design_renderer", "fonts", "segmentation",
-                                                           "dynamic_flowers", "flower_effects", "reference_animation",
-                                                           "delivery_files")),
+    *(f"scripts/montage/{name}.py" for name in ("common", "cli", "job", "catalog", "asr", "plan", "rules", "batch",
+                                                 "render", "audio", "package", "bgm", "text_library")),
+    *(f"scripts/montage/packaging/{name}.py" for name in ("design", "design_renderer", "fonts", "segmentation",
+                                                           "dynamic_flowers", "flower_effects", "reference_animation")),
 )
 
 
@@ -99,7 +95,7 @@ def verify() -> dict:
     failures.extend(packaging_resources())
     if sys.version_info[:3] != (3, 13, 15) or sys.maxsize <= 2**32:
         failures.append("bundled 64-bit Python 3.13.15 required")
-    for name in ("torch", "transformers", "qwen_asr", "soundfile", "numpy", "PIL", "av", "cv2", "onnxruntime", "yaml"):
+    for name in ("torch", "transformers", "qwen_asr", "numpy", "PIL", "cv2"):
         try:
             importlib.import_module(name)
         except Exception as exc:
@@ -113,10 +109,11 @@ def verify() -> dict:
     ffmpeg = ROOT / "assets/dependencies/ffmpeg/bin/ffmpeg.exe"
     if ffmpeg.is_file():
         filters = subprocess.run([str(ffmpeg), "-hide_banner", "-filters"], capture_output=True, text=True)
-        if filters.returncode or any(f" {name} " not in filters.stdout for name in ("ass", "overlay", "amix", "loudnorm")):
-            failures.append("FFmpeg montage/packaging filters unavailable: ass, overlay, amix, loudnorm")
+        needed = ("overlay", "amix", "loudnorm", "aeval", "concat", "trim", "atrim")
+        if filters.returncode or any(f" {name} " not in filters.stdout for name in needed):
+            failures.append("FFmpeg filters unavailable: " + ", ".join(needed))
     failures.extend(asr_model_failures())
-    return {"schema": "video-montage-runtime-check/v260928", "decision": "pass" if not failures else "reject", "failures": failures}
+    return {"decision": "pass" if not failures else "reject", "failures": failures}
 
 
 if __name__ == "__main__":

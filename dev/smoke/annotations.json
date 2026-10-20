@@ -1,0 +1,8 @@
+{"sources": {
+  "S01": {"people": ["person:wu-yue"], "shots": {"2": {"people": ["person:wu-yue", "person:crew"]}, "3": {"people": ["person:wu-yue", "person:crew"]},
+          "4": {"people": ["person:wu-yue", "person:crew"]}, "6": {"people": ["person:wu-yue", "person:crew"]}, "7": {"people": ["person:wu-yue", "person:crew"]},
+          "9": {"people": ["person:wu-yue", "person:crew"]}, "10": {"people": ["person:wu-yue", "person:crew"]}, "11": {"people": ["person:wu-yue", "person:crew"]}},
+          "text": {"U12": "樾哥，", "U30": "称霸冰原，"}},
+  "S02": {"people": ["person:wu-yue"]}, "S03": {"people": ["person:wu-yue"]}, "S04": {"people": ["person:wu-yue"]}, "S05": {"people": ["person:wu-yue"]},
+  "S06": {"people": ["person:lin-zi-cong"]}, "S07": {"people": ["person:lin-zi-cong"]},
+  "S08": {"people": ["person:xu-jun-cong"]}, "S09": {"people": ["person:xu-jun-cong"]}, "S10": {"people": ["person:xu-jun-cong"]}}}

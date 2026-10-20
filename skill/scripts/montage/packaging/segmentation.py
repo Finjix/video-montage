@@ -1,7 +1,6 @@
-"""Speech-bound subtitle proposals, measured at the calibrated display sizes.
+"""Subtitle cue proposals from timed words, measured at the calibrated display sizes.
 
-Punctuation and pauses propose boundaries; they are not displayed or allowed to
-change spoken text. The agent reviews the resulting phrases before packaging.
+Punctuation and pauses propose boundaries; they are not displayed and never change the spoken text.
 """
 from __future__ import annotations
 
@@ -10,8 +9,6 @@ import re
 
 from PIL import ImageFont
 
-from montage import text_library
-from montage.media.mix import FINAL_SPEED
 from montage.packaging import fonts as subtitle_fonts
 MIN_READ_MS = 800
 MAX_LINE_CHARACTERS = 10
@@ -124,6 +121,8 @@ def split_shot(shot: dict, *, names: tuple[str, ...] = GAME_NAMES, font: str | N
         forbidden.update(i for i in range(match.start() + 1, match.end()) if i not in spaces)
     for match in QUANTITY.finditer(text):
         forbidden.update(range(match.start() + 1, match.end()))
+    # Reduplicated characters (蹭蹭, 哈哈) are one word.
+    forbidden.update(i for i in range(1, len(text)) if text[i] == text[i - 1])
     # Genuine punctuation remains available even when a phrase dictionary match
     # accidentally spans two utterances.
     forbidden.difference_update(punctuation)
@@ -153,7 +152,7 @@ def split_shot(shot: dict, *, names: tuple[str, ...] = GAME_NAMES, font: str | N
                 # may not be attached to only the beginning of the next clause.
                 if crossed and (start not in clause_edges or end not in clause_edges):
                     continue
-                duration = (times[end - 1][1] - times[start][0]) * 1000 / FINAL_SPEED
+                duration = (times[end - 1][1] - times[start][0]) * 1000
                 penalty = 8. + max(0, MIN_READ_MS - duration) / 15
                 penalty += max(0, TARGET_READ_MS[0] - duration) / 450
                 penalty += max(0, duration - TARGET_READ_MS[1]) / 800
@@ -174,25 +173,12 @@ def split_shot(shot: dict, *, names: tuple[str, ...] = GAME_NAMES, font: str | N
     return rows
 
 
-def caption_rows(asr: dict, *, names: tuple[str, ...] = GAME_NAMES, font: str | None = None) -> list[dict]:
-    protected = text_library.protected_terms(asr.get("text_library"))
-    observations = asr.get("shot_observations") or [{"output_in_frame": 0, "asr": asr}]
-    if asr.get("review_basis") == "agent-speech-review/v1":
-        if any(not isinstance(shot.get("reviewed_asr"), dict) for shot in observations):
-            raise ValueError("reviewed caption timing requires every shot's reviewed speech")
-        # Keep original recognition in QC; captions use the approved text/times.
-        observations = [{**shot, "asr": shot["reviewed_asr"]} for shot in observations]
-    result = [row for shot in observations for row in split_shot(shot, names=names, font=font, protected_terms=protected)]
-    text_library.require_complete_terms(result, protected, lambda text: "".join(TOKEN.findall(text)))
-    return result
-
-
-def reading_issues(cues: list[dict], *, speed: float = FINAL_SPEED) -> list[dict]:
+def reading_issues(cues: list[dict]) -> list[dict]:
     issues = []
     for index, cue in enumerate(cues, 1):
         if character_count(cue["text"]) > MAX_LINE_CHARACTERS:
             issues.append({"index": index, "code": "line_character_limit", "text": cue["text"]})
-        duration = (cue["end_ms"] - cue["start_ms"]) / speed
+        duration = cue["end_ms"] - cue["start_ms"]
         if duration < MIN_READ_MS:
             issues.append({"index": index, "code": "short_reading", "final_duration_ms": round(duration)})
         if BAD_HEAD.match(cue["text"]):

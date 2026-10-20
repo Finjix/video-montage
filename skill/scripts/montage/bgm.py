@@ -1,9 +1,7 @@
 """Background music: the asset pack's own audio, or a commercial-use track the agent downloads.
 
-Packaging mixes one BGM per video. It comes from the asset pack; when the pack holds no audio the
-agent downloads a track whose license allows commercial use without attribution, registers it with
-`fetch-bgm` (the license evidence is recorded beside the job's configs) and names it in the packaging
-config. `package` accepts only those two origins.
+Downloads are registered with `fetch-bgm` (license evidence kept in config/bgm/); `package` accepts
+only those two origins and spreads the batch so no track serves more than 67% of the videos.
 """
 
 from __future__ import annotations
@@ -15,8 +13,8 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from montage.audio import pcm
 from montage.common import probe, read, sha, write
-from montage.media.mix import pcm
 
 SCHEMA = "video-montage-bgm-licenses/v1"
 AUDIO_SUFFIXES = {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus"}
@@ -35,8 +33,6 @@ ALIASES = {"cc0": "cc0", "cc01": "cc0", "cc010": "cc0", "cczero": "cc0",
            "pixabay": "pixabay", "pixabaylicense": "pixabay", "pixabaycontentlicense": "pixabay",
            "mixkit": "mixkit", "mixkitlicense": "mixkit"}
 MAX_TRACK_SHARE = 0.67  # no single track on more than 67% of a batch's videos
-REPETITION_WAIVER_POLICY = "explicit-user-bgm-repetition-waiver/v1"
-EXTENSION_POLICY = "explicit-user-bgm-extension/v1"
 FORMAT_SUFFIX = {"mp3": ".mp3", "wav": ".wav", "flac": ".flac", "ogg": ".ogg", "aac": ".aac", "mov": ".m4a"}
 
 
@@ -78,15 +74,6 @@ def duration(path: Path) -> float:
     return round(float(info["format"]["duration"]), 3)
 
 
-def require_waiver(value, policy: str) -> None:
-    """Optional user decision recorded in the work order; the agent never writes it unasked."""
-    if value is None:
-        return
-    if (not isinstance(value, dict) or value.get("policy") != policy or value.get("authorized_by") != "user"
-            or not isinstance(value.get("instruction"), str) or not value["instruction"].strip()):
-        raise ValueError(f"{policy} needs the user's explicit instruction")
-
-
 def max_uses(outputs: int) -> int:
     """Most videos one track may serve (a single video cannot be diversified)."""
     return outputs if outputs < 2 else max(1, math.floor(outputs * MAX_TRACK_SHARE + 1e-9))
@@ -98,14 +85,24 @@ def tracks_needed(outputs: int) -> int:
 
 def require_distribution(shas: list[str], waiver) -> None:
     """Reject a batch where one BGM covers more than 67% of the videos, unless the user accepted it."""
-    require_waiver(waiver, REPETITION_WAIVER_POLICY)
-    if waiver is not None or len(shas) < 2:
+    if waiver or len(shas) < 2:
         return
     worst = max(shas.count(item) for item in set(shas))
     if worst > max_uses(len(shas)):
         raise ValueError(f"BGM repetition: one track serves {worst} of {len(shas)} videos (limit {max_uses(len(shas))}, "
                          f"{MAX_TRACK_SHARE:.0%}); use at least {tracks_needed(len(shas))} different tracks. "
-                         "If the pack has too few, ask the user whether you may add licensed downloads")
+                         "If the pack has too few, ask the user whether you may add licensed downloads "
+                         "(record the answer with `decide --key bgm_downloads` or `--key bgm_repetition`)")
+
+
+def available(job: Path, asset_root: Path) -> list[dict]:
+    """Every usable track: pack audio first, then registered downloads."""
+    rows, seen = [], set()
+    for row in [*asset_audio(asset_root), *load_registry(job)]:
+        if row["sha256"] not in seen:
+            seen.add(row["sha256"])
+            rows.append(row)
+    return rows
 
 
 def status(job: Path, asset_root: Path, outputs: int = 1, extension=None) -> dict:
@@ -141,12 +138,11 @@ def acquire(job: Path, asset_root: Path, *, extension=None, url: str | None, fil
     if bool(url) == bool(file):
         raise ValueError("give exactly one of --url (direct audio link) or --file (already downloaded)")
     pack = asset_audio(asset_root)
-    require_waiver(extension, EXTENSION_POLICY)
-    if pack and extension is None and not (asset_audio_unsuitable or "").strip():
+    if pack and not extension and not (asset_audio_unsuitable or "").strip():
         raise ValueError("the asset pack already has audio; use it as the BGM, or state in "
                          f"--asset-audio-unsuitable why none of it can be (found: {[row['path'] for row in pack]}). "
                          "When the pack has too few tracks for the 67% repetition limit, ask the user whether you may "
-                         "add licensed downloads; only their yes (bgm_extension_authorization in the work order) allows it")
+                         "add licensed downloads; only their yes (`decide --key bgm_downloads`) allows it")
     chosen = license_id(license)
     for label, value in (("--license-url", license_url), ("--source-page", source_page)):
         if urllib.parse.urlparse(value or "").scheme not in {"http", "https"}:
