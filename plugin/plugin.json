@@ -1,0 +1,24 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "video-montage",
+  "version": "0.2.0",
+  "description": "Create and revise batches of Chinese spoken-word montage videos with subtitles, animated text and background music on Windows. Required runtimes and models download automatically when used.",
+  "author": {"name": "Finjix", "url": "https://github.com/Finjix"},
+  "repository": "https://github.com/Finjix/video-montage",
+  "extensions": {
+    "com.openai": {
+      "requires_local_executor": true,
+      "interface": {
+        "displayName": "Video Montage",
+        "shortDescription": "中文口播视频批量混剪与字幕包装",
+        "longDescription": "为中文口播素材制作成批混剪视频，支持素材分析、语音识别与校正、剪辑计划检查、字幕、花字动画和背景音乐。需要 Windows 10/11 64 位及本地素材。首次使用相关功能时自动下载运行依赖和模型；已缓存资源可离线复用。",
+        "developerName": "Finjix",
+        "category": "Productivity",
+        "capabilities": [],
+        "logo": "./assets/icon.svg",
+        "composerIcon": "./assets/icon.svg",
+        "defaultPrompt": "根据我的口播素材制作带字幕和背景音乐的混剪视频。"
+      }
+    }
+  }
+}

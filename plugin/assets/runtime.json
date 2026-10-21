@@ -1,0 +1,550 @@
+{
+  "schema": 1,
+  "python": "3.13.15",
+  "uv": "0.13.4",
+  "animations_revision": "31afb920cc5570166976e3310c236e2c657b4293",
+  "ffmpeg": {
+    "version": "9.0.2",
+    "files": {
+      "ffmpeg.exe": {
+        "size": 105423872,
+        "sha256": "3256173f3f8bffd7df12227c68adf68025edb1832273a9530688a7bb1ed8edec",
+        "urls": []
+      },
+      "ffprobe.exe": {
+        "size": 105221120,
+        "sha256": "f0d36ecbbdd3bcfac3efa078c96c7271c2e68b3810595552ac3b7f17e9a65c52",
+        "urls": []
+      }
+    },
+    "archive": {
+      "size": 114768076,
+      "sha256": "60f467265b1e312373dbcd92200c2618a74850f98d3d078e94296bb3fa2047ba",
+      "urls": [
+        "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.0.2-essentials_build.zip"
+      ]
+    }
+  },
+  "models": {
+    "Qwen3-ASR-1.7B": {
+      "revision": "7278e1e70fe206f11671096ffdd38061171dd6e5",
+      "files": {
+        "chat_template.json": {
+          "size": 1161,
+          "sha256": "75a8cfca24f00de72d796fbfed6858fc9614ef3dabd8696684cc3bc03a9c58ff",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen3-ASR-1.7B/resolve/7278e1e70fe206f11671096ffdd38061171dd6e5/chat_template.json",
+            "https://modelscope.cn/models/Qwen/Qwen3-ASR-1.7B/resolve/master/chat_template.json"
+          ]
+        },
+        "config.json": {
+          "size": 6194,
+          "sha256": "2e74a751548b8ad7d7526d29365ad8144c345d8b412b1152d25dc6698452712f",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen3-ASR-1.7B/resolve/7278e1e70fe206f11671096ffdd38061171dd6e5/config.json",
+            "https://modelscope.cn/models/Qwen/Qwen3-ASR-1.7B/resolve/master/config.json"
+          ]
+        },
+        "generation_config.json": {
+          "size": 142,
+          "sha256": "1da527824d81e07118facff437e03f2e24a23311e3bdeb2368973fe77e5f275c",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen3-ASR-1.7B/resolve/7278e1e70fe206f11671096ffdd38061171dd6e5/generation_config.json",
+            "https://modelscope.cn/models/Qwen/Qwen3-ASR-1.7B/resolve/master/generation_config.json"
+          ]
+        },
+        "merges.txt": {
+          "size": 1671853,
+          "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen3-ASR-1.7B/resolve/7278e1e70fe206f11671096ffdd38061171dd6e5/merges.txt",
+            "https://modelscope.cn/models/Qwen/Qwen3-ASR-1.7B/resolve/master/merges.txt"
+          ]
+        },
+        "model-00001-of-00002.safetensors": {
+          "size": 4220320824,
+          "sha256": "a4cd1f1a04d90b757dc7f7dd26254e69a013b19e80efe590a83c6a3bde8608d6",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen3-ASR-1.7B/resolve/7278e1e70fe206f11671096ffdd38061171dd6e5/model-00001-of-00002.safetensors",
+            "https://modelscope.cn/models/Qwen/Qwen3-ASR-1.7B/resolve/master/model-00001-of-00002.safetensors"
+          ]
+        },
+        "model-00002-of-00002.safetensors": {
+          "size": 478200688,
+          "sha256": "6e0b9d9e09e2e0238e7ef3cc8a484ab387e91b90f1900bedf88bc92d7929ccfc",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen3-ASR-1.7B/resolve/7278e1e70fe206f11671096ffdd38061171dd6e5/model-00002-of-00002.safetensors",
+            "https://modelscope.cn/models/Qwen/Qwen3-ASR-1.7B/resolve/master/model-00002-of-00002.safetensors"
+          ]
+        },
+        "model.safetensors.index.json": {
+          "size": 64821,
+          "sha256": "f994739fe38e5210b9e3e8ce6c6307315e2ceac3cb630e7b7414d69dce520f60",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen3-ASR-1.7B/resolve/7278e1e70fe206f11671096ffdd38061171dd6e5/model.safetensors.index.json",
+            "https://modelscope.cn/models/Qwen/Qwen3-ASR-1.7B/resolve/master/model.safetensors.index.json"
+          ]
+        },
+        "preprocessor_config.json": {
+          "size": 330,
+          "sha256": "45e120a4eda2c20c5d7f2ea9354e63536bf35e27aa573fb7cdf78017b378770d",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen3-ASR-1.7B/resolve/7278e1e70fe206f11671096ffdd38061171dd6e5/preprocessor_config.json",
+            "https://modelscope.cn/models/Qwen/Qwen3-ASR-1.7B/resolve/master/preprocessor_config.json"
+          ]
+        },
+        "tokenizer_config.json": {
+          "size": 12487,
+          "sha256": "4942d005604266809309cabc9f4e9cb89ce855d59b14681fdc0e1cc62ea26c4c",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen3-ASR-1.7B/resolve/7278e1e70fe206f11671096ffdd38061171dd6e5/tokenizer_config.json",
+            "https://modelscope.cn/models/Qwen/Qwen3-ASR-1.7B/resolve/master/tokenizer_config.json"
+          ]
+        },
+        "vocab.json": {
+          "size": 2776833,
+          "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen3-ASR-1.7B/resolve/7278e1e70fe206f11671096ffdd38061171dd6e5/vocab.json",
+            "https://modelscope.cn/models/Qwen/Qwen3-ASR-1.7B/resolve/master/vocab.json"
+          ]
+        }
+      }
+    },
+    "Qwen3-ForcedAligner-0.6B": {
+      "revision": "c7cbfc2048c462b0d63a45797104fc9db3ad62b7",
+      "files": {
+        "chat_template.json": {
+          "size": 1161,
+          "sha256": "75a8cfca24f00de72d796fbfed6858fc9614ef3dabd8696684cc3bc03a9c58ff",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B/resolve/c7cbfc2048c462b0d63a45797104fc9db3ad62b7/chat_template.json",
+            "https://modelscope.cn/models/Qwen/Qwen3-ForcedAligner-0.6B/resolve/master/chat_template.json"
+          ]
+        },
+        "config.json": {
+          "size": 5982,
+          "sha256": "d616c65d46c4b90bdc651b0a0963ea932732241140f337f9bb6b0335a9c8ef09",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B/resolve/c7cbfc2048c462b0d63a45797104fc9db3ad62b7/config.json",
+            "https://modelscope.cn/models/Qwen/Qwen3-ForcedAligner-0.6B/resolve/master/config.json"
+          ]
+        },
+        "generation_config.json": {
+          "size": 115,
+          "sha256": "948d089b23bca1d214e768d59c4438365665f52ec6d33678f4062206b3fbbb8c",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B/resolve/c7cbfc2048c462b0d63a45797104fc9db3ad62b7/generation_config.json",
+            "https://modelscope.cn/models/Qwen/Qwen3-ForcedAligner-0.6B/resolve/master/generation_config.json"
+          ]
+        },
+        "merges.txt": {
+          "size": 1671853,
+          "sha256": "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B/resolve/c7cbfc2048c462b0d63a45797104fc9db3ad62b7/merges.txt",
+            "https://modelscope.cn/models/Qwen/Qwen3-ForcedAligner-0.6B/resolve/master/merges.txt"
+          ]
+        },
+        "model.safetensors": {
+          "size": 1835544544,
+          "sha256": "47831d0e82f96b20e9034dba01a075ee06436654719f6a68289e49f1b65ce0e7",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B/resolve/c7cbfc2048c462b0d63a45797104fc9db3ad62b7/model.safetensors",
+            "https://modelscope.cn/models/Qwen/Qwen3-ForcedAligner-0.6B/resolve/master/model.safetensors"
+          ]
+        },
+        "preprocessor_config.json": {
+          "size": 330,
+          "sha256": "45e120a4eda2c20c5d7f2ea9354e63536bf35e27aa573fb7cdf78017b378770d",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B/resolve/c7cbfc2048c462b0d63a45797104fc9db3ad62b7/preprocessor_config.json",
+            "https://modelscope.cn/models/Qwen/Qwen3-ForcedAligner-0.6B/resolve/master/preprocessor_config.json"
+          ]
+        },
+        "tokenizer_config.json": {
+          "size": 12666,
+          "sha256": "3ab80063f8511deb9566e6ad438d17b7a6277fcffd52d92854112f19d36bd81c",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B/resolve/c7cbfc2048c462b0d63a45797104fc9db3ad62b7/tokenizer_config.json",
+            "https://modelscope.cn/models/Qwen/Qwen3-ForcedAligner-0.6B/resolve/master/tokenizer_config.json"
+          ]
+        },
+        "vocab.json": {
+          "size": 2776833,
+          "sha256": "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910",
+          "urls": [
+            "https://huggingface.co/Qwen/Qwen3-ForcedAligner-0.6B/resolve/c7cbfc2048c462b0d63a45797104fc9db3ad62b7/vocab.json",
+            "https://modelscope.cn/models/Qwen/Qwen3-ForcedAligner-0.6B/resolve/master/vocab.json"
+          ]
+        }
+      }
+    }
+  },
+  "animations": {
+    "ice-light-01.npz": {
+      "size": 5070668,
+      "sha256": "bcbff72e17f9eea42276f06fadd6addf4a1cf3b9182fe860b9403d28f4df7225",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/ice-light-01.npz"
+      ]
+    },
+    "ice-light-02.npz": {
+      "size": 5065139,
+      "sha256": "671b6e0dc121fbba8f80e9dd5479fc6c91653c9b7700e6b344159d51750dcaae",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/ice-light-02.npz"
+      ]
+    },
+    "ice-light-03.npz": {
+      "size": 5064356,
+      "sha256": "ac0ce8d0303108c8302eda2494b4174a482b0e92be8ed61894ea910fb9456bd4",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/ice-light-03.npz"
+      ]
+    },
+    "ice-light-04.npz": {
+      "size": 5065573,
+      "sha256": "e622db968d0f04b6483b5d819c2cd11166fc53702f4a88a72ab27ffba1666002",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/ice-light-04.npz"
+      ]
+    },
+    "ice-light-05.npz": {
+      "size": 5065704,
+      "sha256": "f4492f0fac8c9dbabdf1f5fed6a3f6ffb19075cff4099c65b7caf90e2ce6537e",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/ice-light-05.npz"
+      ]
+    },
+    "ice-light-06.npz": {
+      "size": 5065704,
+      "sha256": "9c20b8203a18fc6655b8b492b2442cbfc986bcb926897f3489e181c22a661c68",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/ice-light-06.npz"
+      ]
+    },
+    "ice-light-07.npz": {
+      "size": 6777808,
+      "sha256": "4045d0d60498512a72b6997a8b8d5ab0fed7478ebbdad3ba07d40dfa36c788b1",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/ice-light-07.npz"
+      ]
+    },
+    "ice-light-08.npz": {
+      "size": 6768247,
+      "sha256": "d693b61373fdfa3c507ad25044d23189561a8dd148afb466c00215f228df2738",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/ice-light-08.npz"
+      ]
+    },
+    "ice-light-09.npz": {
+      "size": 6760150,
+      "sha256": "6f8a58d811386e821b5825b3c62b8767113751782407b4038f222ffc38edbffc",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/ice-light-09.npz"
+      ]
+    },
+    "ice-light-10.npz": {
+      "size": 6760467,
+      "sha256": "f3aebfafae92c7b4e18d8232b8e6c02f6d12710f6c8ff364b0754a3f79cf331a",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/ice-light-10.npz"
+      ]
+    },
+    "ice-light-11.npz": {
+      "size": 6758016,
+      "sha256": "7b3025cc99bd09b254b311256b733937d1aef13b54778b6af832a526223f241a",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/ice-light-11.npz"
+      ]
+    },
+    "ice-light-12.npz": {
+      "size": 6758350,
+      "sha256": "2fa3c315946b8416e4a0a1f060919918de29bfba333400dd0f974200dc09a3e3",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/ice-light-12.npz"
+      ]
+    },
+    "ice-light-13.npz": {
+      "size": 6760467,
+      "sha256": "60c0a1e96a4df676c3bf4e947b5b02c1838a520eff54530e48f38ccb06fd2d6f",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/ice-light-13.npz"
+      ]
+    },
+    "ice-light-14.npz": {
+      "size": 8481341,
+      "sha256": "89da6ad1a591b165aa26dab0730d0cec5ee220c46546150b5e16e6b480aa1df4",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/ice-light-14.npz"
+      ]
+    },
+    "ice-light-15.npz": {
+      "size": 8471225,
+      "sha256": "f77bbb762d581518a5aa050264f0ffd90bfa1fb053557661c20084ef0055a5b9",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/ice-light-15.npz"
+      ]
+    },
+    "ice-light-16.npz": {
+      "size": 8464867,
+      "sha256": "660fc799bb9fe435c0c72c649a87698882fc883b15dae8c2f52db5d247a9cb7b",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/ice-light-16.npz"
+      ]
+    },
+    "ice-light-17.npz": {
+      "size": 8482301,
+      "sha256": "52d07155e3e254985b1292c65af2b1b14cd449ebf308bc7356120bc85d422ff6",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/ice-light-17.npz"
+      ]
+    },
+    "ice-light-18.npz": {
+      "size": 8481266,
+      "sha256": "ad14f57593bcc2891187dc099b89e06cd8754dd671cf7a34e78a75508ae47834",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/ice-light-18.npz"
+      ]
+    },
+    "ice-light-19.npz": {
+      "size": 8522051,
+      "sha256": "04b4d1bcf25c155989df80f740f054dc6a36aaefe1694129feac662a2dc0e53c",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/ice-light-19.npz"
+      ]
+    },
+    "ice-light-20.npz": {
+      "size": 8522866,
+      "sha256": "70cad2b0b21728241935f476e70e1a6055eb0e0957491bc47f9edec6dbf828b0",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/ice-light-20.npz"
+      ]
+    },
+    "ice-light-21.npz": {
+      "size": 10214928,
+      "sha256": "fafc5cc7b057962b5cbd463c39054641044c8310358fc9496520b8c412bab79b",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/ice-light-21.npz"
+      ]
+    },
+    "ice-light-22.npz": {
+      "size": 10209948,
+      "sha256": "ebb04d90a8120e9eba1ed901bd6d5804ac84a7ff0755c8596fa4bae23daab1fe",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/ice-light-22.npz"
+      ]
+    },
+    "ice-light-23.npz": {
+      "size": 10159044,
+      "sha256": "8deca5fbeea6bd439efff36094ce7a1b8e5e3360a3c55c60537c2df21794eba6",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/ice-light-23.npz"
+      ]
+    },
+    "ice-light-24.npz": {
+      "size": 10168076,
+      "sha256": "c30681d6b2ae5dc64093e01610cd7f91d2ac79067b736b8942d7c68b217adc22",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/ice-light-24.npz"
+      ]
+    },
+    "ice-light-25.npz": {
+      "size": 10195547,
+      "sha256": "eb7c2ed7322615d1fbe198068d1938aff0c7b0315e0b12ad7a2b531a15e3079f",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/ice-light-25.npz"
+      ]
+    },
+    "ice-light-26.npz": {
+      "size": 10199842,
+      "sha256": "527d692b33f86d51482c382112bcfefb0af3d8fdf96664c9b281bea8b330bece",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/ice-light-26.npz"
+      ]
+    },
+    "ice-light-27.npz": {
+      "size": 10206832,
+      "sha256": "d986466bfcb620da96f54cde0a3c6ba4a31e13eafe41ec85d69231235c57060c",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/ice-light-27.npz"
+      ]
+    },
+    "ice-light-28.npz": {
+      "size": 10214007,
+      "sha256": "1df95b50075408b526fb9f433bb209da48aabcc28ba8681c2df6356659751613",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/ice-light-28.npz"
+      ]
+    },
+    "ice-light-29.npz": {
+      "size": 10216022,
+      "sha256": "4e139ad708e6ff3caa29a6811d2b91ef48183b2367bb7431f2332c32c05efa8e",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/ice-light-29.npz"
+      ]
+    },
+    "shout-light-10.npz": {
+      "size": 6559856,
+      "sha256": "40e341b838cd69327eaa12229c01ac26126cddd666e5a554297387f505afbc51",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/shout-light-10.npz"
+      ]
+    },
+    "shout-light-11.npz": {
+      "size": 6571044,
+      "sha256": "e8ad253e4208b554acd49981ae88b2136bbf537ea993270a0a27c432609bf316",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/shout-light-11.npz"
+      ]
+    },
+    "shout-light-12.npz": {
+      "size": 6584786,
+      "sha256": "9fa356cef619902a8bdcde370cc12c90e0abd59ba5f768bbc0a04ca9c778bb5f",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/shout-light-12.npz"
+      ]
+    },
+    "shout-light-13.npz": {
+      "size": 6581525,
+      "sha256": "2f8098fb8386fb6594482e9a0af74b14b3d9603f2489aba1e5aa35f50b82612f",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/shout-light-13.npz"
+      ]
+    },
+    "shout-light-14.npz": {
+      "size": 6611308,
+      "sha256": "a39c579fa24e76bfc6cab48af4be9f58092a82872e510aa4fbaa3f107f899de8",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/shout-light-14.npz"
+      ]
+    },
+    "shout-light-15.npz": {
+      "size": 6381337,
+      "sha256": "f2d17c33b66de2dcdfbc938687b16926a4241e7f9c021f07163bc9b21c9651c8",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/shout-light-15.npz"
+      ]
+    },
+    "shout-light-16.npz": {
+      "size": 6382903,
+      "sha256": "04cbd0f3d116cf32e5ec3b8dd5b3b351125e9cc29c1fe621add253399d6ca814",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/shout-light-16.npz"
+      ]
+    },
+    "shout-light-17.npz": {
+      "size": 6383767,
+      "sha256": "6570c23dab0dc685cd7c404d29a4baea3142bb1d7792bba8201cf0aa9c25575e",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/shout-light-17.npz"
+      ]
+    },
+    "shout-light-18.npz": {
+      "size": 6384992,
+      "sha256": "bea3619f483fc21c123a049074188472b2ce17b73057b662e630ade3cb27a7bd",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/shout-light-18.npz"
+      ]
+    },
+    "shout-light-19.npz": {
+      "size": 6384507,
+      "sha256": "2ef9ac9a882911690c7bd441ec91efa0b652388181144b2d5459d9a03e84bd12",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/shout-light-19.npz"
+      ]
+    },
+    "shout-light-20.npz": {
+      "size": 6384663,
+      "sha256": "9bfe9360ce18931e86fb5b9f5d57e362c458ce8e3ef817d8831e0c3572c24fcf",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/shout-light-20.npz"
+      ]
+    },
+    "shout-light-21.npz": {
+      "size": 6385083,
+      "sha256": "630f70fc0d8397218be317d2199d53f8945b24463ecba6ff091e4650f513aaac",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/shout-light-21.npz"
+      ]
+    },
+    "shout-light-22.npz": {
+      "size": 6385744,
+      "sha256": "f46fd591b4e18f2f0d9de51f3d39b995c3910f9777aa24e2b93aec5eed85ecb7",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/shout-light-22.npz"
+      ]
+    },
+    "shout-surface-00.npz": {
+      "size": 429693,
+      "sha256": "8ee461b057b35d644a76d681c57e59ecc3cccce799c700724cb211cd1d514010",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/shout-surface-00.npz"
+      ]
+    },
+    "shout-surface-01.npz": {
+      "size": 430529,
+      "sha256": "ea8c9e0de0fa729f1ea180732c2e39af7b641917cd87c5583c43a2b90164dc52",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/shout-surface-01.npz"
+      ]
+    },
+    "shout-surface-02.npz": {
+      "size": 431946,
+      "sha256": "8a75baaf8c59d1618640b3f0e4785a22efbf48d62046bd75eac69ef6c95ef3a6",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/shout-surface-02.npz"
+      ]
+    },
+    "shout-surface-03.npz": {
+      "size": 432450,
+      "sha256": "2bcb29cef16624a1d7c494fcc5cb7bd15be23d69efaae16bb1f87093442297ec",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/shout-surface-03.npz"
+      ]
+    },
+    "shout-surface-04.npz": {
+      "size": 432538,
+      "sha256": "dd03da1c6c779a1788edfd29fd60e47c0865559e9d990cbcaf2a2efee02a2896",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/shout-surface-04.npz"
+      ]
+    },
+    "shout-surface-05.npz": {
+      "size": 432701,
+      "sha256": "72001930a11321a61eac8287bb34209257492e9347ca90caa7532705605dedb1",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/shout-surface-05.npz"
+      ]
+    },
+    "shout-surface-06.npz": {
+      "size": 433214,
+      "sha256": "04718af0d972ff99c1b4900943bb7819fc9c6109872fa84f049db792993bf230",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/shout-surface-06.npz"
+      ]
+    },
+    "shout-surface-07.npz": {
+      "size": 433321,
+      "sha256": "cae3bafb788b296ced8a4a07b3805d68027c47f289490042b50bd3be1d369c55",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/shout-surface-07.npz"
+      ]
+    },
+    "shout-surface-08.npz": {
+      "size": 433382,
+      "sha256": "c1626e62e3bd43eb7b94b0df1121e34c28f8bd2ef1460cb8de39f7233a5a11fa",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/shout-surface-08.npz"
+      ]
+    },
+    "shout-surface-09.npz": {
+      "size": 432347,
+      "sha256": "620a57c283e9b0ae2629f6138b2448711be1e32319fefba40ed216dafcc6f475",
+      "urls": [
+        "https://raw.githubusercontent.com/Finjix/video-montage/31afb920cc5570166976e3310c236e2c657b4293/skill/assets/packaging/animations/parameters/shout-surface-09.npz"
+      ]
+    }
+  }
+}
