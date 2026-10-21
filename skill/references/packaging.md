@@ -87,7 +87,10 @@ assets/dependencies/python/python.exe scripts/video_montage.py fetch-bgm --job-d
   --source-page <track page> --title "<title>" --creator "<artist>" --instrumental
 ```
 
-Use `--file <path>` for a track downloaded another way; `--asset-audio-unsuitable "<reason>"` when the pack's audio
+Every BGM the agent pulls during production lives inside `<job_dir>` (the `temp` folder), never beside the videos
+or elsewhere on disk: `fetch-bgm` stores the registered file under `<job_dir>/config/bgm/`. Use `--file <path>` for a
+track downloaded another way, and download it into `<job_dir>/config/bgm/` first (not the output root, Downloads or the
+system temp), then delete any stray copy after registering; `--asset-audio-unsuitable "<reason>"` when the pack's audio
 cannot serve as music (only sound effects, for example).
 
 ## Loudness

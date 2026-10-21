@@ -62,7 +62,8 @@ editorial rules; [packaging](references/packaging.md) before `package`.
    disclaimer, BGM). Never ask whether to package. Deliver unpackaged (`package --clean`) only when the user says so.
    BGM is the pack's audio. One track serves at most eight videos of a batch (40 videos need at least five tracks);
    when the pack has none or too few, download the missing licensed commercial-ad style tracks yourself, from several
-   different sources, without asking.
+   different sources, without asking. Downloaded BGM files stay in the job's `temp` folder (`config/bgm/`), never
+   in the output root or elsewhere.
 8. **Persist.** Keep fixing and re-running until every requested video is published. Ask the user only for an
    absolute blocker (say what you tried and the minimum you need). Uncertain speech, long processing, a failed check
    or too few coherent routes so far are never blockers.

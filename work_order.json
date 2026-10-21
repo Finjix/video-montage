@@ -1,0 +1,51 @@
+{
+  "requested_outputs": 40,
+  "sources": [
+    "D:/project/video-montage/.素材/吴樾原片/《武馆战力提升》_Acopy_v04.mp4",
+    "D:/project/video-montage/.素材/吴樾原片/办公室灵魂拷问_Aco_终版.mp4",
+    "D:/project/video-montage/.素材/吴樾原片/办公室看号-AI重制-AC-0910.mp4",
+    "D:/project/video-montage/.素材/吴樾原片/多场景玩游戏_场景1_Acopy_v03.mp4",
+    "D:/project/video-montage/.素材/吴樾原片/多场景玩游戏_场景2_Acopy_v04.mp4",
+    "D:/project/video-montage/.素材/吴樾原片/多场景玩游戏_场景3_Acopy_v05.mp4",
+    "D:/project/video-montage/.素材/吴樾原片/片场偷窥-A版-AC-0910.mp4",
+    "D:/project/video-montage/.素材/吴樾原片/片场偷窥B版-AC-0910.mp4",
+    "D:/project/video-montage/.素材/吴樾原片/能打三十个_Aco_终版.mp4",
+    "D:/project/video-montage/.素材/吴樾原片/茶室比熔炉-AC-0910.mp4",
+    "D:/project/video-montage/.素材/林子聪原片/GOFCN55943_信息流达人_林子聪_混剪_只剩泡面_ge.mp4",
+    "D:/project/video-montage/.素材/林子聪原片/GOFCN55944_信息流达人_林子聪_混剪_短口播1_ge.mp4",
+    "D:/project/video-montage/.素材/林子聪原片/GOFCN55945_信息流达人_林子聪_混剪_短口播2_ge.mp4",
+    "D:/project/video-montage/.素材/林子聪原片/GOFCN55946_信息流达人_林子聪_混剪_短口播3_ge.mp4",
+    "D:/project/video-montage/.素材/林子聪原片/GOFCN55947_信息流达人_林子聪_混剪_短口播4_ge.mp4",
+    "D:/project/video-montage/.素材/林子聪原片/GOFCN55948_信息流达人_林子聪_混剪_短口播5_ge.mp4",
+    "D:/project/video-montage/.素材/林子聪原片/GOFCN55950_信息流达人_林子聪_混剪_片场采访_ge.mp4",
+    "D:/project/video-montage/.素材/林子聪原片/GOFCN55952_信息流达人_林子聪_混剪_长剧情3_ge.mp4",
+    "D:/project/video-montage/.素材/许君聪原片/04｜片场偷窥-4 版本二.mp4",
+    "D:/project/video-montage/.素材/许君聪原片/0923-鉴号反转-无字幕.mp4",
+    "D:/project/video-montage/.素材/许君聪原片/0924-成功学-无字幕.mp4",
+    "D:/project/video-montage/.素材/许君聪原片/三亿人小项目OP2.mp4",
+    "D:/project/video-montage/.素材/许君聪原片/为所欲为.mp4",
+    "D:/project/video-montage/.素材/许君聪原片/大哥来了.mp4",
+    "D:/project/video-montage/.素材/许君聪原片/夯.mp4",
+    "D:/project/video-montage/.素材/许君聪原片/拍车窗-口播-V3.mp4",
+    "D:/project/video-montage/.素材/许君聪原片/职业法师.mp4"
+  ],
+  "asset_root": "D:/project/video-montage/.素材/包装素材",
+  "celebrities": [
+    {
+      "person_id": "person:wu-yue",
+      "name": "吴樾",
+      "nameplate": "D:/project/video-montage/.素材/包装素材/明星铭牌/吴樾人名条_固定左侧.png"
+    },
+    {
+      "person_id": "person:lin-zicong",
+      "name": "林子聪",
+      "nameplate": "D:/project/video-montage/.素材/包装素材/明星铭牌/林子聪人名条_固定左侧.png"
+    },
+    {
+      "person_id": "person:xu-juncong",
+      "name": "许君聪",
+      "nameplate": "D:/project/video-montage/.素材/包装素材/明星铭牌/许君聪人名条_固定左侧.png"
+    }
+  ],
+  "request": "使用 素材 跑四十条成片"
+}
