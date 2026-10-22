@@ -175,10 +175,13 @@ class Devices(unittest.TestCase):
 
 
 class Boundaries(unittest.TestCase):
-    def test_cache_cannot_live_in_plugin(self):
+    def test_cache_defaults_to_plugin_directory(self):
+        with patch.dict(os.environ, {"VIDEO_MONTAGE_CACHE_DIR": ""}):
+            self.assertEqual(runtime.cache(), (runtime.ROOT / "runtime-cache").resolve())
+
+    def test_cache_can_be_overridden_inside_plugin(self):
         with patch.dict(os.environ, {"VIDEO_MONTAGE_CACHE_DIR": str(runtime.ROOT / "cache")}):
-            with self.assertRaises(runtime.RuntimeFailure):
-                runtime.cache()
+            self.assertEqual(runtime.cache(), (runtime.ROOT / "cache").resolve())
 
     def test_base_ensure_never_installs(self):
         with patch("subprocess.run", side_effect=AssertionError):

@@ -3,7 +3,8 @@ __pycache__/
 *.pyc
 /dist/
 /dev/smoke/latest.json
-# Downloaded content belongs in the external user cache, never in the plugin.
+# Runtime downloads stay local and must not be committed.
+/plugin/runtime-cache/
 /plugin/assets/dependencies/
 /plugin/assets/packaging/animations/parameters/*.npz
 *.partial

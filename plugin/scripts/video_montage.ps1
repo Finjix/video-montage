@@ -1,8 +1,7 @@
-# Windows PowerShell 5.1+; writes only to the per-user cache.
+# Windows PowerShell 5.1+; defaults to the plugin-local runtime cache.
 $ErrorActionPreference = 'Stop'
 $pluginRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$cacheRoot = if ($env:VIDEO_MONTAGE_CACHE_DIR) { [IO.Path]::GetFullPath($env:VIDEO_MONTAGE_CACHE_DIR) } else { Join-Path $env:LOCALAPPDATA 'video-montage' }
-if ($cacheRoot.TrimEnd('\') -eq $pluginRoot -or $cacheRoot.StartsWith($pluginRoot.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)) { [Console]::Error.WriteLine('Cache must be outside the plugin directory.'); exit 3 }
+$cacheRoot = if ($env:VIDEO_MONTAGE_CACHE_DIR) { [IO.Path]::GetFullPath($env:VIDEO_MONTAGE_CACHE_DIR) } else { Join-Path $pluginRoot 'runtime-cache' }
 $env:PYTHONDONTWRITEBYTECODE = '1'
 $env:PYTHONUTF8 = '1'
 $env:VIDEO_MONTAGE_CACHE_DIR = $cacheRoot

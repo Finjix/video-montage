@@ -1,6 +1,6 @@
 @echo off
 setlocal
-if defined VIDEO_MONTAGE_CACHE_DIR (set "VM_CACHE=%VIDEO_MONTAGE_CACHE_DIR%") else (set "VM_CACHE=%LOCALAPPDATA%\video-montage")
+if defined VIDEO_MONTAGE_CACHE_DIR (set "VM_CACHE=%VIDEO_MONTAGE_CACHE_DIR%") else (set "VM_CACHE=%~dp0..\runtime-cache")
 set "VIDEO_MONTAGE_CACHE_DIR=%VM_CACHE%"
 set "PYTHONUTF8=1"
 set "PYTHONDONTWRITEBYTECODE=1"

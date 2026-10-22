@@ -10,9 +10,9 @@ description: Produce, revise and reburn batches of Chinese spoken-word (口播) 
 - Requires Windows 10/11 x64 and a local executor. Resolve the plugin root as two directories above this SKILL.md.
 - Run `& "<plugin_root>/scripts/video_montage.cmd" <command> --job-dir <job_dir> ...`.
   Python, media tools, dependencies and models download automatically only when needed. First use needs network access;
-  subsequent use reuses the external user cache. Progress goes to stderr; results go to stdout.
+  subsequent use reuses runtime-cache inside the plugin installation directory. Progress goes to stderr; results go to stdout.
   Exit 2 is an input/rule failure; exit 3 is a runtime/download failure: read the cause and retry the same command.
-  Do not install dependencies or write temporary files into the plugin. Never recreate a bundled environment.
+  Dependencies are managed automatically in the plugin's runtime-cache directory. Keep job temporary files in the job directory. Never recreate a bundled environment.
 - The scripts do all media work, timing and checks. Your job is the editorial judgment: read the catalog and
   sheets, correct the transcript, tag people, cut every source into beats, compose the plan and the packaging
   choices. Never write your own search, render or review scripts; `check` answers in under a second, so iterate with it.

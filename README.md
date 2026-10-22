@@ -30,7 +30,7 @@
 
 首次使用 ASR 时检测 NVIDIA 驱动，支持 CUDA 12.8 时安装 CUDA 版，否则安装 CPU 版；CUDA 运行失败自动回退 CPU。运行库随 PyTorch 获取，不安装显卡驱动。可通过 `VIDEO_MONTAGE_DEVICE=cpu` 强制使用 CPU。
 
-缓存默认位于 `%LOCALAPPDATA%\video-montage`，可用 `VIDEO_MONTAGE_CACHE_DIR` 指定插件目录之外的其他位置。运行不修改插件目录；已完整缓存的功能可离线运行。设置 `VIDEO_MONTAGE_OFFLINE=1` 可明确禁止联网。
+缓存默认位于插件安装目录内的 `runtime-cache/`，删除插件目录时可一并清理依赖。可用 `VIDEO_MONTAGE_CACHE_DIR` 指定其他位置。已完整缓存的功能可离线运行。设置 `VIDEO_MONTAGE_OFFLINE=1` 可明确禁止联网。源码中的 `plugin/runtime-cache/` 已被 Git 忽略，发布前应使用不含运行缓存的干净目录。
 
 ```powershell
 # 仅检查，不触发依赖或模型下载

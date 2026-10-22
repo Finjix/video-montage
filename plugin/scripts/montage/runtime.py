@@ -34,10 +34,7 @@ class RuntimeFailure(RuntimeError):
 
 
 def cache() -> Path:
-    root = Path(os.environ.get("VIDEO_MONTAGE_CACHE_DIR") or
-                Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData/Local")) / "video-montage").resolve()
-    if root == ROOT or ROOT in root.parents:
-        raise RuntimeFailure("VIDEO_MONTAGE_CACHE_DIR must be outside the plugin directory")
+    root = Path(os.environ.get("VIDEO_MONTAGE_CACHE_DIR") or ROOT / "runtime-cache").resolve()
     return root
 
 
