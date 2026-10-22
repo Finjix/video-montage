@@ -12,6 +12,7 @@
         "shortDescription": "中文口播视频批量混剪与字幕包装",
         "longDescription": "为中文口播素材制作成批混剪视频，支持素材分析、语音识别与校正、剪辑计划检查、字幕、花字动画和背景音乐。需要 Windows 10/11 64 位及本地素材。首次使用相关功能时自动下载运行依赖和模型；已缓存资源可离线复用。",
         "developerName": "钟丰骏-实习生",
+        "websiteURL": "https://github.com/Finjix/video-montage",
         "category": "视频",
         "capabilities": [],
         "logo": "./assets/icon.svg",
