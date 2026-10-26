@@ -10,6 +10,7 @@ from montage.common import LIBRARY, OUTPUT_ROOT, pool, read, sha, write
 
 STATE = "job.json"
 SOURCE_SUFFIXES = {".mp4", ".mov", ".mkv"}
+PNG_SIGNATURE = bytes.fromhex("89504e470d0a1a0a")
 DELIVERY_NAME = re.compile(r"自动化混剪_\d{8}_\d{6}")
 REBURN_NOTE = ("修改本目录 subtitle-*.txt 的文字或时间码后，把整个输出文件夹交给 AI，要求重新烧录。\n"
                "保留 temp 文件夹，AI 会用它重新打包并覆盖成片。\n")
@@ -26,6 +27,38 @@ def check_decision(key: str, row) -> dict:
             or not isinstance(row.get("instruction"), str) or not row["instruction"].strip()):
         raise ValueError(f"decision {key} needs a valid value and the user's own words as instruction")
     return {"value": row["value"], "instruction": row["instruction"].strip()}
+
+
+def png_size(path: Path) -> tuple[int, int] | None:
+    """Width and height from a PNG header (no image library needed)."""
+    with Path(path).open("rb") as stream:
+        head = stream.read(24)
+    if len(head) < 24 or head[:8] != PNG_SIGNATURE or head[12:16] != b"IHDR":
+        return None
+    return int.from_bytes(head[16:20], "big"), int.from_bytes(head[20:24], "big")
+
+
+def overlay_problem(path: Path) -> str | None:
+    try:
+        size = png_size(path)
+    except OSError as error:
+        return f"unreadable ({error})"
+    if size is None:
+        return "not a PNG"
+    if size[0] * 16 != size[1] * 9:
+        return f"{size[0]}x{size[1]} is not 9:16"
+    return None
+
+
+def asset_inventory(asset_root: Path) -> dict:
+    """What `package` will find in the asset pack by default (text pins, disclaimer, audio)."""
+    pngs = [p for p in asset_root.rglob("*.png") if not overlay_problem(p)]
+
+    def under(*words):
+        return sorted(str(p) for p in pngs if any(w in str(p.relative_to(asset_root)).lower() for w in words))
+    audio = sorted(str(p) for p in asset_root.rglob("*") if p.is_file()
+                   and p.suffix.lower() in {".mp3", ".wav", ".m4a", ".aac", ".flac", ".ogg", ".opus"})
+    return {"text_pins": under("文字钉", "pin"), "disclaimers": under("免责", "disclaimer"), "audio": audio}
 
 
 def init(order: dict, job_dir: Path | None = None) -> tuple[Path, dict]:
@@ -50,11 +83,17 @@ def init(order: dict, job_dir: Path | None = None) -> tuple[Path, dict]:
         plate = Path(row.get("nameplate", "") if isinstance(row.get("nameplate"), str) else row.get("nameplate", {}).get("path", ""))
         if not rules.person_id(row.get("person_id")) or not str(row.get("name", "")).strip() or not plate.is_file():
             raise ValueError(f"celebrity needs person_id (person:xxx), name and an existing nameplate PNG: {row}")
+        if problem := overlay_problem(plate):
+            raise ValueError(f"nameplate {plate} must be a transparent 9:16 PNG ({problem})")
         celebrities.append({"person_id": row["person_id"], "name": row["name"],
                             "nameplate": {"path": str(plate.resolve()), "sha256": sha(plate)}})
     if not celebrities or len({c["person_id"] for c in celebrities}) != len(celebrities):
         raise ValueError("celebrities must list each selected celebrity once")
     decisions = {key: check_decision(key, value) for key, value in (order.get("decisions") or {}).items()}
+    minimum = decisions.get("min_sources_per_output", {}).get("value", 3)
+    if len(paths) < minimum:
+        raise ValueError(f"{len(paths)} source files cannot give each video {minimum} different sources; ask the user now "
+                         "for more footage or record decisions.min_sources_per_output")
     library = text_library.checked(read(LIBRARY))
     parent = Path(order.get("output_root") or OUTPUT_ROOT).resolve()
     if job_dir is not None:

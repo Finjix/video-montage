@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import math
 import re
+import shutil
+import subprocess
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -23,7 +26,7 @@ MIN_SECONDS = 20.0  # the track loops, but a few seconds would repeat audibly
 MAX_BYTES = 100 * 1024 * 1024
 MIN_RMS_DBFS = -45.0
 TIMEOUT_SECONDS = 60
-USER_AGENT = "Mozilla/5.0 (video-montage bgm fetch)"
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
 
 # Only licenses that allow commercial use with no attribution, share-alike or no-derivatives term:
 # the finished video has nowhere to credit a creator and is itself sold or monetized.
@@ -117,17 +120,35 @@ def status(job: Path, asset_root: Path, outputs: int = 1) -> dict:
             "accepted_licenses": LICENSES}
 
 
-def download(url: str, target: Path) -> None:
+def download(url: str, target: Path, referer: str | None = None) -> None:
+    """Browser-like request (some music CDNs refuse bare clients); the system curl retries when Python's TLS
+    store rejects a certificate chain the Windows store accepts."""
     if urllib.parse.urlparse(url).scheme not in {"http", "https"}:
         raise ValueError("download URL must be http(s)")
-    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    size = 0
-    with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response, target.open("wb") as stream:
-        for block in iter(lambda: response.read(1024 * 1024), b""):
-            size += len(block)
-            if size > MAX_BYTES:
-                raise ValueError(f"download exceeds {MAX_BYTES // 1024 // 1024} MB")
-            stream.write(block)
+    headers = {"User-Agent": USER_AGENT, "Accept": "audio/*,*/*;q=0.8"}
+    if referer:
+        headers["Referer"] = referer
+    try:
+        request = urllib.request.Request(url, headers=headers)
+        size = 0
+        with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response, target.open("wb") as stream:
+            for block in iter(lambda: response.read(1024 * 1024), b""):
+                size += len(block)
+                if size > MAX_BYTES:
+                    raise ValueError(f"download exceeds {MAX_BYTES // 1024 // 1024} MB")
+                stream.write(block)
+        return
+    except (urllib.error.URLError, OSError) as error:
+        curl = shutil.which("curl.exe") or shutil.which("curl")
+        if not curl:
+            raise ValueError(f"download failed: {error}") from error
+    command = [curl, "-fsSL", "--max-time", str(TIMEOUT_SECONDS * 3), "--max-filesize", str(MAX_BYTES),
+               "-A", USER_AGENT, "-o", str(target), url]
+    if referer:
+        command[1:1] = ["-e", referer]
+    result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    if result.returncode:
+        raise ValueError(f"download failed: {result.stderr.strip()[-300:] or f'curl exit {result.returncode}'}")
 
 
 def acquire(job: Path, asset_root: Path, *, outputs: int = 1, url: str | None, file: Path | None, license: str, license_url: str,
@@ -158,7 +179,7 @@ def acquire(job: Path, asset_root: Path, *, outputs: int = 1, url: str | None, f
     partial = folder / "download.partial"
     try:
         if url:
-            download(url, partial)
+            download(url, partial, referer=source_page)
         else:
             partial.write_bytes(Path(file).read_bytes())
         info = probe(partial)

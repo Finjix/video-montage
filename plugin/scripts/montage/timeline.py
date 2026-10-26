@@ -1,5 +1,7 @@
 """Pure frame intervals shared by catalog and plan checks; no media dependencies."""
+from functools import lru_cache
 from pathlib import Path
+
 from montage.common import read, REJECTED
 
 SILENT_EDGE = 0.045
@@ -11,8 +13,9 @@ def expand(spans: list[list[int]]) -> list[int]:
 
 # ----------------------------------------------------------------------------------- rejected intervals
 
-def rejected_entries() -> list[dict]:
-    return read(REJECTED)["entries"]
+@lru_cache(maxsize=1)
+def rejected_entries() -> tuple[dict, ...]:
+    return tuple(read(REJECTED)["entries"])
 
 
 def rejected_hits(source: dict, start: int, end: int) -> list[str]:

@@ -233,5 +233,16 @@ def render_one(job: Path, output: dict, games: list[str], protected: tuple[str, 
 
 
 def render_all(job: Path, outputs: list[dict], games: list[str], protected: tuple[str, ...]) -> list[dict]:
+    """Every output; a failure in one is reported as its problem and never stops the others."""
+    def attempt(output):
+        try:
+            return render_one(job, output, games, protected)
+        except (RuntimeError, ValueError, OSError) as error:
+            log(f"render: {output['plan_id']} failed")
+            # An older render of this plan ID must not be packaged in its place.
+            for stale in (job / "clean" / f"{output['plan_id']}.json", job / "clean" / f"{output['plan_id']}.mp4"):
+                stale.unlink(missing_ok=True)
+            return {"plan_id": output["plan_id"], "errors": [f"render failed: {str(error)[-600:]}"], "notes": [],
+                    "sheet": None, "subtitle": None, "qc": {"lufs": None}, "reused": False}
     with pool(len(outputs)) as executor:
-        return list(executor.map(lambda output: render_one(job, output, games, protected), outputs))
+        return list(executor.map(attempt, outputs))

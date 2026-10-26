@@ -31,9 +31,19 @@ def library_terms(job: Path) -> tuple[list[str], tuple[str, ...]]:
 def cmd_init(args) -> int:
     order = json.loads(sys.stdin.buffer.read().decode("utf-8-sig")) if str(args.work_order) == "-" else read(args.work_order)
     job, state = JOB.init(order, args.job_dir)
-    show([f"job_dir: {job}", f"delivery: {state['delivery_dir']}",
-          f"sources: {len(state['sources'])}, outputs requested: {state['order']['requested_outputs']}",
-          "next: prepare"])
+    count = state["order"]["requested_outputs"]
+    assets = JOB.asset_inventory(Path(state["order"]["asset_root"]))
+    need = -(-count // 8)
+    lines = [f"job_dir: {job}", f"delivery: {state['delivery_dir']}",
+             f"sources: {len(state['sources'])}, outputs requested: {count}",
+             f"asset pack: {len(assets['text_pins'])} text pins, {len(assets['disclaimers'])} disclaimer PNGs, "
+             f"{len(assets['audio'])} audio files (BGM needs {need} tracks; download any shortfall with fetch-bgm)"]
+    if not assets["text_pins"]:
+        lines.append("warning: no text pin PNGs found (folder 文字钉/pin); ask the user now or set defaults.text_pins later")
+    if len(assets["disclaimers"]) != 1:
+        lines.append("warning: expected exactly one disclaimer PNG (folder 免责/disclaimer); ask the user now or set "
+                     "defaults.disclaimer later")
+    show(lines + ["next: prepare"])
     return 0
 
 
@@ -48,7 +58,7 @@ def cmd_prepare(args) -> int:
     annotated = (job / "config/annotations.json").is_file()
     show([f"catalog: {job / 'catalog/catalog.md'} ({len(value['sources'])} sources, {units} units, {shots} shots)",
           f"sheets: {job / 'catalog'} (S01.jpg... per source, assets.jpg for the overlay PNGs)",
-          "next: " + ("existing annotations were re-applied; check --plan <plan.json>" if annotated
+          "next: " + ("existing annotations were re-applied; routes" if annotated
                       else "read the catalog and sheets, then annotate --file <annotations.json>")])
     return 0
 
@@ -67,7 +77,8 @@ def cmd_annotate(args) -> int:
     beats = sum(len(s["beats"]) for s in catalog["sources"])
     show([f"catalog updated: {job / 'catalog/catalog.md'} ({edited} corrected units, {beats} beats)"]
          + ([f"not annotated yet: {', '.join(missing)}"] if missing else [])
-         + ([f"no beats yet (unusable in plans): {', '.join(unbeaten)}"] if unbeaten else []) + ["next: check --plan <plan.json>"])
+         + ([f"no beats yet (unusable in plans): {', '.join(unbeaten)}"] if unbeaten else [])
+         + ["next: routes (clips and joins that pass the machine checks)"])
     return 0
 
 
@@ -100,6 +111,14 @@ def cmd_check(args) -> int:
          + [f"scripts (read every video as a viewer hears it): {job / 'reports/scripts.md'}"]
          + ([] if errors else ["plan ok; next: render --plan <plan.json>"]))
     return RULE_FAILURE if errors else 0
+
+
+def cmd_routes(args) -> int:
+    from montage import routes as ROUTES
+    job = args.job_dir.resolve()
+    state = JOB.load(job)
+    show(ROUTES.run(job, state, joins=args.joins, mix=args.mix, max_clips=args.max_clips, seconds=args.seconds))
+    return 0
 
 
 def cmd_render(args) -> int:
@@ -151,6 +170,7 @@ def cmd_package(args) -> int:
     else:
         config = read(stored) if stored.is_file() else {}
     result = PACKAGE.package(job, state, config)
+    result.setdefault("complete", False)
     write(job / "reports/package.json", result)
     lines = [f"published: {', '.join(result['published']) or 'none'} -> {state['delivery_dir']}"]
     if result["warnings"]:
@@ -167,14 +187,29 @@ def cmd_package(args) -> int:
 def cmd_status(args) -> int:
     job = args.job_dir.resolve()
     state = JOB.load(job)
+    count = state["order"]["requested_outputs"]
     delivered = read(job / "delivery.json")["outputs"] if (job / "delivery.json").is_file() else []
+    catalog = read(job / "catalog/catalog.json") if (job / "catalog/catalog.json").is_file() else None
+    beats = sum(len(s["beats"]) for s in catalog["sources"]) if catalog else 0
+    plan = read(job / "config/plan.json")["outputs"] if (job / "config/plan.json").is_file() else []
+    clean = len(list((job / "clean").glob("*.mp4")))
+    packaged = read(job / "reports/package.json") if (job / "reports/package.json").is_file() else {}
+    if not catalog:
+        step = "prepare"
+    elif not beats:
+        step = "annotate --file <annotations.json>"
+    elif len(plan) != count:
+        step = "routes, then check --plan <plan.json>"
+    elif clean < len(plan):
+        step = "render --plan <plan.json>"
+    elif len(delivered) < count or not packaged.get("complete", True):
+        step = "package (the last run left problems: reports/package.json)" if packaged.get("errors") else "package"
+    else:
+        step = "done (revisions: change the plan or subtitles, then render / package)"
     show([f"delivery: {state['delivery_dir']}",
-          f"catalog: {'yes' if (job / 'catalog/catalog.json').is_file() else 'no'}, "
-          f"annotations: {'yes' if (job / 'config/annotations.json').is_file() else 'no'}, "
-          f"plan: {'yes' if (job / 'config/plan.json').is_file() else 'no'}, "
-          f"clean videos: {len(list((job / 'clean').glob('*.mp4')))}, delivered: {len(delivered)}"
-          f"/{state['order']['requested_outputs']}",
-          f"decisions: {json.dumps(state.get('decisions', {}), ensure_ascii=False)}"])
+          f"catalog: {'yes' if catalog else 'no'}, beats: {beats}, plan outputs: {len(plan)}, clean videos: {clean}, "
+          f"delivered: {len(delivered)}/{count}",
+          f"decisions: {json.dumps(state.get('decisions', {}), ensure_ascii=False)}", f"next: {step}"])
     return 0
 
 
@@ -239,6 +274,11 @@ def main() -> None:
     command("prepare", cmd_prepare).add_argument("--fresh", action="store_true", help="recognize speech again (unit IDs may change)")
     command("annotate", cmd_annotate).add_argument("--file", type=Path, required=True)
     command("check", cmd_check).add_argument("--plan", type=Path, required=True)
+    routes = command("routes", cmd_routes)
+    routes.add_argument("--joins", type=Path, help="accepted joins; builds config/plan-draft.json for the whole batch")
+    routes.add_argument("--mix", action="store_true", help="also route across celebrities")
+    routes.add_argument("--max-clips", type=int, default=4)
+    routes.add_argument("--seconds", type=float, default=40.0, help="search time limit")
     command("render", cmd_render).add_argument("--plan", type=Path, required=True)
     packaging = command("package", cmd_package)
     packaging.add_argument("--config", type=Path)
@@ -247,7 +287,7 @@ def main() -> None:
     decide = command("decide", cmd_decide)
     decide.add_argument("--key", required=True, choices=sorted(JOB.DECISIONS))
     decide.add_argument("--value", required=True, help="JSON value, e.g. 2, true, \"reasonable\"")
-    decide.add_argument("--instruction", required=True, help="the user's own words")
+    decide.add_argument("--instruction", required=True, help="the user's own words, or 'fallback: <why>' for a default you took")
     command("bgm-assets", cmd_bgm_assets)
     fetch = command("fetch-bgm", cmd_fetch_bgm)
     fetch.add_argument("--url")
@@ -270,6 +310,9 @@ def main() -> None:
         code = RULE_FAILURE
     except (OSError, ImportError) as error:
         print(f"runtime error: {error}; retry the command after fixing the runtime", file=sys.stderr, flush=True)
+        code = 3
+    except RuntimeError as error:
+        print(f"media error: {error}", file=sys.stderr, flush=True)
         code = 3
     raise SystemExit(code)
 

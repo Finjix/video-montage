@@ -10,6 +10,7 @@ import re
 import subprocess
 import time
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor
 from fractions import Fraction
 from pathlib import Path
 
@@ -369,8 +370,9 @@ def prepare(job: Path, state: dict, *, fresh: bool = False) -> dict:
     with pool(len(sources)) as executor:
         clocks = list(executor.map(lambda source: video_clock(Path(source["path"])), sources))
         futures = [executor.submit(analyse, source, clock, directory) for source, clock in zip(sources, clocks)]
-        samples = [audio_samples(Path(source["path"])) if clock["audio"] else np.zeros(0, np.float32)
-                   for source, clock in zip(sources, clocks)]
+        with ThreadPoolExecutor(4) as decoder:
+            samples = list(decoder.map(lambda pair: audio_samples(Path(pair[0]["path"])) if pair[1]["audio"]
+                                       else np.zeros(0, np.float32), zip(sources, clocks)))
         for source, audio in zip(sources, samples):
             np.save(directory / f"{source['id']}-energy.npy", energy(audio))
         if reuse:
@@ -438,12 +440,32 @@ def raw_units(words: list[dict]) -> list[dict]:
     return units
 
 
-def apply_text(sid: str, units: list[dict], edits: dict, samples, model_factory, cache: dict) -> list[dict]:
-    """Corrected text replaces a unit's words; the aligner re-times it inside the unit's own audio slice."""
-    known = {unit["id"] for unit in units}
-    unknown = set(edits) - known
+def text_window(units: list[dict], index: int) -> tuple[float, float]:
+    """Audio slice the aligner re-times a corrected unit in (bounded by the neighbouring words)."""
+    unit = units[index]
+    before = units[index - 1]["words"][-1]["end"] if index else 0.0
+    after = units[index + 1]["words"][0]["start"] if index + 1 < len(units) else unit["words"][-1]["end"] + 0.5
+    return max(before, unit["words"][0]["start"] - 0.25), min(after, unit["words"][-1]["end"] + 0.25)
+
+
+def text_requests(sid: str, units: list[dict], edits: dict) -> list[tuple[str, float, float, str]]:
+    """(cache key, origin, finish, text) of every corrected unit."""
+    unknown = set(edits) - {unit["id"] for unit in units}
     if unknown:
         raise ValueError(f"{sid}: unknown units {sorted(unknown)}")
+    requests = []
+    for index, unit in enumerate(units):
+        edit = edits.get(unit["id"])
+        pieces = edit if isinstance(edit, list) else [edit]
+        if edit is None or not "".join(pieces).strip():
+            continue
+        origin, finish = text_window(units, index)
+        requests.append((digest([sid, unit["id"], pieces, origin, finish]), origin, finish, "".join(pieces)))
+    return requests
+
+
+def apply_text(sid: str, units: list[dict], edits: dict, cache: dict) -> list[dict]:
+    """Corrected text replaces a unit's words with the aligner's timing (already in `cache`)."""
     result = []
     for index, unit in enumerate(units):
         edit = edits.get(unit["id"])
@@ -453,18 +475,10 @@ def apply_text(sid: str, units: list[dict], edits: dict, samples, model_factory,
         pieces = edit if isinstance(edit, list) else [edit]
         if not "".join(pieces).strip():
             continue
-        before = units[index - 1]["words"][-1]["end"] if index else 0.0
-        after = units[index + 1]["words"][0]["start"] if index + 1 < len(units) else unit["words"][-1]["end"] + 0.5
-        origin = max(before, unit["words"][0]["start"] - 0.25)
-        finish = min(after, unit["words"][-1]["end"] + 0.25)
-        key = digest([sid, unit["id"], pieces, origin, finish])
-        if key not in cache:
-            audio = samples()[round(origin * ASR.SAMPLE_RATE):round(finish * ASR.SAMPLE_RATE)]
-            words = ASR.align(model_factory(), audio, "".join(pieces), origin)
-            if not words:
-                raise ValueError(f"{sid} {unit['id']}: aligner returned no words")
-            cache[key] = words
-        words = [dict(word) for word in cache[key]]
+        origin, finish = text_window(units, index)
+        words = [dict(word) for word in cache.get(digest([sid, unit["id"], pieces, origin, finish]), [])]
+        if not words:
+            raise ValueError(f"{sid} {unit['id']}: aligner returned no words")
         if len(pieces) == 1:
             result.append({"id": unit["id"], "words": words, "sentence_end": unit["sentence_end"], "edited": True})
             continue
@@ -481,6 +495,31 @@ def apply_text(sid: str, units: list[dict], edits: dict, samples, model_factory,
             result.append({"id": f"{unit['id']}.{number}", "words": taken, "edited": True,
                            "sentence_end": unit["sentence_end"] if number == len(pieces) else piece.rstrip()[-1:] in STRONG})
     return result
+
+
+def align_corrections(job_sources: list[dict], raw: dict, annotations: dict, cache: dict, model=None) -> None:
+    """Re-time every new correction in one batched aligner pass (each source's audio decoded once)."""
+    pending = []
+    for source in job_sources:
+        edits = annotations["sources"].get(source["id"], {}).get("text", {})
+        if edits:
+            units = raw_units(raw[source["id"]]["words"])
+            pending += [(source, *request) for request in text_requests(source["id"], units, edits) if request[0] not in cache]
+    if not pending:
+        return
+    started = time.monotonic()
+    paths = {source["id"]: Path(source["path"]) for source, *_ in pending}
+    with ThreadPoolExecutor(4) as decoder:
+        audio = dict(zip(paths, decoder.map(audio_samples, paths.values())))
+    if model is None:
+        log("annotate: loading aligner")
+        model = ASR.build_aligner()
+    requests = [(audio[source["id"]][round(origin * ASR.SAMPLE_RATE):round(finish * ASR.SAMPLE_RATE)], text, origin)
+                for source, _, origin, finish, text in pending]
+    for (_, key, *_), words in zip(pending, ASR.align_many(model, requests)):
+        if words:
+            cache[key] = words
+    log(f"annotate: {len(pending)} corrected units re-timed ({time.monotonic() - started:.1f} s)")
 
 
 def resolve_beats(sid: str, units: list[dict], specs: list[dict]) -> list[dict]:
@@ -514,14 +553,8 @@ def build(job: Path, state: dict, *, model=None) -> dict:
     annotations = check_annotations(load_annotations(job), state)
     cache_path = directory / "aligned.json"
     cache = read(cache_path) if cache_path.is_file() else {}
-    holder = {"model": model}
-
-    def model_factory():
-        if holder["model"] is None:
-            log("annotate: loading aligner")
-            holder["model"] = ASR.build()
-        return holder["model"]
-
+    align_corrections(sources, raw, annotations, cache, model)
+    write(cache_path, cache)
     registered = {row["person_id"] for row in state["celebrities"]}
     catalog = []
     for source in sources:
@@ -529,9 +562,7 @@ def build(job: Path, state: dict, *, model=None) -> dict:
         note = annotations["sources"].get(sid, {})
         env = np.load(directory / f"{sid}-energy.npy")
         series = np.load(directory / f"{sid}.npz")
-        samples = (lambda path=Path(source["path"]): audio_samples(path))
-        units = raw_units(raw[sid]["words"])
-        units = apply_text(sid, units, note.get("text", {}), samples, model_factory, cache)
+        units = apply_text(sid, raw_units(raw[sid]["words"]), note.get("text", {}), cache)
         units = finish_units(units, env, source, (series["adjacent"], series["endpoint"]))
         cameras = {shot: f"{sid}:cam{index}" for index, group in enumerate(note.get("cameras", []), 1) for shot in group}
         merged = {int(number) for number, row in note.get("shots", {}).items() if row.get("merge")}

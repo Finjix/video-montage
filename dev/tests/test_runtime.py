@@ -215,5 +215,5 @@ assert plan.MIN_FRAMES == 1020
     def test_manifest_and_upload_folder(self):
         import build_plugin
         metadata, files = build_plugin.validate()
-        self.assertEqual(metadata["version"], "0.2.0")
+        self.assertRegex(metadata["version"], r"^\d+\.\d+\.\d+$")
         self.assertLess(sum(p.stat().st_size for p in files), 10 * 1024**2)

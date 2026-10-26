@@ -18,6 +18,7 @@ from PIL import Image
 
 from montage import audio as AUDIO
 from montage import bgm as BGM
+from montage import job as JOB
 from montage import catalog as CATALOG
 from montage import rules
 from montage.common import FFMPEG, digest, log, pool, probe, read, run, sha, write
@@ -176,7 +177,9 @@ def pick(options, index: int):
 
 
 def find_assets(asset_root: Path, words: tuple[str, ...]) -> list[str]:
-    return sorted(str(p) for p in asset_root.rglob("*.png") if any(w in str(p.relative_to(asset_root)).lower() for w in words))
+    """Usable 9:16 PNGs under folders named by `words` (the same discovery `init` reports)."""
+    return sorted(str(p) for p in asset_root.rglob("*.png") if any(w in str(p.relative_to(asset_root)).lower() for w in words)
+                  and not JOB.overlay_problem(p))
 
 
 # ----------------------------------------------------------------------------------- encode
@@ -215,12 +218,35 @@ def encode(item: dict, work: Path, target: Path) -> dict:
         return {"design": track["record"], "encoding": encoding}
 
 
-def remix(item: dict, packaged: Path, target: Path) -> None:
-    """Rebuild only the audio (picture copied) with new gains."""
+def remix(item: dict, packaged: Path, target: Path, limit: bool = False) -> None:
+    """Rebuild only the audio (picture copied) with new gains; `limit` holds peaks under -2 dBFS."""
+    limiter = ",alimiter=limit=0.794:level=0:attack=5:release=50" if limit else ""
     run([FFMPEG, "-v", "error", "-nostdin", "-y", "-i", packaged, "-i", item["clean"], "-stream_loop", "-1", "-i", item["bgm"]["path"],
          "-filter_complex", f"[1:a]volume={item['voice_gain_db']}dB[v];[2:a]volume={item['bgm']['gain_db']}dB[m];"
-         "[v][m]amix=inputs=2:duration=first:normalize=0[a]", "-map", "0:v:0", "-map", "[a]", "-c:v", "copy",
+         f"[v][m]amix=inputs=2:duration=first:normalize=0{limiter}[a]", "-map", "0:v:0", "-map", "[a]", "-c:v", "copy",
          "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-t", f"{item['frames'] / 60:.6f}", "-movflags", "+faststart", target])
+
+
+def correct_loudness(item: dict, staged: Path, work: Path) -> dict:
+    """Shift voice and music together until the mix lands on the target; a limiter only when peaks forbid it."""
+    loudness, limit = AUDIO.measure(staged), False
+    for _ in range(3):
+        if loudness["lufs"] is None:
+            break
+        offset = AUDIO.TARGET_LUFS - loudness["lufs"]
+        room = AUDIO.DELIVERY_PEAK_DB - loudness["true_peak"] if loudness["true_peak"] is not None else offset
+        if abs(offset) <= 0.5 and room >= 0:
+            break
+        # Each remix starts again from the clean audio, so once peaks needed the limiter it stays on.
+        limit = limit or offset > room + 0.5
+        shift = offset if limit else min(offset, room)
+        item["voice_gain_db"] = round(item["voice_gain_db"] + shift, 2)
+        item["bgm"]["gain_db"] = round(item["bgm"]["gain_db"] + shift, 2)
+        corrected = work / f"{item['plan_id']}-mix.mp4"
+        remix(item, staged, corrected, limit=limit)
+        os.replace(corrected, staged)
+        loudness = AUDIO.measure(staged)
+    return loudness
 
 
 def clipped_stereo(path: Path) -> int:
@@ -241,19 +267,9 @@ def finish(item: dict, work: Path) -> dict:
         result = item["previous"]
         if Path(result["path"]).is_file() and sha(Path(result["path"])) == result["sha256"]:
             log(f"package: {item['plan_id']} unchanged")
-            return {**result, "reused": True}
+            return {**result, "bgm_auto": item["bgm_auto"], "reused": True}
     result = encode(item, work, staged)
-    loudness = AUDIO.measure(staged)
-    offset = AUDIO.TARGET_LUFS - loudness["lufs"] if loudness["lufs"] is not None else 0.0
-    if loudness["true_peak"] is not None:
-        offset = min(offset, AUDIO.DELIVERY_PEAK_DB - loudness["true_peak"])
-    if abs(offset) > 0.5:
-        item["voice_gain_db"] = round(item["voice_gain_db"] + offset, 2)
-        item["bgm"]["gain_db"] = round(item["bgm"]["gain_db"] + offset, 2)
-        corrected = work / f"{item['plan_id']}-mix.mp4"
-        remix(item, staged, corrected)
-        os.replace(corrected, staged)
-        loudness = AUDIO.measure(staged)
+    loudness = correct_loudness(item, staged, work)
     errors = []
     info = probe(staged)
     video = next(s for s in info["streams"] if s["codec_type"] == "video")
@@ -274,7 +290,7 @@ def finish(item: dict, work: Path) -> dict:
     return {"plan_id": item["plan_id"], "key": item["key"], "staged": str(staged), "errors": errors, "frames": item["frames"],
             "clean": {"path": item["clean"], "sha256": item["clean_sha256"]}, "subtitle": item["subtitle"],
             "lufs": loudness["lufs"], "true_peak": loudness["true_peak"], "voice_gain_db": item["voice_gain_db"],
-            "bgm": item["bgm"], "voice_over_music_db": item["voice_over_music_db"], **result}
+            "bgm": item["bgm"], "voice_over_music_db": item["voice_over_music_db"], "bgm_auto": item["bgm_auto"], **result}
 
 
 def final_sheet(row: dict, video: Path, target: Path) -> None:
@@ -297,8 +313,8 @@ def prepare_items(job: Path, state: dict, config: dict) -> tuple[list[dict], dic
     plan_ids = [row["plan_id"] for row in read(job / "config/plan.json")["outputs"]]
     by_id = {record["plan_id"]: record for record in records}
     missing = [pid for pid in plan_ids if pid not in by_id]
-    if missing:
-        raise ValueError(f"render first: no clean video for {', '.join(missing)}")
+    if len(missing) == len(plan_ids):
+        raise ValueError("render first: no clean videos")
     defaults = config.get("defaults", {})
     overrides = config.get("outputs", {})
     unknown = set(overrides) - set(plan_ids)
@@ -312,6 +328,9 @@ def prepare_items(job: Path, state: dict, config: dict) -> tuple[list[dict], dic
     items, errors, warnings = [], {}, {}
     cues_by_output, values = [], []
     for ordinal, pid in enumerate(plan_ids):
+        if pid not in by_id:
+            errors[pid] = ["no clean video: run render for this plan first"]
+            continue
         record, own = by_id[pid], overrides.get(pid, {})
         output = record["output"]
         problems, notes = list(record["errors"]), []
@@ -387,15 +406,14 @@ def prepare_items(job: Path, state: dict, config: dict) -> tuple[list[dict], dic
         BGM.require_distribution(shas, state.get("decisions", {}).get("bgm_repetition"))
     except ValueError as error:
         errors.setdefault("batch", []).append(str(error))
-    for item in items:
-        if item["plan_id"] in errors or "bgm" not in item:
-            continue
+    ready = [item for item in items if item["plan_id"] not in errors and "bgm" in item]
+    gains = bgm_gains(ready)
+    for item in ready:
         item["font_path"] = subtitle_fonts.FONTS[item["design"]["font"]]["path"]
-        voice = AUDIO.pcm(Path(item["clean"]))
-        music = AUDIO.pcm(Path(item["bgm"]["path"]))
         item["voice_gain_db"] = 0.0
-        item["bgm"]["gain_db"] = AUDIO.auto_bgm_gain_db(voice, music)
-        item["voice_over_music_db"] = AUDIO.voice_over_music_db(voice, music, item["bgm"]["gain_db"])
+        item["bgm_auto"] = gains[item["plan_id"]]
+        item["bgm"]["gain_db"] = item["bgm_auto"]["gain_db"]
+        item["voice_over_music_db"] = item["bgm_auto"]["voice_over_music_db"]
         item["key"] = digest([VERSION, item["clean_sha256"], sha(Path(item["subtitle"])), item["design"]["cues"],
                               item["design"]["font"], item["layers"], item["bgm"]])
         if not (item["previous"] and item["previous"].get("key") == item["key"]):
@@ -404,14 +422,52 @@ def prepare_items(job: Path, state: dict, config: dict) -> tuple[list[dict], dic
     return prepared, errors, warnings
 
 
+def bgm_gains(items: list[dict]) -> dict[str, dict]:
+    """Automatic BGM gain per output; reused from the last run while the clean video and track are unchanged,
+    otherwise each track is decoded once and the voices in parallel."""
+    result, todo = {}, []
+    for item in items:
+        known = (item["previous"] or {}).get("bgm_auto") or {}
+        if (known.get("version") == VERSION and known.get("clean") == item["clean_sha256"]
+                and known.get("bgm") == item["bgm"]["sha256"]):
+            result[item["plan_id"]] = known
+        else:
+            todo.append(item)
+    if not todo:
+        return result
+    music = {}
+    for item in todo:
+        if item["bgm"]["sha256"] not in music:
+            music[item["bgm"]["sha256"]] = AUDIO.pcm(Path(item["bgm"]["path"]))
+
+    def measure(item):
+        voice, track = AUDIO.pcm(Path(item["clean"])), music[item["bgm"]["sha256"]]
+        gain = AUDIO.auto_bgm_gain_db(voice, track)
+        return {"version": VERSION, "clean": item["clean_sha256"], "bgm": item["bgm"]["sha256"], "gain_db": gain,
+                "voice_over_music_db": AUDIO.voice_over_music_db(voice, track, gain)}
+    with pool(len(todo)) as executor:
+        for item, row in zip(todo, executor.map(measure, todo)):
+            result[item["plan_id"]] = row
+    return result
+
+
 def package(job: Path, state: dict, config: dict) -> dict:
     items, errors, warnings = prepare_items(job, state, config)
-    if errors:
-        return {"published": [], "errors": errors, "warnings": warnings}
-    work = job / "work"
-    work.mkdir(exist_ok=True)
+    if errors.get("batch"):
+        return {"published": [], "errors": errors, "warnings": warnings, "complete": False}
+    # Outputs without problems are packaged now; the others wait for their fix (a re-run redoes only those).
+    # A private work folder per run: a leftover process of an interrupted run cannot block this one.
+    shutil.rmtree(job / "work", ignore_errors=True)
+    work = job / "work" / f"run-{os.getpid()}"
+    work.mkdir(parents=True, exist_ok=True)
+
+    def attempt(item):
+        try:
+            return finish(item, work)
+        except (RuntimeError, ValueError, OSError) as error:
+            return {"plan_id": item["plan_id"], "errors": [f"encode failed: {str(error)[-600:]}"]}
     with pool(len(items)) as executor:
-        results = list(executor.map(lambda item: finish(item, work), items))
+        results = list(executor.map(attempt, items))
     for row in results:
         if row["errors"]:
             errors[row["plan_id"]] = row["errors"]
@@ -440,7 +496,7 @@ def package(job: Path, state: dict, config: dict) -> dict:
         if pid not in plan_ids:
             Path(rows.pop(pid)["path"]).unlink(missing_ok=True)
     write(manifest_path, {"outputs": [rows[pid] for pid in plan_ids if pid in rows], "config": config})
-    shutil.rmtree(work, ignore_errors=True)
+    shutil.rmtree(job / "work", ignore_errors=True)
     return {"published": published, "errors": errors, "warnings": warnings,
             "complete": all(pid in rows for pid in plan_ids) and not errors}
 

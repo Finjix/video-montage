@@ -25,3 +25,10 @@ python -B dev/build_plugin.py
 ```
 
 Uploading the ZIP, developer identity verification and market review remain portal operations; no market submission was performed.
+
+## 2026-10-26 review pass
+
+- 40 regression tests pass under the system Python 3.13 and the plugin's private Python, including the new `test_plan_routes.py` (plan robustness, `routes` clips/joins/draft on a synthetic catalog, incremental batch limits against `batch.audit`, PNG header check, aligner OOM fallback, tolerant token attachment).
+- On the existing 10-source smoke catalog: `routes` found 90 cuttable clips and 2967 verified single-celebrity routes in about 6 s; `routes --joins` built a 3-output draft (and a 40-output draft in 1.8 s) that `check` accepted with no batch problems. `render` of the 3-output draft passed QC (-23.18 / -22.96 / -22.66 LUFS); `package` published all three (-23.1 / -22.86 / -22.88 LUFS) in 32 s, and an unchanged re-run took 0.8 s with identical output hashes.
+- `init` through the `.cmd` launcher with Chinese JSON on stdin reported the asset pack (15 text pins, 1 disclaimer, 0 audio) and refused a two-source order for the default three-source rule.
+- Not exercised here: `prepare` and `annotate` with text corrections (the ASR runtime and models are not cached on this machine), so the aligner-only load and batched alignment are covered by unit tests only.

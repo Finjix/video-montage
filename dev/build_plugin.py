@@ -1,6 +1,5 @@
 """Validate the complete upload folder and produce the marketplace ZIP."""
 import json
-import sys
 import zipfile
 from pathlib import Path
 from xml.etree import ElementTree
@@ -30,7 +29,8 @@ def validate(root=PLUGIN):
     instructions = skill.read_text(encoding="utf-8")
     assert instructions.startswith("---\nname: video-montage\n") and "description:" in instructions
     assert (skill.parent / "agents/openai.yaml").is_file()
-    files = sorted(path for path in root.rglob("*") if path.is_file())
+    # The runtime cache (downloaded on first use, Git-ignored) is never part of the upload.
+    files = sorted(path for path in root.rglob("*") if path.is_file() and path.relative_to(root).parts[0] != "runtime-cache")
     assert len(files) <= 5000
     assert sum(path.stat().st_size for path in files) <= 512 * 1024**2
     names = set()

@@ -289,13 +289,21 @@ def ensure(feature: str):
         save(receipt, stamp)
 
 
+_BINARIES: dict[tuple[str, str], Path] = {}
+
+
 def binary(name: str) -> Path:
+    """Verified FFmpeg tool; checked once per process, not on every command."""
+    known = _BINARIES.get((str(cache()), name))
+    if known is not None and known.is_file():
+        return known
     spec = manifest()["ffmpeg"]
     folder = cache() / "tools" / f"ffmpeg-{spec['version']}"
     target = folder / f"{name}.exe"
     with locked("ffmpeg"):
         files = spec["files"]
         if all(valid(folder / filename, item) for filename, item in files.items()):
+            _BINARIES[(str(cache()), name)] = target
             return target
         archive = fetch(cache() / "downloads" / "ffmpeg.zip", spec["archive"])
         with zipfile.ZipFile(archive) as zipped:
@@ -312,6 +320,7 @@ def binary(name: str) -> Path:
                 os.replace(partial, folder / filename)
                 if not valid(folder / filename, item):
                     raise RuntimeFailure(f"FFmpeg checksum mismatch: {filename}")
+        _BINARIES[(str(cache()), name)] = target
         return target
 
 

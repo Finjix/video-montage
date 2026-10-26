@@ -1,23 +1,22 @@
-# Workflow and file formats
+# Commands and file formats
 
-All commands: `& "<plugin_root>/scripts/video_montage.cmd" <command> --job-dir <job_dir>`.
-The launcher automatically prepares its private Python. Media/ASR dependencies are installed only when used.
-Use `runtime --feature base|media|packaging|asr` to inspect without downloading, or append `--install` to prefetch that feature.
-First-use downloads add setup time; processing estimates below assume a warm cache. Exit 3 indicates runtime setup failure.
-Results print on stdout; progress lines on stderr. Exit code 2 means the input broke a rule: read the listed
-problems, fix the input and run the same command again. Every command can be re-run; nothing needs a repair step.
+All commands: `& "<plugin_root>/scripts/video_montage.cmd" <command> --job-dir <job_dir>`. Times assume a warm
+runtime cache; the first use of a feature adds its download (`runtime --feature base|media|packaging|asr [--install]`
+inspects or prefetches it).
 
 | Command | Does | Typical time |
 | --- | --- | --- |
-| `init --work-order -` | validates the order (JSON on stdin or a file), creates the delivery folder and job dir | seconds |
-| `prepare` | frame clock, camera cuts, speech recognition, units with clean cut points, sheets (a re-run keeps the speech and unit IDs; `--fresh` recognizes again) | about 1 min per 10 sources |
-| `annotate --file <json>` | applies people, speakers, transcript fixes and beats; rewrites the catalog | seconds (+10 s when text changed) |
-| `check --plan <json>` | resolves exact cut frames and checks every rule; writes `reports/check.json` and `reports/scripts.md` (every video's words, beats and joins) | < 1 s |
+| `init --work-order -` | validates the order (JSON on stdin or a file), creates the delivery folder and job dir, reports the asset pack | seconds |
+| `prepare` | frame clock, camera cuts, speech recognition, units with clean cut points, sheets (`--fresh` recognizes again) | ~1 min per 10 sources |
+| `annotate --file <json>` | applies people, speakers, transcript fixes and beats; rewrites the catalog | seconds (+ aligner load when text changed) |
+| `routes [--mix]` | cuttable clips, unusable beats with reasons, joins of verified routes → `reports/routes.md` | seconds, at most `--seconds` (40) |
+| `routes --joins <json>` | builds `config/plan-draft.json` for the whole batch from the accepted joins | seconds |
+| `check --plan <json>` | exact cut frames and every rule → `reports/check.json`, `reports/scripts.md` | < 1 s |
 | `render --plan <json>` | clean videos, QC, subtitle drafts, cut sheets (changed outputs only) | ~15 s per 3 videos |
-| `package [--config <json>]` | designs, encodes, checks and publishes (changed outputs only) | ~15-40 s per video, 4 in parallel |
+| `package [--config <json>]` | designs, encodes, checks and publishes (changed outputs only) | ~25-40 s per video, 4 in parallel |
 | `package --clean` | publishes the clean videos unpackaged (explicit user request only) | seconds |
-| `status` | what exists so far | - |
-| `decide --key K --value V --instruction "<user's words>"` | records a user decision | - |
+| `status` | what exists so far and the next step | - |
+| `decide --key K --value V --instruction "<text>"` | records a decision (the user's words, or `fallback: ...`) | - |
 | `bgm-assets`, `fetch-bgm ...` | BGM inventory and licensed downloads ([packaging](packaging.md#bgm)) | - |
 
 ## Work order (`init`)
@@ -28,33 +27,27 @@ problems, fix the input and run the same command again. Every command can be re-
  "asset_root": "D:/footage/packaging",
  "celebrities": [{"person_id": "person:wu-yue", "name": "吴樾", "nameplate": "D:/footage/packaging/明星铭牌/吴樾.png"}],
  "request": "<the user's request, verbatim>",
- "output_root": "<optional folder; default: the user's Desktop>"}
+ "output_root": "<optional folder; default: the user's Desktop>",
+ "decisions": {"min_sources_per_output": {"value": 2, "instruction": "<the user's words>"}}}
 ```
 
-`sources` are .mp4/.mov/.mkv files with a constant frame rate from timestamp 0 (otherwise `prepare` says so: make
-a constant-frame-rate copy with FFmpeg and use that). `celebrities` lists every selected celebrity with a
-transparent 9:16 nameplate PNG; person IDs look like `person:wu-yue`.
-
-User decisions (only after the user answered; `decide` adds them later):
-
-| Key | Value | Effect |
-| --- | --- | --- |
-| `min_sources_per_output` | `1` or `2` | fewer than 3 source files per video |
-| `bgm_repetition` | `true` | one BGM track may serve more than eight videos |
-
-In the work order: `"decisions": {"min_sources_per_output": {"value": 2, "instruction": "<the user's words>"}}`.
+- `sources`: .mp4/.mov/.mkv with a constant frame rate from timestamp 0 (otherwise `prepare` says so: make a
+  constant-frame-rate copy with FFmpeg and use that).
+- `celebrities`: every selected celebrity with a transparent 9:16 nameplate PNG; IDs look like `person:wu-yue`.
+- `decisions` (optional): `min_sources_per_output` 1 or 2 (default 3 different source files per video);
+  `bgm_repetition` `true` (one track may serve more than eight videos).
 
 ## Catalog (`prepare`)
 
-`temp/catalog/catalog.md` lists each source (S01...) with its camera shots and its speech units (U01...).
-A unit is a clause; `|` marks a sentence end. `in` means a clip may start at this unit, `out` that it may end
-after it (both need a clean pause and a stable picture). `x` excluded, `R` overlaps a user-rejected interval,
-`*` corrected text. `>> Bnn` opens a beat (kind/role and gist, see Annotations; "cannot start/end a clip" means that beat's first/last unit has no clean cut, so a clip must continue into or begin with its neighbour). `S01.jpg` shows the middle frame of every shot (`S01 #3 f574-681` = shot 3, native frames);
-`assets.jpg` shows every overlay PNG of the asset pack.
+`temp/catalog/catalog.md` lists each source (S01...) with its camera shots and speech units (U01...). A unit is a
+clause; `|` marks a sentence end. `in`: a clip may start at this unit; `out`: it may end after it (clean pause and
+stable picture). `x` excluded, `R` overlaps a user-rejected interval, `*` corrected text. `>> Bnn` opens a beat;
+"cannot start/end a clip" means its first/last unit has no clean cut. `S01.jpg` shows the middle frame of every shot
+(`S01 #3 f574-681` = shot 3, native frames); `assets.jpg` shows every overlay PNG of the asset pack.
 
 ## Annotations (`annotate`)
 
-One file for all sources; re-run `annotate` with the complete file whenever you change it.
+One file for all sources; re-run `annotate` with the complete file after every change.
 
 ```json
 {"sources": {
@@ -66,68 +59,82 @@ One file for all sources; re-run `annotate` with the complete file whenever you 
           "exclude": ["U09"],
           "beats": [{"units": "U02-U05", "kind": "talk", "role": "hook", "gist": "asks who still fails at the cold start and promises the fix"},
                     {"units": "U06-U10", "kind": "talk", "role": "body", "gist": "chop trees first, feed the furnace, temperature rises"},
-                    {"units": "U11-U12", "kind": "scene", "role": "body", "gist": "friend asks why the furnace never lights (a scene beat: kept for the record, never planned)"},
-                    {"units": "U30-U31", "kind": "talk", "role": "cta", "gist": "no download needed, click to play"}],
-          "notes": "U12 is 樾哥 (context: he is addressed by name)"}}}
+                    {"units": "U11-U12", "kind": "scene", "role": "body", "gist": "friend asks why the furnace never lights"},
+                    {"units": "U30-U31.2", "kind": "talk", "role": "cta", "gist": "no download needed, click to play"}],
+          "notes": "U12 is 樾哥 (he is addressed by name)"}}}
 ```
 
-- `people`: who is visible in every shot of the source (registered celebrities and any other `person:` IDs for
-  supporting actors); `shots` overrides a shot by number. Tag what the frames show, never what a folder name says.
-  Every shot used in a video must show at least one registered celebrity.
-- `merge: true`: the detected cut that starts this shot is not a real camera change (flash, fast motion).
-- `cameras`: optional groups of shots filmed by the same camera setup (they count as one opening camera).
+- `people`: who is visible in every shot of the source (registered celebrities, plus any other `person:` ID for
+  supporting actors); `shots` overrides one shot by number. Tag what the frames show.
+- `merge: true`: the detected cut starting this shot is not a real camera change (flash, fast motion).
+- `cameras`: optional groups of shots from one camera setup (they count as one opening camera).
 - `speaker` / `speakers`: who talks (default: the single registered celebrity in `people`).
-- `text`: the corrected text of a unit; `""` deletes it (noise, hallucination); a list splits it into
-  `U31.1`, `U31.2`... The aligner re-times corrected text, so keep the words in spoken order.
-- `exclude`: units that must not be used (off-topic, broken audio, wrong person speaking...).
-- `beats`: the only material a plan may use. Each is a run of whole units (`"U06-U10"`, split units as
-  `"U31.1-U31.2"`) with `kind` (`talk` / `scene`), `role` (`hook` / `body` / `payoff` / `cta`) and an English `gist`
-  of at least 12 letters. Beats may not overlap; units in no beat are unusable. How to cut them and what the kinds
-  and roles mean: [editing](editing.md#how-to-compose). A source with no beats cannot be planned.
+- `text`: corrected unit text; `""` deletes the unit (noise, hallucination); a list splits it into `U31.1`,
+  `U31.2`... Keep the words in spoken order: the aligner re-times them.
+- `exclude`: units that must never be used.
+- `beats`: the only material a plan may use: runs of whole units with `kind`, `role` and an English `gist` of at
+  least 12 letters, never overlapping. How to cut them: [editing](editing.md#beats).
+
+## Routes (`routes`)
+
+`reports/routes.md` has three parts:
+- **Clips**: every run of one to three consecutive talk beats of one source that can be cut cleanly (key
+  `S01:U02-U05`), with roles, length range, shot-length range, cast, how many verified routes it opens or closes,
+  its words and gists.
+- **Beats that cannot be cut alone**, each with the reason (no clean pause, edge shot under 60 frames, rejected
+  interval, a shot without a registered celebrity). Join such a beat to a neighbour or re-cut it.
+- **Joins**: for each clip its last sentence, then every clip that can follow it in a route that passes every
+  machine check (its first sentence, the number of such routes, and the allowed relations when they are limited).
+
+Routes keep one celebrity per video; `--mix` adds cross-celebrity routes. Each clip of a route comes from a different
+source file. Write the joins you accept:
+
+```json
+{"joins": [{"from": "S08:U06-U09", "to": "S04:U07-U09", "relation": "explanation", "reason": "U09 asks what matters most; S04 answers: temperature"},
+           {"from": "S04:U07-U09", "to": "S20:U35-U36", "relation": "benefit", "reason": "after the method, the gift code gives the resources", "weak": true}]}
+```
+
+`routes --joins <file>` walks only those joins, verifies every route with the full `check`, then selects the batch:
+strong joins before `weak` ones, one celebrity before mixed casts, least-used clips and openings first, inside the
+batch limits. It writes `config/plan-draft.json` (`P01`...; outputs with a weak join carry a note) and says how many
+outputs it found and what limited it.
 
 ## Plan (`check`, `render`)
 
 ```json
 {"outputs": [
   {"plan_id": "P01",
-   "clips": [{"source": "S08", "units": "U06"}, {"source": "S08", "units": "U13"}, {"source": "S04", "units": "U07-U09"}],
-   "transitions": [{"relation": "question_answer", "reason": "clip 2 answers what matters most: temperature"},
-                   {"relation": "explanation", "reason": "explains how to get temperature: chopping lights the furnace"}],
+   "clips": [{"source": "S08", "units": "U06-U09"}, {"source": "S04", "units": "U07-U09"}, {"source": "S20", "units": "U35-U36"}],
+   "transitions": [{"relation": "explanation", "reason": "U09 asks what matters most; S04 answers: temperature"},
+                   {"relation": "benefit", "reason": "after the method, the gift code gives the resources"}],
    "note": "optional one-line narrative"}]}
 ```
 
-- `plan_id`: letters, digits, `-` and `_`; one output per requested video. The count is the user's: never edit
-  `requested_outputs` in `job.json`; a plan with fewer outputs is unfinished work, not a result.
-- A clip is a contiguous unit range of one source (`"U07-U09"`) made of whole beats. The program chooses the exact in/out frames
-  inside the clean pauses so that duration, shot lengths and silent cuts hold, and maps the shots, cast and
-  nameplates itself.
-- `transitions`: one per adjacent clip pair, with a relation from [editing](editing.md#transitions) and a concrete
-  reason (what links the two clips).
-- `check` prints one line per output (frames, shot lengths, sources, talk share, cast) and every problem with its
-  numbers, and writes `reports/scripts.md`: per output each clip's source, beats, spoken words and beat gists with the
-  relation and reason of every join. Read it before `render` ([read-through](editing.md#read-through-after-every-check)).
-  `render` runs the same check first and renders nothing while problems remain.
+- `plan_id`: letters, digits, `-` and `_`; one output per requested video.
+- A clip is a contiguous unit range of one source made of whole beats. The program picks the exact in/out frames
+  inside the clean pauses and maps shots, cast and nameplates itself.
+- `transitions`: one per adjacent clip pair: a relation from [editing](editing.md#transitions) and a reason naming
+  the words that link the two clips.
+- `check` prints one line per output (frames, shot lengths, sources, cast) and every problem with its numbers, and
+  writes `reports/scripts.md`: each video's clips, beats, words and gists with the relation and reason of every
+  join. `render` runs the same check first and renders nothing while problems remain.
 
 ## After `render`
 
-- `temp/sheets/<plan_id>-cuts.jpg`: the first and last frame of every shot in order. Look across each cut: a jump in
-  subject position or scale, a wrong or missing person, two shot changes in quick succession or a transition
-  effect is a plan problem.
-- `temp/subtitles/subtitle-<plan_id>.txt`: SRT cues drafted from the corrected words. You may edit text and times
+- `temp/sheets/<plan_id>-cuts.jpg`: first and last frame of every shot. A jump in subject position or scale, a wrong
+  or missing person, two shot changes in quick succession or a transition effect is a plan problem.
+- `temp/subtitles/subtitle-<plan_id>.txt`: SRT cues drafted from the corrected words. Edit text and times freely
   (one line per cue, at most 10 characters, inside the video, no overlaps, never across a cut).
-- Render QC problems (frame mismatch, clipping, a cut that is not silent) are listed per output; they mean a plan or
-  source problem, not a reason to retry blindly.
+- Render QC problems (frame mismatch, clipping, a cut that is not silent) point to the plan or the source.
 
 ## After `package`
 
-Videos land in the delivery folder as `<plan_id>.mp4`. `temp/sheets/<plan_id>-final.jpg` shows each cue settled in
-the encoded video. `temp/delivery.json` records what was published. Re-running `package` re-encodes only outputs
-whose inputs changed.
+Videos land in the delivery folder as `<plan_id>.mp4`; `temp/sheets/<plan_id>-final.jpg` shows each settled cue.
+Outputs without problems are published even while others still have problems; re-running redoes only what changed.
 
 ## Revisions and reburns
 
-- Edit, swap or replace outputs: change the plan, `render`, then `package`. Removed plan IDs are deleted from the
-  delivery folder.
-- Subtitle reburn (the user edited `temp/subtitles/subtitle-<plan_id>.txt`, or asks for a wording change): run
-  `package`. Edited text that differs from the transcript is kept and noted.
+- Edit, swap or replace outputs: change the plan, `render`, `package`. Removed plan IDs leave the delivery folder.
+- Subtitle reburn (the user edited `temp/subtitles/subtitle-<plan_id>.txt` or asks for a wording change): `package`.
+  Edited text that differs from the transcript is kept and noted.
 - Sources must stay where they were; if one moved, `init` a new job.

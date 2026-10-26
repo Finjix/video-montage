@@ -203,7 +203,11 @@ def clip_beats(source: dict, units: list[dict]) -> tuple[list[dict], list[str]]:
     return [{key: beat[key] for key in ("id", "kind", "role", "gist")} for beat in covered], problems
 
 
-def resolve_output(output: dict, sources: dict, registered: set[str], games: list[str], min_sources: int) -> tuple[dict, list[str]]:
+def resolve_output(output: dict, sources: dict, registered: set[str], games: list[str], min_sources: int,
+                   cache: dict | None = None) -> tuple[dict, list[str]]:
+    """`cache` (optional) keeps the in/out options of each clip across many calls on one catalog."""
+    if not isinstance(output, dict):
+        raise PlanError("each output is an object with plan_id, clips and transitions")
     pid = output.get("plan_id")
     clips_spec = output.get("clips")
     if not isinstance(clips_spec, list) or not clips_spec:
@@ -230,7 +234,16 @@ def resolve_output(output: dict, sources: dict, registered: set[str], games: lis
                                           for covered in beat_rows])
     if errors:
         return {}, errors
-    options = [clip_options(source, units) for source, units in rows]
+    options = []
+    for source, units in rows:
+        key = (source["id"], units[0]["id"], units[-1]["id"])
+        if cache is None or key not in cache:
+            row = clip_options(source, units)
+            if cache is None:
+                options.append(row)
+                continue
+            cache[key] = row
+        options.append(cache[key])
     empty = [f"clip {number}: {source['id']} {units[0]['id']}-{units[-1]['id']} has no valid in/out frame pair"
              for number, ((source, units), row) in enumerate(zip(rows, options), 1) if not row]
     if empty:
@@ -276,12 +289,16 @@ def resolve_output(output: dict, sources: dict, registered: set[str], games: lis
     errors += cast_errors
     used = len({clip["sha256"] for clip in clips})
     if used < min_sources:
-        errors.append(f"uses {used} source files; needs >= {min_sources} (ask the user before accepting fewer)")
+        errors.append(f"uses {used} source files; needs >= {min_sources}: take a clip from another source")
+    transitions = output.get("transitions") or []
+    if not isinstance(transitions, list) or not all(isinstance(row, dict) for row in transitions):
+        errors.append("transitions is a list of {relation, reason} objects")
+        transitions = []
     errors += rules.structure_errors(clips)
-    errors += rules.output_errors(clips, output.get("transitions") or [], games)
+    errors += rules.output_errors(clips, transitions, games)
     resolved = {"plan_id": pid, "clips": clips, "shots": shots, "frames": cursor, "nameplates": windows,
                 "protagonists": sorted({p for shot in shots for p in shot["people"] if p in registered}),
-                "transitions": output.get("transitions") or [], "note": output.get("note", "")}
+                "transitions": transitions, "note": output.get("note", "")}
     return resolved, errors
 
 
@@ -340,8 +357,9 @@ def script(output: dict) -> list[str]:
     lines = [f"## {output['plan_id']} ({output['frames'] / 60:.1f} s)" + (f" - {output['note']}" if output.get("note") else "")]
     for number, clip in enumerate(output["clips"], 1):
         if number > 1:
-            link = output["transitions"][number - 2]
-            lines.append(f"   -> {link.get('relation')}: {link.get('reason')}")
+            links = output["transitions"]
+            link = links[number - 2] if number - 2 < len(links) else {}
+            lines.append(f"   -> {link.get('relation', '(missing)')}: {link.get('reason', '(missing)')}")
         beats = ", ".join(f"{beat['id']} {beat['kind']}/{beat['role']}" for beat in clip["beats"])
         lines.append(f"{number}. {clip['source']} {clip['units'][0]}-{clip['units'][-1]} [{beats}] {clip['duration']:.1f} s")
         lines.append(f"   {clip['text']}")
