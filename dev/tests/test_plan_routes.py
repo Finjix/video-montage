@@ -90,6 +90,13 @@ class PlanRobustness(unittest.TestCase):
         _, errors = PLAN.resolve_output({"plan_id": "P01", "clips": clips, "transitions": FOUR_LINKS}, sources, {WU}, GAMES, 3)
         self.assertEqual(errors, [])
 
+    def test_a_returning_source_may_not_repeat_a_beat(self):
+        sources = {s["id"]: s for s in catalog()["sources"]}
+        clips = [{"source": "S01", "units": "U01-U02"}, {"source": "S02", "units": "U02"}, {"source": "S01", "units": "U02"},
+                 {"source": "S03", "units": "U04"}]
+        _, errors = PLAN.resolve_output({"plan_id": "P01", "clips": clips, "transitions": FOUR_LINKS}, sources, {WU}, GAMES, 3)
+        self.assertTrue(any("clip 3: S01 B02 is already spoken in clip 1" in e for e in errors), errors)
+
     def test_camera_cuts_inside_a_clip_do_not_count_as_shots(self):
         sources = {s["id"]: s for s in catalog()["sources"]}
         clips = [{"source": "S01", "units": "U01-U02"}, {"source": "S02", "units": "U03"}, {"source": "S03", "units": "U04"}]
@@ -171,6 +178,10 @@ class Routes(unittest.TestCase):
             beats = [(clip["sha256"], beat) for clip in row["route"] for beat in clip["beats"]]
             self.assertEqual(len(beats), len(set(beats)))
 
+    def test_fewer_max_clips_than_a_video_needs_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "needs >= 4 clips"):
+            ROUTES.run(Path("no-job"), state(1), joins=None, mix=False, max_clips=3, seconds=1)
+
     def test_joins_file_rejects_bad_relations_and_reasons(self):
         found, _ = ROUTES.clips(catalog(), {WU, XU})
         by_key = {clip["key"]: clip for clip in found}
@@ -249,6 +260,30 @@ class CameraCuts(unittest.TestCase):
         self.assertEqual(catalog.camera_cuts(self.series(flicker, base=0.0)), [])
         self.assertEqual(catalog.camera_cuts(self.series({100: 0.025})), [])          # too faint to tell from noise
         self.assertEqual(catalog.camera_cuts(self.series({100: 0.2})), [100])
+
+    def test_shot_notes_follow_their_frames_when_cuts_change(self):
+        from montage import catalog
+        before, after = [[0, 100], [100, 300], [300, 500]], [[0, 100], [100, 200], [200, 300], [300, 450], [450, 500]]
+        note = {"people": [WU], "shots": {"2": {"people": [XU]}, "3": {"merge": True, "people": [WU, XU]}}, "cameras": [[1, 3]]}
+        moved = catalog.renumber_shots(note, before, after)
+        self.assertEqual(moved["shots"], {"2": {"people": [XU]}, "3": {"people": [XU]}, "4": {"merge": True, "people": [WU, XU]},
+                                          "5": {"people": [WU, XU]}})
+        self.assertEqual(moved["cameras"], [[1, 4, 5]])
+        self.assertEqual(moved["people"], [WU])
+
+    def test_prepare_rerun_renumbers_only_sources_whose_cuts_changed(self):
+        from montage import catalog
+        with tempfile.TemporaryDirectory() as folder:
+            job = Path(folder)
+            (job / "config").mkdir()
+            notes = {"sources": {"S01": {"shots": {"2": {"people": [XU]}}}, "S02": {"shots": {"2": {"people": [XU]}}}}}
+            (job / "config/annotations.json").write_text(json.dumps(notes), encoding="utf-8")
+            old = [{"id": sid, "sha256": sid * 8, "frames": 500, "cuts": [100]} for sid in ("S01", "S02")]
+            new = [dict(old[0], cuts=[50, 100]), dict(old[1], sha256="other", cuts=[50, 100])]
+            catalog.keep_shot_notes(job, old, new)
+            result = json.loads((job / "config/annotations.json").read_text(encoding="utf-8"))
+            self.assertEqual(result["sources"]["S01"]["shots"], {"3": {"people": [XU]}})
+            self.assertEqual(result["sources"]["S02"], notes["sources"]["S02"])   # another file: numbers left as they are
 
 
 @unittest.skipUnless(importlib.util.find_spec("numpy"), "needs numpy")

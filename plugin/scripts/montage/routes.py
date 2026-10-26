@@ -270,6 +270,8 @@ def joins_file(path: Path, by_key: dict) -> tuple[dict, list[str]]:
 
 
 def run(job: Path, state: dict, *, joins: Path | None, mix: bool, max_clips: int, seconds: float) -> list[str]:
+    if max_clips < PLAN.MIN_SHOTS:
+        raise ValueError(f"--max-clips {max_clips} finds no route: a video needs >= {PLAN.MIN_SHOTS} clips")
     catalog = read(job / "catalog/catalog.json")
     sources = {source["id"]: source for source in catalog["sources"]}
     registered = {row["person_id"] for row in state["celebrities"]}

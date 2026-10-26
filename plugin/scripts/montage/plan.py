@@ -224,6 +224,13 @@ def resolve_output(output: dict, sources: dict, registered: set[str], games: lis
         if not units[-1]["out_frames"]:
             errors.append(f"clip {number}: {source['id']} {units[-1]['id']} cannot end a clip (no clean silence or stable picture after it)")
         rows.append((source, units))
+    spoken = {}
+    for number, ((source, _), covered) in enumerate(zip(rows, beat_rows), 1):
+        for beat in covered:
+            first = spoken.setdefault((source["sha256"], beat["id"]), number)
+            if first != number:
+                errors.append(f"clip {number}: {source['id']} {beat['id']} is already spoken in clip {first}; a source may "
+                              "return later in a video, a beat may not")
     if not errors:
         errors += rules.structure_errors([{"beats": covered, "kind": "scene" if any(b["kind"] == "scene" for b in covered) else "talk"}
                                           for covered in beat_rows])

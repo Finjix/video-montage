@@ -356,6 +356,49 @@ def analyse(source: dict, clock: dict, directory: Path) -> dict:
     return {**source, **clock, "cuts": cuts, "sheet": str(sheet)}
 
 
+def renumber_shots(note: dict, before: list[list[int]], after: list[list[int]]) -> dict:
+    """Shot-keyed notes moved onto the new shots covering the same frames: each new shot inherits the old shot it
+    starts in, and only the first of them keeps a merge (it undoes the cut that started the old shot)."""
+    parent = [next(old for old, (start, end) in enumerate(before, 1) if start <= first < end) for first, _ in after]
+    result = dict(note)
+    if "shots" in note:
+        shots = {}
+        for number, old in enumerate(parent, 1):
+            row = dict(note["shots"].get(str(old), {}))
+            if number > 1 and parent[number - 2] == old:
+                row.pop("merge", None)
+            if row:
+                shots[str(number)] = row
+        result["shots"] = shots
+    if "cameras" in note:
+        result["cameras"] = [[number for number, old in enumerate(parent, 1) if old in group] for group in note["cameras"]]
+    return result
+
+
+def keep_shot_notes(job: Path, before: list[dict], after: list[dict]) -> None:
+    """A re-run that finds other camera cuts (a newer detector) renumbers shots; annotations keyed by shot number
+    follow their frames so they stay valid, as unit IDs do."""
+    path = job / "config/annotations.json"
+    if not path.is_file():
+        return
+    annotations = read(path)
+    previous = {row["id"]: row for row in before}
+    moved = []
+    for source in after:
+        note = annotations.get("sources", {}).get(source["id"])
+        old = previous.get(source["id"])
+        if (not note or not {"shots", "cameras"} & set(note) or not old or old["sha256"] != source["sha256"]
+                or old["frames"] != source["frames"] or old["cuts"] == source["cuts"]):
+            continue
+        annotations["sources"][source["id"]] = renumber_shots(note, shots_of(old["cuts"], old["frames"]),
+                                                              shots_of(source["cuts"], source["frames"]))
+        moved.append(source["id"])
+    if moved:
+        write(path, annotations)
+        log(f"prepare: camera cuts changed in {', '.join(moved)}; shot notes in config/annotations.json were renumbered "
+            "to the new shots (re-read catalog.md before editing shot notes again)")
+
+
 def recognition_context(order: dict, library: dict) -> str:
     names = [entry["text"] for entry in library["entries"]] + [row["name"] for row in order["celebrities"]]
     return " ".join(dict.fromkeys(names))
@@ -393,6 +436,8 @@ def prepare(job: Path, state: dict, *, fresh: bool = False) -> dict:
         analysed = [future.result() for future in futures]
     raw = {row["id"]: {"words": w} for row, w in zip(analysed, words)}
     write(directory / "asr.json", {**raw, "_sources": {s["id"]: s["sha256"] for s in sources}})
+    if (directory / "sources.json").is_file():
+        keep_shot_notes(job, read(directory / "sources.json"), analysed)
     write(directory / "sources.json", analysed)
     asset_sheet(Path(state["order"]["asset_root"]), directory / "assets.jpg")
     return build(job, state, model=model)
