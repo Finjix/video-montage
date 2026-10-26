@@ -23,6 +23,7 @@ from montage.common import FFMPEG, FFPROBE, FONT, REJECTED, digest, log, pool, p
 
 THUMB_W, THUMB_H = 64, 114
 CUT_DIFFERENCE = 0.07       # adjacent-frame mean difference that marks a camera cut / unstable edge
+SOFT_CUT, ISOLATION = 0.03, 3.0  # a same-background cut (zoom-in, jump cut) stays under CUT_DIFFERENCE but towers over every neighbour
 ENDPOINT_DIFFERENCE = 0.12  # 13-frame endpoint distance at a clip edge (dissolves, fast zooms)
 EDGE_FRAMES = 30            # frames at each clip edge that must stay free of dissolves, flashes and fast motion
 HOP = 0.01                  # energy envelope resolution (seconds)
@@ -100,14 +101,18 @@ def visual_series(path: Path, frames: int) -> tuple[np.ndarray, np.ndarray, np.n
 
 def camera_cuts(adjacent: np.ndarray) -> list[int]:
     """Frames that start a new shot: a spike well above its neighbourhood, so steady motion and duplicated-frame
-    flicker are not cuts. The onset of a motion burst can still read as a cut; annotations can merge it."""
+    flicker are not cuts. A softer single-frame spike ISOLATION times above every neighbour is a cut too: a zoom-in on
+    the same set or a jump cut differs little per pixel, and a few frames of it at a clip edge flash on screen.
+    The onset of a motion burst can still read as a cut; annotations can merge it."""
     cuts = []
     for i in range(1, len(adjacent)):
         value = adjacent[i]
-        if value <= CUT_DIFFERENCE:
+        if value <= SOFT_CUT:
             continue
         around = np.concatenate([adjacent[max(1, i - 8):i], adjacent[i + 1:i + 9]])
-        if around.size and value < 3 * float(np.percentile(around, 75)):
+        hard = value > CUT_DIFFERENCE and not (around.size and value < 3 * float(np.percentile(around, 75)))
+        soft = not around.size or value >= ISOLATION * float(np.max(around))
+        if not (hard or soft):
             continue
         if cuts and i - cuts[-1] < 6:
             if value > adjacent[cuts[-1]]:

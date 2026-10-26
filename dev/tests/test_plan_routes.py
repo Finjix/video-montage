@@ -226,6 +226,31 @@ class InitChecks(unittest.TestCase):
             self.assertEqual(JOB.overlay_problem(path), "not a PNG")
 
 
+@unittest.skipUnless(importlib.util.find_spec("numpy") and importlib.util.find_spec("PIL"), "needs numpy and Pillow")
+class CameraCuts(unittest.TestCase):
+    def series(self, spikes: dict[int, float], base: float = 0.003, frames: int = 200):
+        import numpy as np
+        values = np.full(frames, base, np.float32)
+        values[0] = 0.0
+        for frame, value in spikes.items():
+            values[frame] = value
+        return values
+
+    def test_soft_isolated_spike_is_a_cut(self):
+        from montage import catalog
+        # a zoom-in on the same set: 0.056 against ~0.003 neighbours (S01 frame 922 of the 2026-10-26 batch)
+        self.assertEqual(catalog.camera_cuts(self.series({100: 0.056, 101: 0.0})), [100])
+
+    def test_motion_and_flicker_are_not_cuts(self):
+        from montage import catalog
+        burst = {frame: 0.066 + 0.001 * (frame % 3) for frame in range(100, 106)}   # steady fast motion
+        self.assertEqual(catalog.camera_cuts(self.series(burst)), [])
+        flicker = {frame: 0.035 for frame in range(80, 140, 2)}                     # duplicated frames: motion every other frame
+        self.assertEqual(catalog.camera_cuts(self.series(flicker, base=0.0)), [])
+        self.assertEqual(catalog.camera_cuts(self.series({100: 0.025})), [])          # too faint to tell from noise
+        self.assertEqual(catalog.camera_cuts(self.series({100: 0.2})), [100])
+
+
 @unittest.skipUnless(importlib.util.find_spec("numpy"), "needs numpy")
 class Alignment(unittest.TestCase):
     def test_unmatched_token_does_not_fail_recognition(self):
