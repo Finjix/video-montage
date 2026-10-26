@@ -11,7 +11,7 @@ from montage import batch, timeline as CATALOG, rules
 from montage.common import read
 
 MIN_FRAMES, MAX_FRAMES = 1020, 1800      # 17-30 s at 60 fps, clean and final (no speed change)
-MIN_SHOTS, MIN_SHOT, MAX_SPREAD = 4, 60, 300   # shots >= 1 s, longest minus shortest <= 300 frames (5 s)
+MIN_SHOTS, MIN_SHOT, MAX_SPREAD = 4, 60, 300   # >= 4 source runs, shots >= 1 s, longest minus shortest <= 300 frames (5 s)
 NAMEPLATE_FRAMES, MIN_NAMEPLATE, NAMEPLATE_GAP = 192, 48, 18
 IN_PAD, OUT_PAD = 0.10, 0.12             # preferred silence beyond the muted edge
 SAMPLES_PER_EDGE = 14
@@ -71,23 +71,22 @@ def clip_options(source: dict, units: list[dict]) -> list[dict]:
     return options
 
 
-def violation(total: int, shots: int) -> int:
-    return max(0, MIN_FRAMES - total) + max(0, total - MAX_FRAMES) + 1000 * max(0, MIN_SHOTS - shots)
+def violation(total: int) -> int:
+    return max(0, MIN_FRAMES - total) + max(0, total - MAX_FRAMES)
 
 
 def repair(feasible: list[list[dict]]) -> list[dict] | None:
-    """Cheapest option per clip, then single-clip swaps until duration and shot count hold."""
+    """Cheapest option per clip, then single-clip swaps until the duration holds."""
     choice = [min(row, key=lambda o: o["cost"]) for row in feasible]
     total = sum(o["total"] for o in choice)
-    shots = sum(len(o["pieces"]) for o in choice)
     for _ in range(60):
-        current = violation(total, shots)
+        current = violation(total)
         if not current:
             return choice
         best = None
         for i, row in enumerate(feasible):
             for o in row:
-                score = violation(total - choice[i]["total"] + o["total"], shots - len(choice[i]["pieces"]) + len(o["pieces"]))
+                score = violation(total - choice[i]["total"] + o["total"])
                 key = (score, o["cost"] - choice[i]["cost"])
                 if score < current and (best is None or key < best[0]):
                     best = (key, i, o)
@@ -95,13 +94,12 @@ def repair(feasible: list[list[dict]]) -> list[dict] | None:
             return None
         _, i, o = best
         total += o["total"] - choice[i]["total"]
-        shots += len(o["pieces"]) - len(choice[i]["pieces"])
         choice[i] = o
     return None
 
 
 def solve(options: list[list[dict]]) -> list[dict] | None:
-    """One option per clip: every shot in [L, L+MAX_SPREAD] with L >= MIN_SHOT, 17-30 s, >= 4 shots, least padding."""
+    """One option per clip: every shot in [L, L+MAX_SPREAD] with L >= MIN_SHOT, 17-30 s, least padding."""
     usable = [[o for o in row if min(o["pieces"]) >= MIN_SHOT] for row in options]
     if any(not row for row in usable):
         return None
@@ -142,9 +140,6 @@ def explain(source_rows: list[tuple[dict, list[dict]]], options: list[list[dict]
         reasons.append(f"at most {high} frames ({high / 60:.1f} s); needs >= {MIN_FRAMES} (17 s): add complete speech")
     if low > MAX_FRAMES:
         reasons.append(f"at least {low} frames ({low / 60:.1f} s); needs <= {MAX_FRAMES} (30 s): drop a clip")
-    shots = sum(max(len(o["pieces"]) for o in row) for row in options)
-    if shots < MIN_SHOTS:
-        reasons.append(f"only {shots} camera shots; needs >= {MIN_SHOTS}: add clips from other cameras/sources")
     if not reasons:
         spans = [f"clip {i}: {min(min(o['pieces']) for o in row)}-{max(max(o['pieces']) for o in row)}"
                  for i, row in enumerate(options, 1)]
@@ -276,10 +271,6 @@ def resolve_output(output: dict, sources: dict, registered: set[str], games: lis
                           "people": shot["people"], "family": shot["family"], "catalog_shot": shot["number"]})
             offset += length
         cursor += option["total"]
-    for left, right in zip(shots, shots[1:]):
-        if (left["source"], left["catalog_shot"]) == (right["source"], right["catalog_shot"]):
-            errors.append(f"clips {left['clip']} and {right['clip']} cut inside one camera shot ({left['source']} shot "
-                          f"{left['catalog_shot']}): a jump cut is not a new shot; put another camera between them or join them")
     for index, shot in enumerate(shots, 1):
         if not shot["people"]:
             errors.append(f"shot {index} ({shot['source']} catalog shot {shot['catalog_shot']}): people not annotated")
@@ -287,6 +278,13 @@ def resolve_output(output: dict, sources: dict, registered: set[str], games: lis
             errors.append(f"shot {index} ({shot['source']} catalog shot {shot['catalog_shot']}): no registered celebrity visible")
     windows, cast_errors = nameplates(shots, registered)
     errors += cast_errors
+    for number, (left, right) in enumerate(zip(clips, clips[1:]), 1):
+        if left["sha256"] == right["sha256"]:
+            errors.append(f"clips {number} and {number + 1} both come from {left['source']}: adjacent shots must come from "
+                          "different source files; put a clip from another source between them or join them")
+    if len(clips) < MIN_SHOTS:
+        errors.append(f"only {len(clips)} clips; needs >= {MIN_SHOTS} shots from alternating sources (camera cuts inside one "
+                      "clip do not count): add clips from other sources")
     used = len({clip["sha256"] for clip in clips})
     if used < min_sources:
         errors.append(f"uses {used} source files; needs >= {min_sources}: take a clip from another source")

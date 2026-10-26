@@ -77,9 +77,11 @@ one ("coherent", "same game", "smooth") is refused.
 
 `check` refuses a plan that breaks any of these; `routes` only lists routes that pass them all.
 
-- Shape: 1020-1800 frames (17-30 s at 60 fps, natural speed), at least 4 camera shots, every shot at least 60 frames,
+- Shape: 1020-1800 frames (17-30 s at 60 fps, natural speed), at least 4 shots where adjacent shots come from different
+  source files (so at least 4 clips, no two neighbours from one source; a source may return later, e.g. a b a c
+  with 3 sources; camera cuts inside a clip are allowed but do not count), every shot at least 60 frames,
   longest minus shortest shot at most 300 frames. A long single-camera clip (over 6 s) needs partners of similar
-  shot length. Two adjacent clips inside one camera shot are a jump cut.
+  shot length.
 - Edges: every clip starts and ends in clean silence (at most 0.45 s before and 0.55 s after the speech) with no
   dissolve, flash or fast motion; user-rejected intervals are refused.
 - Sources: at least 3 different source files per video (unless decided otherwise).

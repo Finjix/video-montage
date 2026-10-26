@@ -79,7 +79,6 @@ def cut(source: dict, run: list[dict], registered: set[str]) -> tuple[dict | Non
             "last_text": "".join(unit["text"] for unit in units[(ends[-1] + 1 if ends else 0):]), "first_speaker": units[0].get("speaker"), "last_speaker": units[-1].get("speaker"),
             "cast": tuple(sorted({p for row in people for p in row if p in registered})),
             "min_frames": min(o["total"] for o in options), "max_frames": max(o["total"] for o in options),
-            "max_shots": max(len(o["pieces"]) for o in options),
             "floor": max(min(o["pieces"]) for o in options), "ceiling": min(max(o["pieces"]) for o in options),
             "pieces": (min(min(o["pieces"]) for o in options), max(max(o["pieces"]) for o in options))}, ""
 
@@ -125,16 +124,17 @@ def search(found: list[dict], links, *, min_sources: int, mix: bool, max_clips: 
         high = sum(c["max_frames"] for c in route)
         if low > PLAN.MAX_FRAMES:
             return
-        if (len(route) >= max(2, min_sources) and last["roles"][-1] in ("payoff", "cta") and "body" in roles
-                and high >= PLAN.MIN_FRAMES and sum(c["max_shots"] for c in route) >= PLAN.MIN_SHOTS
+        if (len({c["sha256"] for c in route}) >= max(2, min_sources) and last["roles"][-1] in ("payoff", "cta") and "body" in roles
+                and high >= PLAN.MIN_FRAMES and len(route) >= PLAN.MIN_SHOTS
                 and max(c["ceiling"] for c in route) - PLAN.MAX_SPREAD <= min(c["floor"] for c in route)):
             yield route, relations_so_far
         if len(route) >= max_clips or last["roles"][-1] == "cta":
             return
-        used = {c["sha256"] for c in route}
+        used = {(c["sha256"], beat) for c in route for beat in c["beats"]}
         pool = found if mix else by_cast[route[0]["cast"]]
         for clip in pool:
-            if clip["sha256"] in used or clip["roles"][0] == "hook":
+            if (clip["sha256"] == last["sha256"] or any((clip["sha256"], beat) in used for beat in clip["beats"])
+                    or clip["roles"][0] == "hook"):
                 continue
             if rules.ROLE_RANK[clip["roles"][0]] < rules.ROLE_RANK[last["roles"][-1]]:
                 continue
@@ -332,9 +332,9 @@ def explore(job, found, unusable, sources, registered, games, min_sources, mix, 
              f"{len(found)} cuttable clips, {len(verified)} routes pass every machine check"
              + (" (search stopped at the time limit; raise --seconds for more)" if truncated else "")
              + f", {len(joins)} distinct joins. Batch: {count} videos.",
-             "A route is clips from different sources in role order. Judge each join below as a viewer: does the second",
-             "clip answer, continue, prove or pay off the first? Accept the good ones in a joins file and run",
-             "`routes --joins <file>` to build the batch.", "", "## Clips", ""]
+             "A route is clips in role order, neighbours from different sources (a source may return later: a b a c).",
+             "Judge each join below as a viewer: does the second clip answer, continue, prove or pay off the first?",
+             "Accept the good ones in a joins file and run `routes --joins <file>` to build the batch.", "", "## Clips", ""]
     for clip in sorted(found, key=lambda c: (c["cast"], c["key"])):
         lines.append(f"{clip['key']}  {'/'.join(clip['roles'])}  {clip['min_frames'] / 60:.1f}-{clip['max_frames'] / 60:.1f} s  "
                      f"shots {clip['pieces'][0]}-{clip['pieces'][1]} f  cast {','.join(names[p] for p in clip['cast'])}  "

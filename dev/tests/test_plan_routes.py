@@ -62,7 +62,42 @@ class Job:
         self.state = state(count)
 
 
+FOUR_CLIPS = [{"source": "S01", "units": "U01"}, {"source": "S02", "units": "U02"}, {"source": "S03", "units": "U03"},
+              {"source": "S04", "units": "U04"}]
+FOUR_LINKS = [{"relation": "answer", "reason": "the opening step answers the hook question"},
+              {"relation": "progression", "reason": "continues the first building step"},
+              {"relation": "benefit", "reason": "invites the viewer to play after the steps"}]
+
+
 class PlanRobustness(unittest.TestCase):
+    def test_four_alternating_clips_pass(self):
+        sources = {s["id"]: s for s in catalog()["sources"]}
+        output = {"plan_id": "P01", "clips": FOUR_CLIPS, "transitions": FOUR_LINKS}
+        _, errors = PLAN.resolve_output(output, sources, {WU}, GAMES, 3)
+        self.assertEqual(errors, [])
+
+    def test_adjacent_clips_from_one_source_are_refused(self):
+        sources = {s["id"]: s for s in catalog()["sources"]}
+        clips = [{"source": "S01", "units": "U01"}, {"source": "S02", "units": "U02"}, {"source": "S02", "units": "U03"},
+                 {"source": "S03", "units": "U04"}]
+        _, errors = PLAN.resolve_output({"plan_id": "P01", "clips": clips, "transitions": FOUR_LINKS}, sources, {WU}, GAMES, 3)
+        self.assertTrue(any("clips 2 and 3 both come from S02" in e for e in errors), errors)
+
+    def test_a_source_may_return_when_not_adjacent(self):
+        sources = {s["id"]: s for s in catalog()["sources"]}
+        clips = [{"source": "S01", "units": "U01"}, {"source": "S02", "units": "U02"}, {"source": "S01", "units": "U03"},
+                 {"source": "S03", "units": "U04"}]
+        _, errors = PLAN.resolve_output({"plan_id": "P01", "clips": clips, "transitions": FOUR_LINKS}, sources, {WU}, GAMES, 3)
+        self.assertEqual(errors, [])
+
+    def test_camera_cuts_inside_a_clip_do_not_count_as_shots(self):
+        sources = {s["id"]: s for s in catalog()["sources"]}
+        clips = [{"source": "S01", "units": "U01-U02"}, {"source": "S02", "units": "U03"}, {"source": "S03", "units": "U04"}]
+        resolved, errors = PLAN.resolve_output({"plan_id": "P01", "clips": clips, "transitions": FOUR_LINKS[1:]},
+                                               sources, {WU}, GAMES, 3)
+        self.assertGreaterEqual(len(resolved["shots"]), 4)
+        self.assertTrue(any("only 3 clips" in e for e in errors), errors)
+
     def test_script_survives_missing_transitions(self):
         sources = {s["id"]: s for s in catalog()["sources"]}
         output = {"plan_id": "P01", "clips": [{"source": "S01", "units": "U01-U02"}, {"source": "S02", "units": "U03"},
@@ -122,6 +157,20 @@ class Routes(unittest.TestCase):
         finally:
             job.temp.cleanup()
 
+    def test_three_sources_still_give_four_shot_routes(self):
+        data = catalog()
+        data["sources"] = data["sources"][:3]
+        found, _ = ROUTES.clips(data, {WU, XU})
+        sources = {s["id"]: s for s in data["sources"]}
+        verified, _ = ROUTES.search(found, lambda a, b: (ROUTES.relations(a, b) or [None])[0], min_sources=3, mix=False,
+                                    max_clips=4, seconds=10, verify=ROUTES.verifier(sources, {WU}, GAMES, 3))
+        self.assertTrue(verified)
+        for row in verified:
+            route = [clip["sha256"] for clip in row["route"]]
+            self.assertTrue(all(a != b for a, b in zip(route, route[1:])))
+            beats = [(clip["sha256"], beat) for clip in row["route"] for beat in clip["beats"]]
+            self.assertEqual(len(beats), len(set(beats)))
+
     def test_joins_file_rejects_bad_relations_and_reasons(self):
         found, _ = ROUTES.clips(catalog(), {WU, XU})
         by_key = {clip["key"]: clip for clip in found}
@@ -138,10 +187,7 @@ class Routes(unittest.TestCase):
         sources = {s["id"]: s for s in catalog()["sources"]}
         resolved = []
         for number in range(3):
-            output = {"plan_id": f"P{number}", "clips": [{"source": "S01", "units": "U01-U02"}, {"source": "S02", "units": "U03"},
-                                                        {"source": "S03", "units": "U04"}],
-                      "transitions": [{"relation": "progression", "reason": "continues the first building step"},
-                                      {"relation": "benefit", "reason": "invites the viewer to play after the steps"}]}
+            output = {"plan_id": f"P{number}", "clips": FOUR_CLIPS, "transitions": FOUR_LINKS}
             row, errors = PLAN.resolve_output(output, sources, {WU}, GAMES, 3)
             self.assertEqual(errors, [])
             resolved.append(row)
