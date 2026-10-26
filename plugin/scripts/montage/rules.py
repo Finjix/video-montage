@@ -35,7 +35,6 @@ DISCOVERY = r"入坑|刷.{0,8}广告|全球.{0,12}(?:亿|都在玩)|(?:亿|千�
 MECHANISM = r"砍树|获取资源|建造|升级熔炉|提升温度|吸引.{0,6}幸存者"
 GAMEPLAY_BRIDGE = r"怎么(?:玩|上手|开始)|如何(?:玩|上手|开始)|玩法|开局|一上来|进去(?:以后|之后|一看)|首先|先(?:让|把|收集|采集|砍|升级|建)"
 PERSONAL = r"我(?!们)|本人|(?:这个|该|这)(?:账号|帐号|个号)"
-MAX_CLIPS = 5               # every join is a chance to lose the thread
 ROLE_RANK = {"hook": 0, "body": 1, "payoff": 2, "cta": 3}
 GENERIC_REASONS = re.compile(r"(?:sametopic|samegame|coherent|smooth|natural|flows?|continues?|good|ok|fine|"
                              r"同一(?:个)?(?:游戏|人物|话题|主角)|语义连贯|逻辑连贯|衔接自然|增加(?:新的)?信息|接着介绍|继续介绍|通过审核)+")
@@ -69,8 +68,6 @@ def matches(text: str, patterns: list[str]) -> bool:
 def structure_errors(clips: list[dict]) -> list[str]:
     """Talk-first and narrative order over the beats of an output (clips carry beats, kind and frames)."""
     errors = []
-    if len(clips) > MAX_CLIPS:
-        errors.append(f"{len(clips)} clips; at most {MAX_CLIPS}: take longer beats instead of more joins")
     scenes = [number for number, clip in enumerate(clips, 1) if clip["kind"] == "scene"]
     if scenes:
         errors.append(f"clips {', '.join(map(str, scenes))} contain acted scene beats; videos are talk to the viewer only")

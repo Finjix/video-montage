@@ -78,19 +78,19 @@ the words in A and B that connect them.
 ## Machine-checked (`check`)
 
 Edit shape:
-- 1020-1800 frames (17-30 s at 60 fps), natural speed, at least 4 camera shots, every shot at least 48 frames
-  (0.8 s), longest minus shortest shot at most 480 frames (8 s). A very long single-camera clip (over 9 s) breaks
+- 1020-1800 frames (17-30 s at 60 fps), natural speed, at least 4 camera shots, every shot at least 60 frames
+  (1 s), longest minus shortest shot at most 300 frames (5 s). A very long single-camera clip (over 6 s) breaks
   the spread beside short-cut clips; pair it with clips of similar shot length or clips that contain camera changes.
 - Two adjacent clips cut inside one camera shot are a jump cut, not a new shot.
 - Every clip starts and ends in clean silence (`in`/`out` in the catalog) with no dissolve, flash or fast motion at the
   edge; the pause kept at a cut is at most 0.45 s before and 0.55 s after the speech (the catalog's `in`/`out` already
-  include this). A plain camera cut near the edge is fine as long as the edge shot keeps its 48 frames. User-rejected
+  include this). A plain camera cut near the edge is fine as long as the edge shot keeps its 60 frames. User-rejected
   intervals are refused.
 - At least 3 different source files per video (unless the user decided otherwise).
 
 Talk and structure:
 - Clips are whole beats of one source; units outside every beat and sources without beats cannot be planned.
-- At most 5 clips; every clip is talk: a clip containing a `scene` beat is refused.
+- Every clip is talk: a clip containing a `scene` beat is refused.
 - Beat roles run hook, body, payoff, cta in that order: a hook only first, at most one cta, at least one body, and the
   last beat is a payoff or a cta.
 

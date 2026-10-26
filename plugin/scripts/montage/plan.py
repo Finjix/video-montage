@@ -11,7 +11,7 @@ from montage import batch, timeline as CATALOG, rules
 from montage.common import read
 
 MIN_FRAMES, MAX_FRAMES = 1020, 1800      # 17-30 s at 60 fps, clean and final (no speed change)
-MIN_SHOTS, MIN_SHOT, MAX_SPREAD = 4, 48, 480   # shots >= 0.8 s, longest minus shortest <= 480 frames (8 s)
+MIN_SHOTS, MIN_SHOT, MAX_SPREAD = 4, 60, 300   # shots >= 1 s, longest minus shortest <= 300 frames (5 s)
 NAMEPLATE_FRAMES, MIN_NAMEPLATE, NAMEPLATE_GAP = 192, 48, 18
 IN_PAD, OUT_PAD = 0.10, 0.12             # preferred silence beyond the muted edge
 SAMPLES_PER_EDGE = 14
@@ -101,7 +101,7 @@ def repair(feasible: list[list[dict]]) -> list[dict] | None:
 
 
 def solve(options: list[list[dict]]) -> list[dict] | None:
-    """One option per clip: every shot in [L, L+300] with L >= 48, 17-30 s, >= 4 shots, least padding."""
+    """One option per clip: every shot in [L, L+MAX_SPREAD] with L >= MIN_SHOT, 17-30 s, >= 4 shots, least padding."""
     usable = [[o for o in row if min(o["pieces"]) >= MIN_SHOT] for row in options]
     if any(not row for row in usable):
         return None
