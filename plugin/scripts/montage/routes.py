@@ -107,15 +107,19 @@ def relations(left: dict, right: dict) -> list[str]:
 # ----------------------------------------------------------------------------------- search
 
 def search(found: list[dict], links, *, min_sources: int, mix: bool, max_clips: int, seconds: float,
-           verify) -> tuple[list[dict], bool]:
+           verify, stranded: frozenset = frozenset(), limit: int | None = None) -> tuple[list[dict], bool]:
     """Routes hook/body -> ... -> payoff/cta through `links(left, right)` (relation or None), verified by `verify`.
 
-    Start clips take turns so a time limit still samples every opening.
+    Start clips take turns so a time limit still samples every opening. Without `mix` a route keeps one cast,
+    except that clips of a `stranded` cast (one whose own clips finish no route) may hand over to or from it.
     """
     deadline = time.monotonic() + seconds
-    by_cast = defaultdict(list)
-    for clip in found:
-        by_cast[clip["cast"]].append(clip)
+
+    def allowed(route, clip):
+        if mix or clip["cast"] in stranded:
+            return True
+        casts = {c["cast"] for c in route if c["cast"] not in stranded}
+        return not casts or clip["cast"] in casts
 
     def walk(route, relations_so_far):
         last = route[-1]
@@ -131,10 +135,9 @@ def search(found: list[dict], links, *, min_sources: int, mix: bool, max_clips: 
         if len(route) >= max_clips or last["roles"][-1] == "cta":
             return
         used = {(c["sha256"], beat) for c in route for beat in c["beats"]}
-        pool = found if mix else by_cast[route[0]["cast"]]
-        for clip in pool:
+        for clip in found:
             if (clip["sha256"] == last["sha256"] or any((clip["sha256"], beat) in used for beat in clip["beats"])
-                    or clip["roles"][0] == "hook"):
+                    or clip["roles"][0] == "hook" or not allowed(route, clip)):
                 continue
             if rules.ROLE_RANK[clip["roles"][0]] < rules.ROLE_RANK[last["roles"][-1]]:
                 continue
@@ -157,7 +160,19 @@ def search(found: list[dict], links, *, min_sources: int, mix: bool, max_clips: 
             result = verify(route, chosen)
             if result:
                 verified.append(result)
+                if limit and len(verified) >= limit:
+                    return verified, False
     return verified, truncated
+
+
+def stranded_casts(found: list[dict], links, *, min_sources: int, max_clips: int, verify) -> frozenset:
+    """Casts whose own clips finish no route: editing lets such a celebrity hand over to another one."""
+    by_cast = defaultdict(list)
+    for clip in found:
+        by_cast[clip["cast"]].append(clip)
+    return frozenset(cast for cast, own in by_cast.items()
+                     if not search(own, links, min_sources=min_sources, mix=False, max_clips=max_clips, seconds=2.0,
+                                   verify=verify, limit=1)[0])
 
 
 def verifier(sources: dict, registered: set[str], games: list[str], min_sources: int, reasons=None):
@@ -219,13 +234,18 @@ class Usage:
 
 
 def select(candidates: list[dict], count: int) -> list[dict]:
-    """Greedy pick: strong joins before weak, one celebrity before mixed casts, least-used clips first."""
-    usage, chosen, clip_uses, opening_uses = Usage(), [], Counter(), Counter()
+    """Greedy pick: strong joins before weak, a celebrity still under its fair share of the batch first (so one whose
+    clips only hand over still appears), one celebrity before mixed casts, least-used clips first."""
+    usage, chosen, clip_uses, opening_uses, featured = Usage(), [], Counter(), Counter(), Counter()
     for candidate in candidates:
         candidate["profile"] = Usage.keys(candidate["resolved"])
+    people = {p for candidate in candidates for p in candidate["resolved"]["protagonists"]}
+    share = count // max(1, len(people))
     remaining = list(candidates)
     while len(chosen) < count and remaining:
-        remaining.sort(key=lambda c: (c["weak"], len(c["resolved"]["protagonists"]) > 1,
+        remaining.sort(key=lambda c: (c["weak"], all(featured[p] >= share for p in c["resolved"]["protagonists"]),
+                                      len(c["resolved"]["protagonists"]) > 1,
+                                      min((featured[p] for p in c["resolved"]["protagonists"]), default=0),
                                       opening_uses[c["route"][0]["key"]] * 3 + sum(clip_uses[x["key"]] for x in c["route"]),
                                       abs(len(c["route"]) - 3)))
         for position, candidate in enumerate(remaining):
@@ -234,6 +254,7 @@ def select(candidates: list[dict], count: int) -> list[dict]:
                 chosen.append(candidate)
                 clip_uses.update(c["key"] for c in candidate["route"])
                 opening_uses[candidate["route"][0]["key"]] += 1
+                featured.update(candidate["resolved"]["protagonists"])
                 del remaining[position]
                 break
         else:
@@ -319,8 +340,11 @@ def run(job: Path, state: dict, *, joins: Path | None, mix: bool, max_clips: int
 
 def explore(job, found, unusable, sources, registered, games, min_sources, mix, max_clips, seconds, count) -> list[str]:
     links = lambda a, b: (relations(a, b) or [None])[0]
+    verify = verifier(sources, registered, games, min_sources)
+    stranded = frozenset() if mix else stranded_casts(found, links, min_sources=min_sources, max_clips=max_clips,
+                                                       verify=verify)
     verified, truncated = search(found, links, min_sources=min_sources, mix=mix, max_clips=max_clips, seconds=seconds,
-                                 verify=verifier(sources, registered, games, min_sources))
+                                 verify=verify, stranded=stranded)
     joins = Counter()
     openings, closings = Counter(), Counter()
     for row in verified:
@@ -336,7 +360,11 @@ def explore(job, found, unusable, sources, registered, games, min_sources, mix, 
              + f", {len(joins)} distinct joins. Batch: {count} videos.",
              "A route is clips in role order, neighbours from different sources (a source may return later: a b a c).",
              "Judge each join below as a viewer: does the second clip answer, continue, prove or pay off the first?",
-             "Accept the good ones in a joins file and run `routes --joins <file>` to build the batch.", "", "## Clips", ""]
+             "Accept the good ones in a joins file and run `routes --joins <file>` to build the batch."]
+    if stranded:
+        lines.append(f"Own clips finish no video for {', '.join(names[p] for cast in sorted(stranded) for p in cast)}: "
+                     "their clips hand over to or from another celebrity.")
+    lines += ["", "## Clips", ""]
     for clip in sorted(found, key=lambda c: (c["cast"], c["key"])):
         lines.append(f"{clip['key']}  {'/'.join(clip['roles'])}  {clip['min_frames'] / 60:.1f}-{clip['max_frames'] / 60:.1f} s  "
                      f"shots {clip['pieces'][0]}-{clip['pieces'][1]} f  cast {','.join(names[p] for p in clip['cast'])}  "

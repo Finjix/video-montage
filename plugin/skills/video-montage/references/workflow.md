@@ -86,8 +86,9 @@ One file for all sources; re-run `annotate` with the complete file after every c
 - **Joins**: for each clip its last sentence, then every clip that can follow it in a route that passes every
   machine check (its first sentence, the number of such routes, and the allowed relations when they are limited).
 
-Routes keep one celebrity per video; `--mix` adds cross-celebrity routes. Each clip of a route comes from a different
-source file. Write the joins you accept:
+Routes keep one celebrity per video; `--mix` adds cross-celebrity routes. A celebrity whose own clips finish no
+video (`routes.md` names them) hands over to or from another celebrity without `--mix`. Each clip of a route comes
+from a different source file. Write the joins you accept:
 
 ```json
 {"joins": [{"from": "S08:U06-U09", "to": "S04:U07-U09", "relation": "explanation", "reason": "U09 asks what matters most; S04 answers: temperature"},
@@ -95,8 +96,8 @@ source file. Write the joins you accept:
 ```
 
 `routes --joins <file>` walks only those joins, verifies every route with the full `check`, then selects the batch:
-strong joins before `weak` ones, one celebrity before mixed casts, least-used clips and openings first, inside the
-batch limits. It writes `config/plan-draft.json` (`P01`...; outputs with a weak join carry a note) and says how many
+strong joins before `weak` ones, every celebrity up to its fair share of the batch, one celebrity before mixed casts,
+least-used clips and openings first, inside the batch limits. It writes `config/plan-draft.json` (`P01`...; outputs with a weak join carry a note) and says how many
 outputs it found and what limited it.
 
 ## Plan (`check`, `render`)

@@ -25,13 +25,14 @@ THUMB_W, THUMB_H = 64, 114
 CUT_DIFFERENCE = 0.07       # adjacent-frame mean difference that marks a camera cut / unstable edge
 SOFT_CUT, ISOLATION = 0.03, 3.0  # a same-background cut (zoom-in, jump cut) stays under CUT_DIFFERENCE but towers over every neighbour
 ENDPOINT_DIFFERENCE = 0.12  # 13-frame endpoint distance at a clip edge (dissolves, fast zooms)
-EDGE_FRAMES = 30            # frames at each clip edge that must stay free of dissolves, flashes and fast motion
+EDGE_SECONDS = 0.5          # time at each clip edge that must stay free of dissolves, flashes and fast motion
 HOP = 0.01                  # energy envelope resolution (seconds)
 CLAUSE_PAUSE = 0.35         # a pause this long always ends a unit
 SENTENCE_PAUSE = 0.6
 LEAD, TAIL = 0.02, 0.03     # kept beyond the energy island around the words
 GROW_LEFT, GROW_RIGHT = 0.12, 0.25  # an island grows through audible onset/decay at most this far
 SILENT_EDGE = 0.045         # muted audio at every clip edge (the cut check reads 40 ms)
+BED_MARGIN = 6.0            # speech onset/decay rises this far above a music or ambience bed under the voice
 MAX_HEAD, MAX_TAIL = 0.45, 0.55  # longest pause kept before / after the speech of a clip
 STRONG = "。！？!?…"
 WEAK = "，、；：,;:"
@@ -132,17 +133,21 @@ def mask_cuts(adjacent: np.ndarray, endpoint: np.ndarray, cuts: list[int]) -> tu
     return adjacent, endpoint
 
 
-def head_stable(adjacent: np.ndarray, endpoint: np.ndarray, frame: int) -> bool:
-    """A clip may start at `frame`: no transition inside its first frames."""
-    end = min(len(adjacent), frame + EDGE_FRAMES)
+def edge_frames(fps: float) -> int:
+    return max(13, round(EDGE_SECONDS * fps))
+
+
+def head_stable(adjacent: np.ndarray, endpoint: np.ndarray, frame: int, edge: int) -> bool:
+    """A clip may start at `frame`: no transition inside its first `edge` frames."""
+    end = min(len(adjacent), frame + edge)
     if end - frame < 13:
         return False
     return float(np.max(adjacent[frame + 1:end])) <= CUT_DIFFERENCE and not endpoint[frame] > ENDPOINT_DIFFERENCE
 
 
-def tail_stable(adjacent: np.ndarray, endpoint: np.ndarray, frame: int) -> bool:
-    """A clip may end before `frame` (exclusive): no transition inside its last frames."""
-    start = max(0, frame - EDGE_FRAMES)
+def tail_stable(adjacent: np.ndarray, endpoint: np.ndarray, frame: int, edge: int) -> bool:
+    """A clip may end before `frame` (exclusive): no transition inside its last `edge` frames."""
+    start = max(0, frame - edge)
     if frame - start < 13 or frame > len(adjacent):
         return False
     return float(np.max(adjacent[start + 1:frame])) <= CUT_DIFFERENCE and not endpoint[frame - 13] > ENDPOINT_DIFFERENCE
@@ -185,8 +190,10 @@ def split_units(words: list[dict]) -> list[dict]:
 
 
 def threshold(env: np.ndarray) -> float:
+    """Level below which audio is a pause. A source with music or ambience mixed under the voice never reaches
+    -35 dBFS between words; its pauses are measured against that bed instead."""
     floor = float(np.percentile(env, 10)) if env.size else -90.0
-    return min(-35.0, max(floor + 10.0, -50.0))
+    return max(min(-35.0, max(floor + 10.0, -50.0)), floor + BED_MARGIN)
 
 
 def island(env: np.ndarray, limit: float, start: float, end: float, lower: float, upper: float) -> tuple[float, float]:
@@ -215,16 +222,18 @@ def finish_units(units: list[dict], env: np.ndarray, clock: dict, series: tuple[
         lo, hi = island(env, limit, words[0]["start"], words[-1]["end"], lower, upper)
         unit["protect"] = [round(max(lower, lo - LEAD), 3), round(min(upper, hi + TAIL), 3)]
     adjacent, endpoint = mask_cuts(*series, clock["cuts"])
+    edge = edge_frames(fps)
     for index, unit in enumerate(units):
-        before = units[index - 1]["protect"][1] if index else 0.0
-        after = units[index + 1]["protect"][0] if index + 1 < len(units) else clock["duration"]
+        # A neighbour's decay outside this unit's protected span is muted by render; only its words bound the window.
+        before = units[index - 1]["words"][-1]["end"] if index else 0.0
+        after = units[index + 1]["words"][0]["start"] if index + 1 < len(units) else clock["duration"]
         first = math.ceil(max(before, unit["protect"][0] - MAX_HEAD) * fps - 1e-9)
         last = math.floor((unit["protect"][0] - SILENT_EDGE) * fps + 1e-9)
-        unit["in_frames"] = ranges(f for f in range(max(0, first), last + 1) if head_stable(adjacent, endpoint, f))
+        unit["in_frames"] = ranges(f for f in range(max(0, first), last + 1) if head_stable(adjacent, endpoint, f, edge))
         first = math.ceil((unit["protect"][1] + SILENT_EDGE) * fps - 1e-9)
         last = math.floor(min(after, unit["protect"][1] + MAX_TAIL) * fps + 1e-9)
         unit["out_frames"] = ranges(f for f in range(first, min(clock["frames"], last) + 1)
-                                    if tail_stable(adjacent, endpoint, f))
+                                    if tail_stable(adjacent, endpoint, f, edge))
         unit["text"] = unit_text(unit["words"])
         unit["start"], unit["end"] = unit["words"][0]["start"], unit["words"][-1]["end"]
     return units

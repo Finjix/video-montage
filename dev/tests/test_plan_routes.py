@@ -36,10 +36,10 @@ def source(sid: str, person: str, lines: list[tuple[str, str]], *, seconds: floa
             "shots": shots, "units": units, "beats": beats, "annotated": True}
 
 
-def catalog() -> dict:
+def catalog(wu_sources: int = 4) -> dict:
     sources = []
     for index in range(6):
-        person = WU if index < 4 else XU
+        person = WU if index < wu_sources else XU
         sources.append(source(f"S{index + 1:02d}", person, [
             ("hook", f"你知道无尽冬日第{index}招吗？"), ("body", f"开局先砍树第{index}步，"),
             ("body", f"然后升级第{index}个建筑。"), ("cta", f"点击即玩第{index}号。")]))
@@ -150,7 +150,10 @@ class Routes(unittest.TestCase):
             report = json.loads((job.root / "reports/routes.json").read_text(encoding="utf-8"))
             clips = {clip["key"]: clip for clip in report["clips"]}
             self.assertTrue(report["joins"])
-            self.assertFalse(any(clips[j["from"]]["cast"] != clips[j["to"]]["cast"] for j in report["joins"]))
+            # Xu has two sources, too few for a video of its own: its clips hand over to or from Wu
+            crossing = [j for j in report["joins"] if clips[j["from"]]["cast"] != clips[j["to"]]["cast"]]
+            self.assertTrue(crossing)
+            self.assertIn("Own clips finish no video for xu-jun-cong", (job.root / "reports/routes.md").read_text(encoding="utf-8"))
             accepted = [{"from": j["from"], "to": j["to"], "relation": ROUTES.relations(clips[j["from"]], clips[j["to"]])[0],
                          "reason": "synthetic link between the two clips for this test"} for j in report["joins"]]
             path = job.root / "config/joins.json"
@@ -161,8 +164,22 @@ class Routes(unittest.TestCase):
             outputs, errors, _ = PLAN.resolve(draft, job.root, job.state)
             self.assertEqual(errors, {})
             self.assertEqual(batch.audit(outputs, {})[0], [])
+            self.assertTrue(any(XU in output["protagonists"] for output in outputs))
         finally:
             job.temp.cleanup()
+
+    def test_explore_keeps_one_celebrity_when_each_finishes_alone(self):
+        found, _ = ROUTES.clips(catalog(wu_sources=3), {WU, XU})
+        data = catalog(wu_sources=3)
+        sources = {s["id"]: s for s in data["sources"]}
+        links = lambda a, b: (ROUTES.relations(a, b) or [None])[0]
+        verify = ROUTES.verifier(sources, {WU, XU}, GAMES, 3)
+        stranded = ROUTES.stranded_casts(found, links, min_sources=3, max_clips=4, verify=verify)
+        self.assertEqual(stranded, frozenset())
+        verified, _ = ROUTES.search(found, links, min_sources=3, mix=False, max_clips=4, seconds=10, verify=verify,
+                                    stranded=stranded)
+        self.assertTrue(verified)
+        self.assertTrue(all(len({clip["cast"] for clip in row["route"]}) == 1 for row in verified))
 
     def test_three_sources_still_give_four_shot_routes(self):
         data = catalog()
