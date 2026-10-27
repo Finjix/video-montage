@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import sysconfig
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -248,25 +249,23 @@ def ensure(feature: str):
     lock = ROOT / "requirements" / f"{name}.txt"
     stamp = {"lock": checksum(lock), "python": sys.executable}
     receipt = cache() / "installed" / (hashlib.sha256(sys.executable.encode()).hexdigest() + f"-{name}.json")
-    with locked("packages-" + sys.prefix):
+
+    def installed() -> bool:
         try:
-            installed = json.loads(receipt.read_text(encoding="utf-8")) == stamp
-        except (OSError, ValueError):
-            installed = False
-        if installed:
-            try:
-                for package, version in FEATURES[feature].items():
-                    if importlib.metadata.version(package) != version:
-                        installed = False
-                if selected and importlib.metadata.version("torch") != f"2.11.0+{selected}":
-                    installed = False
-            except importlib.metadata.PackageNotFoundError:
-                installed = False
-        if installed:
+            return (json.loads(receipt.read_text(encoding="utf-8")) == stamp
+                    and all(importlib.metadata.version(package) == version for package, version in FEATURES[feature].items())
+                    and (not selected or importlib.metadata.version("torch") == f"2.11.0+{selected}"))
+        except (OSError, ValueError, importlib.metadata.PackageNotFoundError):
+            return False
+    # An installed feature never waits for the lock: another command may be installing PyTorch for many minutes.
+    if installed():
+        return
+    with locked("packages-" + sys.prefix):
+        if installed():
             return
         if cache() not in Path(sys.executable).resolve().parents:
             raise RuntimeFailure("Use scripts/video_montage.ps1; dependencies are only installed into the private cache")
-        note(f"preparing {name} dependencies")
+        note(f"preparing {name} dependencies" + (" (PyTorch is about 2.6 GB: allow 10-30 min on first use)" if selected else ""))
         if selected:
             adopt_torch(f"2.11.0+{selected}")
         command = [str(uv()), "pip", "install", "--python", sys.executable, "--require-hashes",
@@ -282,7 +281,17 @@ def ensure(feature: str):
             command += ["--index", f"https://download.pytorch.org/whl/{selected}",
                         "--index-strategy", "unsafe-best-match"]
         env = {**os.environ, "UV_CACHE_DIR": str(cache() / "uv-cache")}
-        result = subprocess.run(command, stdout=sys.stderr, stderr=sys.stderr, env=env)
+        # uv shows no progress without a terminal: a heartbeat says the setup is still alive.
+        done = threading.Event()
+
+        def heartbeat(started=time.monotonic()):
+            while not done.wait(60):
+                note(f"still preparing {name} dependencies ({(time.monotonic() - started) / 60:.0f} min)")
+        threading.Thread(target=heartbeat, daemon=True).start()
+        try:
+            result = subprocess.run(command, stdout=sys.stderr, stderr=sys.stderr, env=env)
+        finally:
+            done.set()
         if result.returncode:
             raise RuntimeFailure(f"Dependency setup failed ({name}); retry the original command")
         importlib.invalidate_caches()
@@ -350,6 +359,39 @@ def animation(filename: str, digest: str) -> Path:
     if not spec or spec["sha256"] != digest:
         raise RuntimeFailure(f"Unregistered animation table: {filename}")
     return fetch(cache() / "animations" / filename, spec)
+
+
+def animation_tables(effects) -> dict[str, str]:
+    """Table file -> sha256 of every large shader table the given subtitle entrances render with."""
+    tables = {}
+
+    def visit(item):
+        if isinstance(item, dict):
+            if item.get("table_file"):
+                tables[item["table_file"]] = item.get("table_sha256")
+            for child in item.values():
+                visit(child)
+        elif isinstance(item, list):
+            for child in item:
+                visit(child)
+    for effect in effects:
+        path = ROOT / "assets/packaging/animations/parameters" / f"{effect}.json"
+        if path.is_file():
+            visit(json.loads(path.read_text(encoding="utf-8")))
+    return tables
+
+
+def prefetch_animations(effects, workers: int = 4) -> None:
+    """Download the tables of these entrances in parallel up front (the renderer would fetch them one by one)."""
+    from concurrent.futures import ThreadPoolExecutor
+    specs = manifest()["animations"]
+    missing = [(name, digest) for name, digest in animation_tables(effects).items()
+               if name in specs and not valid(cache() / "animations" / name, specs[name], remember=False)]
+    if not missing:
+        return
+    note(f"downloading {len(missing)} animation tables ({sum(specs[n]['size'] for n, _ in missing) // 1024 ** 2} MB)")
+    with ThreadPoolExecutor(workers) as executor:
+        list(executor.map(lambda row: animation(*row), missing))
 
 
 def status(feature="base") -> dict:

@@ -2,12 +2,12 @@
 
 All commands: `& "<plugin_root>/scripts/video_montage.cmd" <command> --job-dir <job_dir>`. Times assume a warm
 runtime cache; the first use of a feature adds its download (`runtime --feature base|media|packaging|asr [--install]`
-inspects or prefetches it).
+inspects or prefetches it; it needs no job). Long commands print progress lines on stderr: wait for them.
 
 | Command | Does | Typical time |
 | --- | --- | --- |
 | `init --work-order -` | validates the order (JSON on stdin or a file), creates the delivery folder and job dir, reports the asset pack | seconds |
-| `prepare` | frame clock, camera cuts, speech recognition, units with clean cut points, sheets (`--fresh` recognizes again) | ~1 min per 10 sources |
+| `prepare` | frame clock, camera cuts, speech recognition, units with clean cut points, sheets (`--fresh` recognizes again) | ~1 min per 10 sources (first use: +30-60 min of downloads) |
 | `annotate --file <json>` | applies people, speakers, transcript fixes and beats; rewrites the catalog | seconds (+ aligner load when text changed) |
 | `routes [--mix]` | cuttable clips, unusable beats with reasons, joins of verified routes → `reports/routes.md` | seconds, at most `--seconds` (40) |
 | `routes --joins <json>` | builds `config/plan-draft.json` for the whole batch from the accepted joins | seconds |
@@ -66,12 +66,14 @@ One file for all sources; re-run `annotate` with the complete file after every c
 
 - `people`: who is visible in every shot of the source (registered celebrities, plus any other `person:` ID for
   supporting actors); `shots` overrides one shot by number. Tag what the frames show.
-- `merge: true`: the detected cut starting this shot is not a real camera change (flash, fast motion).
+- `merge: true`: the detected cut starting this shot is no camera change (a flash, blur or fast motion inside one
+  shot). The two shots become one; clips still cannot start or end within 0.5 s of the disturbance.
 - `cameras`: optional groups of shots from one camera setup (they count as one opening camera).
 - `speaker` / `speakers`: who talks (default: the single registered celebrity in `people`).
 - `text`: corrected unit text; `""` deletes the unit (noise, hallucination); a list splits it into `U31.1`,
   `U31.2`... Keep the words in spoken order: the aligner re-times them.
-- `exclude`: units that must never be used.
+- `exclude`: units that must never be used, e.g. beside a transition (zoom blur, flash) a sheet shows but the
+  catalog missed. `exclude` and `speakers` name units by their current IDs (a split unit is `U31.1`...).
 - `beats`: the only material a plan may use: runs of whole units with `kind`, `role` and an English `gist` of at
   least 12 letters, never overlapping. How to cut them: [editing](editing.md#beats).
 
@@ -84,21 +86,31 @@ One file for all sources; re-run `annotate` with the complete file after every c
 - **Beats that cannot be cut alone**, each with the reason (no clean pause, edge shot under 60 frames, rejected
   interval, a shot without a registered celebrity). Join such a beat to a neighbour or re-cut it.
 - **Joins**: for each clip its last sentence, then every clip that can follow it in a route that passes every
-  machine check (its first sentence, the number of such routes, and the allowed relations when they are limited).
+  machine check (its first sentence, the number of such routes, and in brackets the only relations allowed when the
+  checks limit them).
 
-Routes keep one celebrity per video; `--mix` adds cross-celebrity routes. A celebrity whose own clips finish no
-video (`routes.md` names them) hands over to or from another celebrity without `--mix`. Each clip of a route comes
-from a different source file. Write the joins you accept:
+The file often runs to a thousand lines or more: read it in parts until you have seen every join you judge. Routes
+keep one celebrity per video; `--mix` adds cross-celebrity routes. A celebrity whose own clips finish no video
+(`routes.md` names them) hands over to or from another celebrity without `--mix`. Neighbouring clips come from
+different source files (a source may return later: a b a c). Write the joins you accept:
 
 ```json
-{"joins": [{"from": "S08:U06-U09", "to": "S04:U07-U09", "relation": "explanation", "reason": "U09 asks what matters most; S04 answers: temperature"},
-           {"from": "S04:U07-U09", "to": "S20:U35-U36", "relation": "benefit", "reason": "after the method, the gift code gives the resources", "weak": true}]}
+{"joins": [{"from": "S08:U06-U09", "to": "S04:U07-U09", "relation": "explanation", "reason": "S08 asks 最要紧的是什么; S04 answers 提升温度"},
+           {"from": "S04:U07-U09", "to": "S20:U35-U36", "relation": "benefit", "reason": "after 升级熔炉 the 礼包码 gives the resources", "weak": true}]}
 ```
 
+- `relation`: one of the bracketed relations when routes.md lists them, otherwise any from
+  [editing](editing.md#transitions).
+- `reason`: one per join, quoting the linking words of both clips exactly as spoken (two or more Chinese
+  characters from each). A reason without both quotes, or one reason reused for joins at different clip boundaries,
+  is refused: every join is judged on its own words, never as a cross product of openings and endings.
+
 `routes --joins <file>` walks only those joins, verifies every route with the full `check`, then selects the batch:
-strong joins before `weak` ones, every celebrity up to its fair share of the batch, one celebrity before mixed casts,
-least-used clips and openings first, inside the batch limits. It writes `config/plan-draft.json` (`P01`...; outputs with a weak join carry a note) and says how many
-outputs it found and what limited it.
+strong joins before `weak` ones, every celebrity up to its fair share of the batch, videos of the current plan,
+one celebrity before mixed casts, least-used clips and openings first, inside the batch limits. It writes
+`config/plan-draft.json` (outputs with a weak join carry a note), prints the videos per celebrity and says how many
+outputs it found and what limited it. A video already in `config/plan.json` keeps its plan ID, so render and
+package reuse its work.
 
 ## Plan (`check`, `render`)
 
@@ -106,16 +118,18 @@ outputs it found and what limited it.
 {"outputs": [
   {"plan_id": "P01",
    "clips": [{"source": "S08", "units": "U06-U09"}, {"source": "S04", "units": "U07-U09"}, {"source": "S20", "units": "U35-U36"}],
-   "transitions": [{"relation": "explanation", "reason": "U09 asks what matters most; S04 answers: temperature"},
-                   {"relation": "benefit", "reason": "after the method, the gift code gives the resources"}],
+   "transitions": [{"relation": "explanation", "reason": "S08 asks 最要紧的是什么; S04 answers 提升温度"},
+                   {"relation": "benefit", "reason": "after 升级熔炉 the 礼包码 gives the resources"}],
    "note": "optional one-line narrative"}]}
 ```
 
 - `plan_id`: letters, digits, `-` and `_`; one output per requested video.
 - A clip is a contiguous unit range of one source made of whole beats. The program picks the exact in/out frames
   inside the clean pauses and maps shots, cast and nameplates itself.
-- `transitions`: one per adjacent clip pair: a relation from [editing](editing.md#transitions) and a reason naming
+- `transitions`: one per adjacent clip pair: a relation from [editing](editing.md#transitions) and a reason quoting
   the words that link the two clips.
+- Edit the draft by hand only for a small fix (one clip, one relation) and `check` again; to replace videos, change
+  the joins or beats and re-run `routes --joins`.
 - `check` prints one line per output (frames, shot lengths, sources, cast) and every problem with its numbers, and
   writes `reports/scripts.md`: each video's clips, beats, words and gists with the relation and reason of every
   join. `render` runs the same check first and renders nothing while problems remain.
@@ -123,9 +137,12 @@ outputs it found and what limited it.
 ## After `render`
 
 - `temp/sheets/<plan_id>-cuts.jpg`: first and last frame of every shot. A jump in subject position or scale, a wrong
-  or missing person, two shot changes in quick succession or a transition effect is a plan problem.
+  or missing person, two shot changes in quick succession or a transition effect is a plan problem. A transition
+  the catalog missed (zoom blur, flash) belongs in the annotations (`exclude` the unit at that edge, or `merge` a
+  false cut), then `annotate` and `routes --joins` again, so no other video uses that edge either.
 - `temp/subtitles/subtitle-<plan_id>.txt`: SRT cues drafted from the corrected words. Edit text and times freely
-  (one line per cue, at most 10 characters, inside the video, no overlaps, never across a cut).
+  (one line per cue, at most 10 characters, inside the video, no overlaps, never across a cut). Edits survive
+  re-renders while that video's clips stay the same; when its clips change, `render` writes a new draft and says so.
 - Render QC problems (frame mismatch, clipping, a cut that is not silent) point to the plan or the source.
 
 ## After `package`
@@ -135,7 +152,8 @@ Outputs without problems are published even while others still have problems; re
 
 ## Revisions and reburns
 
-- Edit, swap or replace outputs: change the plan, `render`, `package`. Removed plan IDs leave the delivery folder.
+- Edit, swap or replace outputs: change the joins (`routes --joins`) or the plan, `render`, `package`. Removed plan
+  IDs leave the delivery folder.
 - Subtitle reburn (the user edited `temp/subtitles/subtitle-<plan_id>.txt` or asks for a wording change): `package`.
   Edited text that differs from the transcript is kept and noted.
 - Sources must stay where they were; if one moved, `init` a new job.

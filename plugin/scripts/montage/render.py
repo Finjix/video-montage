@@ -216,6 +216,8 @@ def render_one(job: Path, output: dict, games: list[str], protected: tuple[str, 
     edited = bool(previous and subtitle.is_file() and sha(subtitle) != previous.get("draft_sha256"))
     notes = []
     if not reused or not subtitle.is_file() or (previous.get("draft_key") != draft_key and not edited):
+        if edited and not reused:
+            notes.append("the clips changed, so the hand-edited subtitle file was replaced by a new draft; redo the edits")
         write_srt(rows, subtitle, round(output["frames"] / FPS * 1000))
         draft_sha = sha(subtitle)
     else:

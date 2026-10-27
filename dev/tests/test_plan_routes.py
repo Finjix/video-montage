@@ -1,6 +1,7 @@
 """Plan resolver robustness and the route finder on a synthetic catalog (no media tools needed)."""
 import importlib.util
 import json
+import re
 import tempfile
 import unittest
 from pathlib import Path
@@ -11,6 +12,10 @@ from montage import batch, job as JOB, plan as PLAN, routes as ROUTES
 FPS = 60
 WU, XU = "person:wu-yue", "person:xu-jun-cong"
 GAMES = ["无尽冬日"]
+
+
+def quote(text: str) -> str:
+    return re.findall(r"[\u3400-\u9fff]{2,}", text)[0]
 
 
 def source(sid: str, person: str, lines: list[tuple[str, str]], *, seconds: float = 4.5) -> dict:
@@ -117,6 +122,22 @@ class PlanRobustness(unittest.TestCase):
         with self.assertRaises(PLAN.PlanError):
             PLAN.resolve_output("P01", {}, {WU}, GAMES, 3)
 
+    def test_an_opening_that_leans_on_an_earlier_line_is_refused(self):
+        sources = {s["id"]: s for s in catalog()["sources"]}
+        for text in ("再去砍树就行了。", "为什么呢？因为温度最重要。", "就是六个字：要想富先砍树。"):
+            sources["S01"]["units"][0]["text"] = text
+            _, errors = PLAN.resolve_output({"plan_id": "P01", "clips": FOUR_CLIPS, "transitions": FOUR_LINKS}, sources, {WU}, GAMES, 3)
+            self.assertTrue(any("leans on an earlier line" in e for e in errors), (text, errors))
+
+    def test_a_clip_that_restates_the_previous_one_is_refused(self):
+        sources = {s["id"]: s for s in catalog()["sources"]}
+        sources["S01"]["units"][1]["text"] = "开局一定要先砍树。"
+        sources["S02"]["units"][1]["text"] = "开局一定要砍树、"
+        clips = [{"source": "S01", "units": "U01-U02"}, {"source": "S02", "units": "U02-U03"}, {"source": "S03", "units": "U03"},
+                 {"source": "S04", "units": "U04"}]
+        _, errors = PLAN.resolve_output({"plan_id": "P01", "clips": clips, "transitions": FOUR_LINKS}, sources, {WU}, GAMES, 3)
+        self.assertTrue(any("restating the end of clip 1" in e for e in errors), errors)
+
     def test_too_few_sources_never_tells_the_agent_to_ask(self):
         sources = {s["id"]: s for s in catalog()["sources"]}
         output = {"plan_id": "P01", "clips": [{"source": "S01", "units": "U01-U02"}, {"source": "S02", "units": "U03-U04"}],
@@ -155,7 +176,8 @@ class Routes(unittest.TestCase):
             self.assertTrue(crossing)
             self.assertIn("Own clips finish no video for xu-jun-cong", (job.root / "reports/routes.md").read_text(encoding="utf-8"))
             accepted = [{"from": j["from"], "to": j["to"], "relation": ROUTES.relations(clips[j["from"]], clips[j["to"]])[0],
-                         "reason": "synthetic link between the two clips for this test"} for j in report["joins"]]
+                         "reason": f"{j['from']} ends on {quote(clips[j['from']]['last_text'])}, {j['to']} follows with "
+                                   f"{quote(clips[j['to']]['first_text'])}"} for j in report["joins"]]
             path = job.root / "config/joins.json"
             path.write_text(json.dumps({"joins": accepted}, ensure_ascii=False), encoding="utf-8")
             lines = ROUTES.run(job.root, job.state, joins=path, mix=False, max_clips=4, seconds=10)
@@ -165,6 +187,14 @@ class Routes(unittest.TestCase):
             self.assertEqual(errors, {})
             self.assertEqual(batch.audit(outputs, {})[0], [])
             self.assertTrue(any(XU in output["protagonists"] for output in outputs))
+            self.assertTrue(any(line.startswith("cast: ") for line in lines))
+            # a re-run keeps every video of the current plan under its plan ID
+            (job.root / "config/plan.json").write_text(json.dumps(draft, ensure_ascii=False), encoding="utf-8")
+            lines = ROUTES.run(job.root, job.state, joins=path, mix=False, max_clips=4, seconds=10)
+            again = json.loads((job.root / "config/plan-draft.json").read_text(encoding="utf-8"))
+            self.assertEqual({o["plan_id"]: ROUTES.signature(o) for o in again["outputs"]},
+                             {o["plan_id"]: ROUTES.signature(o) for o in draft["outputs"]})
+            self.assertIn("kept 6 videos of the previous plan under their plan IDs (render and package reuse them)", lines)
         finally:
             job.temp.cleanup()
 
@@ -210,6 +240,22 @@ class Routes(unittest.TestCase):
             accepted, problems = ROUTES.joins_file(path, by_key)
         self.assertEqual(accepted, {})
         self.assertEqual(len(problems), 2)
+
+    def test_join_reasons_quote_both_clips_once_each(self):
+        found, _ = ROUTES.clips(catalog(), {WU, XU})
+        by_key = {clip["key"]: clip for clip in found}
+        joins = [{"from": "S01:U01-U02", "to": "S02:U03", "relation": "progression", "reason": "the first step leads to building upgrades"},
+                 {"from": "S01:U01-U02", "to": "S02:U03", "relation": "progression", "reason": "开局先砍树 leads to the upgrade"},
+                 {"from": "S03:U01-U02", "to": "S04:U03", "relation": "progression", "reason": "开局先砍树 leads to 然后升级"},
+                 {"from": "S05:U01-U02", "to": "S06:U03", "relation": "progression", "reason": "开局先砍树 leads to 然后升级"}]
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "joins.json"
+            path.write_text(json.dumps({"joins": joins}, ensure_ascii=False), encoding="utf-8")
+            accepted, problems = ROUTES.joins_file(path, by_key)
+        self.assertIn("nothing quoted from the first and second clip", problems[0])
+        self.assertIn("nothing quoted from the second clip", problems[1])
+        self.assertIn("joins 3, 4 share one reason", problems[2])
+        self.assertEqual(len(problems), 3)
 
     def test_usage_matches_batch_audit(self):
         sources = {s["id"]: s for s in catalog()["sources"]}
@@ -334,6 +380,51 @@ class Alignment(unittest.TestCase):
         words = asr.align_many(Aligner(), requests)
         self.assertEqual([w[0]["start"] for w in words], [2.1, 5.1])
         self.assertEqual(calls, [2, 1, 1])
+
+    def test_memory_errors_on_the_cpu_are_raised_not_retried(self):
+        from montage import asr
+        import numpy as np
+        calls = []
+
+        class Aligner:
+            def align(self, audio, text, language):
+                calls.append(len(audio))
+                raise RuntimeError("out of memory")
+        original = asr.build_aligner
+        asr.build_aligner = lambda target=None: Aligner()
+        try:
+            with self.assertRaises(RuntimeError):
+                asr.align_many(Aligner(), [(np.zeros(16000, np.float32), "砍树", 0.0)] * 2)
+        finally:
+            asr.build_aligner = original
+        self.assertEqual(calls, [2, 1, 1])
+
+
+@unittest.skipUnless(importlib.util.find_spec("PIL"), "needs Pillow")
+class SubtitleDrafts(unittest.TestCase):
+    def test_a_run_without_a_word_safe_split_is_still_drafted(self):
+        from montage.packaging import segmentation
+        text = "哈" * 14 + "无尽冬日"
+        shot = {"asr": {"segments": [{"text": text, "words": [{"word": text, "start": 0.0, "end": 4.0}]}]}}
+        rows = segmentation.split_shot(shot, names=tuple(GAMES), protected_terms=tuple(GAMES))
+        self.assertEqual("".join(row["text"] for row in rows), text)
+        self.assertTrue(all(segmentation.character_count(row["text"]) <= 10 for row in rows))
+        self.assertTrue(any("无尽冬日" in row["text"] for row in rows))
+
+    def test_drafts_keep_numbers_and_idioms_whole(self):
+        from montage.packaging import segmentation
+
+        def cues(text, pause_before=None):
+            words, start = [], 0.0
+            for index, char in enumerate(text):
+                start += 0.3 if index == pause_before else 0.0
+                words.append({"word": char, "start": start, "end": start + 0.2})
+                start += 0.2
+            shot = {"asr": {"segments": [{"text": text, "words": words}]}}
+            return [row["text"] for row in segmentation.split_shot(shot, names=tuple(GAMES), protected_terms=tuple(GAMES))]
+        self.assertEqual(cues("那战力可不得蹭蹭往上涨啊"), ["那战力可不得", "蹭蹭往上涨啊"])
+        # an aligner pause before 度 used to give 一开局就是零下七十 / 度的冰原
+        self.assertTrue(any("零下七十度" in row for row in cues("一开局就是零下七十度的冰原", pause_before=10)))
 
 
 if __name__ == "__main__":

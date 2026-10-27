@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from difflib import SequenceMatcher
 
 RELATIONS = {
     "hook_response", "question_answer", "answer", "explanation", "problem_solution", "claim_support",
@@ -35,6 +36,10 @@ DISCOVERY = r"入坑|刷.{0,8}广告|全球.{0,12}(?:亿|都在玩)|(?:亿|千�
 MECHANISM = r"砍树|获取资源|建造|升级熔炉|提升温度|吸引.{0,6}幸存者"
 GAMEPLAY_BRIDGE = r"怎么(?:玩|上手|开始)|如何(?:玩|上手|开始)|玩法|开局|一上来|进去(?:以后|之后|一看)|首先|先(?:让|把|收集|采集|砍|升级|建)"
 PERSONAL = r"我(?!们)|本人|(?:这个|该|这)(?:账号|帐号|个号)"
+# Words that lean on a line the viewer has not heard: a video cannot open on them.
+LEANING_OPENINGS = re.compile(r"^(?:然后|接着|随后|所以|因此|于是|但是|但(?!凡)|不过|可是|而且|并且|另外|其次|同时|还有(?!谁|人)"
+                              r"|再(?!也)|就是|为什么呢|为啥呢|这下|那么)")
+RESTATED = 0.75   # similarity at which a clip's opening restates the previous clip's closing words
 ROLE_RANK = {"hook": 0, "body": 1, "payoff": 2, "cta": 3}
 GENERIC_REASONS = re.compile(r"(?:sametopic|samegame|coherent|smooth|natural|flows?|continues?|good|ok|fine|"
                              r"同一(?:个)?(?:游戏|人物|话题|主角)|语义连贯|逻辑连贯|衔接自然|增加(?:新的)?信息|接着介绍|继续介绍|通过审核)+")
@@ -110,6 +115,8 @@ def output_errors(clips: list[dict], transitions: list[dict], games: list[str]) 
                 break
         if index == 0 and text.startswith("因为") and not any(term in text for term in ("所以", "因此")):
             errors.append("clip 1 opens with 因为 without its result")
+        if index == 0 and (lean := LEANING_OPENINGS.match(text)):
+            errors.append(f"clip 1 opens with {lean[0]}, which leans on an earlier line; open on words that stand alone")
         if text.startswith("只要") and not any(term in text for term in ("就", "便", "即可", "才能")):
             if index >= len(transitions) or transitions[index].get("relation") != "condition_result":
                 errors.append(f"{where} opens with 只要; the next transition must be condition_result")
@@ -129,9 +136,18 @@ def output_errors(clips: list[dict], transitions: list[dict], games: list[str]) 
                 errors.append(f"{where}: 海量福利 only in the final clip")
             if not contains(clip["text"], CONCRETE_BENEFITS):
                 errors.append(f"{where}: 海量福利 needs a concrete benefit (礼包码, 兑换...)")
+    units = [(number, normalize(text)) for number, clip in enumerate(clips, 1) for text in clip.get("unit_texts") or [clip["text"]]]
+    spoken = {}
+    for number, text in units:
+        if len(text) >= 4 and spoken.setdefault(text, number) != number:
+            errors.append(f"clip {number} repeats a clause of clip {spoken[text]}: {text}")
     for index, transition in enumerate(transitions, 1):
         where = f"transition {index}"
         left, right = clips[index - 1], clips[index]
+        tail = normalize((left.get("unit_texts") or [left["text"]])[-1])
+        head = normalize((right.get("unit_texts") or [right["text"]])[0])
+        if min(len(tail), len(head)) >= 4 and tail != head and SequenceMatcher(None, tail, head).ratio() >= RESTATED:
+            errors.append(f"{where}: clip {index + 1} opens by restating the end of clip {index} ({tail} / {head})")
         if transition.get("relation") not in RELATIONS:
             errors.append(f"{where}: relation must be one of {sorted(RELATIONS)}")
         if not specific(transition.get("reason")):

@@ -53,16 +53,16 @@ def audit(outputs: list[dict], decisions: dict) -> tuple[list[str], dict]:
         for key, plan_ids in rows.items():
             if len(plan_ids) > limit:
                 sample = key[1] if name == "unit" else key
-                errors.append(f"batch: {len(plan_ids)} outputs use {labels[name]} (limit {limit}): "
+                errors.append(f"{len(plan_ids)} outputs use {labels[name]} (limit {limit}): "
                               f"{','.join(plan_ids)} :: {str(sample)[:40]}")
     for i, (left_id, left_route, left_text) in enumerate(profiles):
         for right_id, right_route, right_text in profiles[i + 1:]:
             overlap = sum(a == b for a, b in zip(left_route, right_route)) / max(len(left_route), len(right_route))
             if overlap > cap["overlap"]:
-                errors.append(f"batch: {left_id}/{right_id} share {overlap:.0%} of clip positions (limit {cap['overlap']:.0%})")
+                errors.append(f"{left_id}/{right_id} share {overlap:.0%} of clip positions (limit {cap['overlap']:.0%})")
             similarity = trigram_similarity(left_text, right_text)
             if similarity > cap["similarity"]:
-                errors.append(f"batch: {left_id}/{right_id} speech similarity {similarity:.2f} (limit {cap['similarity']})")
+                errors.append(f"{left_id}/{right_id} speech similarity {similarity:.2f} (limit {cap['similarity']})")
     summary = {"limits": cap, "openings": len(uses["opening"]), "opening_cameras": len(uses["opening_family"]),
                "closings": len(uses["closing"]),
                "most_used_unit": max((len(v) for v in uses["unit"].values()), default=0)}

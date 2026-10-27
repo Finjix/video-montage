@@ -58,7 +58,9 @@ cue's `y` to about 0.80-0.84, under the chin and clear of the disclaimer, and co
 Drafts follow the corrected words: cues of at most 10 characters, aimed at 1.2-2.5 s, never splitting a word, a
 number from its classifier, a reduplication (蹭蹭) or a library term, never starting with a dependent particle
 (的, 了...). Read every draft and merge or re-split cues where the meaning reads badly (e.g. 那战力可不得 / 蹭蹭往上涨啊,
-not 那战力可 / 不得蹭蹭往上涨啊). Cues under 0.8 s and dependent heads are reported as notes.
+not 那战力可 / 不得蹭蹭往上涨啊). Cues under 0.8 s and dependent heads are reported as notes: merge a short cue into
+its neighbour where the 10-character limit allows (move the boundary time), and re-split a dependent head; leave a
+note only where no change reads better.
 
 ## BGM
 
@@ -83,8 +85,10 @@ mix: Mixkit (direct `https://assets.mixkit.co/music/<id>/<id>.mp3`), Internet Ar
   --source-page <track page> --title "<title>" --creator "<artist>" --instrumental
 ```
 
-`fetch-bgm` downloads with a browser user agent and the source page as referer (falling back to the system curl),
-checks the audio (length >= 20 s, level) and stores the file and its license evidence in `<job_dir>/config/bgm/`.
+`--source-page` is the track's own page (where you read the license), not a genre listing. `fetch-bgm` downloads
+with a browser user agent and the source page as referer (falling back to the system curl), checks the audio
+(length >= 20 s, level) and stores the file and its license evidence in `<job_dir>/config/bgm/`. Several
+`fetch-bgm` calls may run at once, also while `prepare` runs.
 For a file you fetched another way, download it into `<job_dir>/config/bgm/` first and pass `--file <path>`; leave no
 copy elsewhere. `--asset-audio-unsuitable "<reason>"` registers downloads even though the pack has audio that cannot
 serve as music (only sound effects, for example).

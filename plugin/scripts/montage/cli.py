@@ -248,6 +248,8 @@ def cmd_runtime(args) -> int:
         runtime.ensure(args.feature)
         if args.feature in ("media", "packaging", "asr"):
             runtime.binary("ffmpeg")
+        if args.feature == "packaging":
+            runtime.prefetch_animations(("bounce_up", "ice_drift", "shout_wave"))
         if args.feature == "asr":
             runtime.models()
     from verify_runtime import verify
@@ -299,6 +301,7 @@ def main() -> None:
     inspection = command("runtime", cmd_runtime, job=False)
     inspection.add_argument("--feature", choices=("base", "media", "packaging", "asr"), default="base")
     inspection.add_argument("--install", action="store_true")
+    inspection.add_argument("--job-dir", type=Path, help="ignored (the runtime is shared by every job)")
     args = parser.parse_args()
     try:
         code = args.handler(args)

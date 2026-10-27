@@ -201,18 +201,19 @@ def align_many(model, requests: list[tuple[np.ndarray, str, float]], batch: int 
     aligner = _aligner(model)
     results: list[list[dict]] = [[] for _ in requests]
     todo = [i for i, (_, text, _) in enumerate(requests) if text.strip()]
+    on_cpu = False
     while todo:
         chunk, todo = todo[:batch], todo[batch:]
         try:
             rows = aligner.align(audio=[(requests[i][0], SAMPLE_RATE) for i in chunk],
                                  text=[requests[i][1] for i in chunk], language=["Chinese"] * len(chunk))
         except RuntimeError as error:
-            if not out_of_memory(error):
+            if not out_of_memory(error) or on_cpu:
                 raise
             free_gpu()
             if batch == 1:
                 runtime.note("GPU memory exhausted; aligning on the CPU")
-                aligner = build_aligner("cpu")
+                aligner, on_cpu = build_aligner("cpu"), True
             todo, batch = chunk + todo, 1
             continue
         for i, row in zip(chunk, rows):

@@ -28,10 +28,11 @@ CLAUSE_HEADS = (
     "因为", "温度高了", "我是", "我在", "然后", "这是", "才入坑", "全部",
     "几个", "更多", "都在", "可是", "就得", "给你", "所以", "把你",
 )
-DEPENDENT_END = re.compile(r"(?:的|地|得|把|被|让|给|和|与|在|将|才|就|才能|这是|所有)$")
+DEPENDENT_END = re.compile(r"(?:的|地|(?<![不懂记值舍免省难晓])得|把|被|让|给|和|与|在|将|才|就|才能|这是|所有)$")
 BAD_HEAD = re.compile(r"^(?:的(?!确)|了(?!解|不起)|着|过(?!程|去|来)|们|地|得(?!到|意|益))")
 TOKEN = re.compile(r"[0-9A-Za-z\u3400-\u9fff]")
-QUANTITY = re.compile(r"(?:[0-9]+|[一二三四五六七八九十百千万亿两]+)(?:分钟|小时|秒|个|人|局|次|年|天|亿|万)?")
+QUANTITY = re.compile(r"(?:零下)?(?:[0-9]+|[零一二三四五六七八九十百千万亿两]+)"
+                      r"(?:分钟|小时|秒|个|人|局|次|年|天|亿|万|度|级|倍|块|元|张|只|件|种|条|位|名|号|步|招|关|层|波|岁|周|月)?")
 
 
 @functools.lru_cache(maxsize=16)
@@ -113,7 +114,10 @@ def split_shot(shot: dict, *, names: tuple[str, ...] = GAME_NAMES, font: str | N
     text, times, spaces, punctuation, word_edges = _shot_stream(shot)
     if not text:
         return []
-    forbidden = set()
+    forbidden, terms = set(), set()
+    for phrase in (*names, *protected_terms):
+        for match in re.finditer(re.escape(phrase), text):
+            terms.update(range(match.start() + 1, match.end()))
     for phrase in (*names, *PHRASES):
         for match in re.finditer(re.escape(phrase), text):
             forbidden.update(range(match.start() + 1, match.end()))
@@ -126,17 +130,15 @@ def split_shot(shot: dict, *, names: tuple[str, ...] = GAME_NAMES, font: str | N
     # Genuine punctuation remains available even when a phrase dictionary match
     # accidentally spans two utterances.
     forbidden.difference_update(punctuation)
-    for phrase in protected_terms:
-        for match in re.finditer(re.escape(phrase), text):
-            forbidden.update(range(match.start() + 1, match.end()))
+    forbidden |= terms
     heads = {m.start() for phrase in CLAUSE_HEADS for m in re.finditer(re.escape(phrase), text)}
     strong = sorted({0, len(text), *(i for i, kind in punctuation.items() if kind == "strong")})
 
     def caption(start, end):
         return "".join((" " if i in spaces and i > start else "") + text[i] for i in range(start, end))
 
-    rows = []
-    for left, right in zip(strong, strong[1:]):
+    def segment(left, right, strict):
+        blocked = forbidden if strict else terms
         clause_edges = sorted({left, right, *(i for i in punctuation if left < i < right)})
         costs = {right: (0., [])}
         for start in range(right - 1, left - 1, -1):
@@ -145,12 +147,13 @@ def split_shot(shot: dict, *, names: tuple[str, ...] = GAME_NAMES, font: str | N
                 candidate = caption(start, end)
                 if not fits(candidate, names, font):
                     break
-                if end not in costs or end in forbidden or (end < right and BAD_HEAD.match(text[end:])):
+                if end not in costs or end in blocked:
                     continue
                 crossed = [i for i in clause_edges if start < i < end]
                 # Complete adjacent clauses may share one cue. A clause tail
                 # may not be attached to only the beginning of the next clause.
-                if crossed and (start not in clause_edges or end not in clause_edges):
+                if strict and ((end < right and BAD_HEAD.match(text[end:]))
+                               or (crossed and (start not in clause_edges or end not in clause_edges))):
                     continue
                 duration = (times[end - 1][1] - times[start][0]) * 1000
                 penalty = 8. + max(0, MIN_READ_MS - duration) / 15
@@ -166,9 +169,16 @@ def split_shot(shot: dict, *, names: tuple[str, ...] = GAME_NAMES, font: str | N
                 choices.append((penalty + suffix, [(start, end), *bounds]))
             if choices:
                 costs[start] = min(choices, key=lambda choice: (choice[0], len(choice[1])))
-        if left not in costs:
-            raise ValueError("no readable single-line subtitle segmentation; submit reviewed subtitle TXT")
-        for start, end in costs[left][1]:
+        return costs[left][1] if left in costs else None
+
+    rows = []
+    for left, right in zip(strong, strong[1:]):
+        # A run no word-safe split fits (a long number, a reduplication) is still drafted, breaking only outside
+        # game names and library terms; the agent re-splits the draft by hand.
+        bounds = segment(left, right, True) or segment(left, right, False)
+        if bounds is None:
+            raise ValueError("no single-line subtitle segmentation fits; write the subtitle file by hand")
+        for start, end in bounds:
             rows.append({"start": times[start][0], "end": times[end - 1][1], "text": caption(start, end)})
     return rows
 

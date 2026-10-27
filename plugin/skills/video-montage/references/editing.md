@@ -63,7 +63,8 @@ contrasts or pays off. A shared game name or keyword is not a link. Ask:
 5. Do two speakers' claims fit (one person's first-person result after another's story is a break)?
 6. Does the last clip sound finished: a settled statement, a rhetorical question or a `cta`?
 
-Any "no" rejects the join. Write the `reason` after the join passes: it names the words in A and B that connect them.
+Any "no" rejects the join. Write the `reason` after the join passes: it quotes the words in A and B that connect
+them, as spoken.
 After `check`, read `reports/scripts.md` once per video as a viewer and apply the same questions to the whole video.
 
 ## Transitions
@@ -91,7 +92,10 @@ one ("coherent", "same game", "smooth") is refused.
 - Text: a game name from the text library (`无尽冬日`) in at least one clip. A clip opening with 但/但是/不过 needs
   `contrast`/`counterpoint`; 所以 needs `cause_effect`, `condition_result`, `problem_solution` or `payoff`; 这下 needs
   `cause_effect`, `condition_result` or `payoff`; 然后/接着/随后 need `progression`/`escalation`. The first clip cannot
-  open with 因为 (unless it holds 所以/因此); 只要 without 就/便/即可/才能 needs a following `condition_result`.
+  open with 因为 (unless it holds 所以/因此) or with words that lean on an earlier line (然后, 所以, 但是, 不过, 而且,
+  另外, 再, 就是, 为什么呢, 那么...); 只要 without 就/便/即可/才能 needs a following `condition_result`.
+- Repeats: no clip opens by restating the previous clip's last clause ("开局一定要先砍树。" then "开局一定要砍树、"),
+  and no clause of four or more characters is spoken twice in a video.
 - Result phrases (幸存者一多, 建设末日城镇, 称霸冰原, 战力蹭蹭, 熔炉满级) need a causal transition into them, and after
   砍树 and 熔炉 a survivor bridge (招收幸存者, 吸引更多幸存者...). "so easy" only beside a result phrase; only one clip
   may use 易如反掌/轻轻松松/小意思/so easy. 海量福利 only in the final clip, with a concrete benefit (礼包码, 兑换...).
@@ -123,8 +127,9 @@ So N videos need at least N/8 different openings.
 
 ## Reaching the count
 
-Fewer coherent videos than requested means dig deeper, never stop or ask. After each rung re-run `annotate` (when
-beats changed), `routes` and `routes --joins`:
+Fewer coherent videos than requested, or a registered celebrity in no video (`routes --joins` prints the cast
+split), means dig deeper, never stop or ask. After each rung re-run `annotate` (when beats changed), `routes` and
+`routes --joins`:
 
 1. **Annotate every source.** A source without people and beats contributes nothing; `annotate` lists the ones
    still missing.
@@ -145,5 +150,6 @@ beats changed), `routes` and `routes --joins`:
 
 On each cut sheet compare the last frame before a cut with the first frame after it: similar subject position and
 size read as one flow; a large jump in framing of the same person, a half-finished gesture, a frame from another
-shot, a flash or a transition effect means another clip choice. Check that the tagged people are the ones in the
-frames and that every talk beat shows the speaker addressing the viewer, alone in frame.
+shot, a flash or a transition effect means another clip choice; record a transition the catalog missed in the
+annotations ([workflow](workflow.md#after-render)) so no other video uses it. Check that the tagged people are the
+ones in the frames and that every talk beat shows the speaker addressing the viewer, alone in frame.

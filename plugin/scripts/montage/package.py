@@ -20,7 +20,7 @@ from montage import audio as AUDIO
 from montage import bgm as BGM
 from montage import job as JOB
 from montage import catalog as CATALOG
-from montage import rules
+from montage import rules, runtime
 from montage.common import FFMPEG, digest, log, pool, probe, read, run, sha, write
 from montage.packaging import design, design_renderer, flower_effects, segmentation
 from montage.packaging import fonts as subtitle_fonts
@@ -407,6 +407,7 @@ def prepare_items(job: Path, state: dict, config: dict) -> tuple[list[dict], dic
     except ValueError as error:
         errors.setdefault("batch", []).append(str(error))
     ready = [item for item in items if item["plan_id"] not in errors and "bgm" in item]
+    log(f"package: {len(ready)} of {len(plan_ids)} outputs ready; setting their BGM levels")
     gains = bgm_gains(ready)
     for item in ready:
         item["font_path"] = subtitle_fonts.FONTS[item["design"]["font"]]["path"]
@@ -460,6 +461,9 @@ def package(job: Path, state: dict, config: dict) -> dict:
     shutil.rmtree(job / "work", ignore_errors=True)
     work = job / "work" / f"run-{os.getpid()}"
     work.mkdir(parents=True, exist_ok=True)
+    fresh = [item for item in items if not item["previous"]]
+    runtime.prefetch_animations({cue["entrance"]["effect"] for item in fresh for cue in item["design"]["cues"]} - {"none"})
+    log(f"package: encoding {len(fresh)} outputs ({len(items) - len(fresh)} unchanged)")
 
     def attempt(item):
         try:

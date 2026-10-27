@@ -8,15 +8,18 @@ eight videos.
 from __future__ import annotations
 
 import math
+import os
 import re
 import shutil
 import subprocess
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from montage import runtime
 from montage.audio import pcm
 from montage.common import probe, read, sha, write
 
@@ -95,8 +98,8 @@ def require_distribution(shas: list[str], waiver) -> None:
     if worst > MAX_VIDEOS_PER_TRACK:
         raise ValueError(f"BGM repetition: one track serves {worst} of {len(shas)} videos (limit {MAX_VIDEOS_PER_TRACK}); "
                          f"use at least {tracks_needed(len(shas))} different tracks: download the missing ones with `fetch-bgm` "
-                         "(several different sources) instead of repeating a track. Only the user's own yes "
-                         "(`decide --key bgm_repetition`) allows more than eight videos per track")
+                         "(several different sources) instead of repeating a track. Only when downloads failed from at "
+                         "least three sources: `decide --key bgm_repetition --value true --instruction \"fallback: <sources tried>\"`")
 
 
 def available(job: Path, asset_root: Path) -> list[dict]:
@@ -176,7 +179,7 @@ def acquire(job: Path, asset_root: Path, *, outputs: int = 1, url: str | None, f
 
     folder = registry_path(job).parent
     folder.mkdir(parents=True, exist_ok=True)
-    partial = folder / "download.partial"
+    partial = folder / f"download-{os.getpid()}-{threading.get_ident()}.partial"   # parallel fetch-bgm calls never collide
     try:
         if url:
             download(url, partial, referer=source_page)
@@ -204,8 +207,9 @@ def acquire(job: Path, asset_root: Path, *, outputs: int = 1, url: str | None, f
              "license_url": license_url, "license_evidence": license_evidence.strip(), "source_page": source_page,
              "download_url": url, "instrumental": True, "asset_audio_unsuitable": (asset_audio_unsuitable or "").strip() or None,
              "downloaded_at": datetime.now(timezone(timedelta(hours=8))).isoformat(timespec="seconds")}
-    tracks = [row for row in load_registry(job) if row["sha256"] != digest] + [entry]
-    write(registry_path(job), {"schema": SCHEMA, "tracks": tracks})
+    with runtime.locked(f"bgm-registry-{registry_path(job).resolve()}"):
+        tracks = [row for row in load_registry(job) if row["sha256"] != digest] + [entry]
+        write(registry_path(job), {"schema": SCHEMA, "tracks": tracks})
     return entry
 
 

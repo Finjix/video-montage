@@ -1,10 +1,10 @@
 # video-montage
 
-版本 `0.2.0`。用于批量制作中文口播混剪视频的 OpenAI 插件，支持 Windows 10/11 x64 的本地执行环境。
+版本 `0.0.1`（见 `plugin/plugin.json`）。用于批量制作中文口播混剪视频的 OpenAI 插件，支持 Windows 10/11 x64 的本地执行环境。
 
 ## 使用与发布
 
-`plugin/` 是完整发布目录，包含标准 `plugin.json`、`skills/video-montage/`、业务脚本及小型包装素材。直接将整个 `plugin/` 文件夹压缩成 ZIP 即可上传 ChatGPT 插件目录，或运行 `python dev/build_plugin.py` 生成并检查 `dist/video-montage-0.2.0.zip`。平台要求压缩包不超过 100 MB；上传后仍需开发者身份验证和市场审核。
+`plugin/` 是完整发布目录，包含标准 `plugin.json`、`skills/video-montage/`、业务脚本及小型包装素材。直接将整个 `plugin/` 文件夹压缩成 ZIP 即可上传 ChatGPT 插件目录，或运行 `python dev/build_plugin.py` 生成并检查 `dist/video-montage-0.0.1.zip`。平台要求压缩包不超过 100 MB；上传后仍需开发者身份验证和市场审核。
 
 插件采用仅包含技能和脚本的 Desktop only 形式。`.cmd` 入口负责转发业务参数和 JSON stdin，PowerShell 启动器负责准备环境，以兼容 Windows PowerShell 5.1 的独立 `-` 参数限制。安装时不下载运行环境，首次调用相关功能时自动准备；无需预装 Python，不需修改系统 PATH。AI 阅读 `skills/video-montage/SKILL.md` 后通过统一入口操作：
 
@@ -43,4 +43,4 @@
 
 ## 开发与验证
 
-开发工具、测试和验证记录统一放在 `dev/`。运行 `python dev/run_tests.py` 执行不需模型的回归测试；需要媒体测试时通过启动器准备相应依赖。`python dev/build_plugin.py` 检查包结构、清单引用、文件数量及大小并生成 ZIP。`dev/smoke/e2e.py` 用本地 `.素材` 执行三条视频的端到端验证，输出留在外部临时目录。
+开发工具、测试和验证记录统一放在 `dev/`。运行 `python dev/run_tests.py` 执行不需模型的回归测试；需要媒体测试时通过启动器准备相应依赖。`python dev/build_plugin.py` 检查包结构、清单引用、文件数量及大小并生成 ZIP。`dev/smoke/e2e.py` 用本地 `.素材` 执行三条视频的端到端验证，输出留在外部临时目录。修改提交后运行 `python dev/sync_codex_plugin.py`，把 `plugin/` 同步到本机 Codex 已安装的插件副本（保留其中的 `runtime-cache/`，`--dry-run` 只列出变化）。

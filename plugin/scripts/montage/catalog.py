@@ -469,6 +469,18 @@ def check_annotations(value: dict, state: dict) -> dict:
             raise ValueError(f"unknown source {sid}")
         if not isinstance(row, dict) or set(row) - allowed:
             raise ValueError(f"{sid}: allowed fields are {sorted(allowed)}")
+        shapes = {"people": list, "shots": dict, "cameras": list, "speakers": dict, "text": dict, "exclude": list}
+        for field, kind in shapes.items():
+            if not isinstance(row.get(field, kind()), kind):
+                raise ValueError(f"{sid} {field}: expected a {'list' if kind is list else 'mapping'} (see the annotation format)")
+        for number, shot in row.get("shots", {}).items():
+            if not str(number).isdigit() or not isinstance(shot, dict) or set(shot) - {"people", "merge"} \
+                    or not isinstance(shot.get("people", []), list):
+                raise ValueError(f"{sid} shot {number!r}: a shot note is {{\"people\": [...]}} and/or {{\"merge\": true}}, keyed by shot number")
+        if any(not isinstance(group, list) or not all(type(n) is int for n in group) for group in row.get("cameras", [])):
+            raise ValueError(f"{sid} cameras: a list of shot-number lists, e.g. [[1, 3, 5], [2, 4]]")
+        if any(not isinstance(unit, str) for unit in row.get("exclude", [])):
+            raise ValueError(f"{sid} exclude: a list of unit IDs")
         beats = row.get("beats", [])
         if not isinstance(beats, list):
             raise ValueError(f"{sid}: beats is a list of {{units, kind, role, gist}}")
@@ -621,11 +633,19 @@ def build(job: Path, state: dict, *, model=None) -> dict:
         note = annotations["sources"].get(sid, {})
         env = np.load(directory / f"{sid}-energy.npy")
         series = np.load(directory / f"{sid}.npz")
-        units = apply_text(sid, raw_units(raw[sid]["words"]), note.get("text", {}), cache)
-        units = finish_units(units, env, source, (series["adjacent"], series["endpoint"]))
-        cameras = {shot: f"{sid}:cam{index}" for index, group in enumerate(note.get("cameras", []), 1) for shot in group}
         merged = {int(number) for number, row in note.get("shots", {}).items() if row.get("merge")}
         cuts = [cut for number, cut in enumerate(source["cuts"], 2) if number not in merged]
+        units = apply_text(sid, raw_units(raw[sid]["words"]), note.get("text", {}), cache)
+        # A merged detection (flash, fast motion) is no camera change: it stays an unstable edge, not a masked cut.
+        units = finish_units(units, env, {**source, "cuts": cuts}, (series["adjacent"], series["endpoint"]))
+        deleted = {uid for uid, text in note.get("text", {}).items() if not "".join(text if isinstance(text, list) else [text]).strip()}
+        known = {unit["id"] for unit in units} | deleted
+        for field in ("exclude", "speakers"):
+            unknown = sorted(set(note.get(field, [])) - known)
+            if unknown:
+                raise ValueError(f"{sid} {field}: no unit {', '.join(unknown)} (a corrected or split unit has its own ID; "
+                                 "check the catalog)")
+        cameras = {shot: f"{sid}:cam{index}" for index, group in enumerate(note.get("cameras", []), 1) for shot in group}
         people_default = note.get("people", [])
         shots = []
         for number, (start, end) in enumerate(shots_of(source["cuts"], source["frames"]), 1):

@@ -25,7 +25,7 @@ def check_decision(key: str, row) -> dict:
         raise ValueError(f"unknown decision {key}; known: {sorted(DECISIONS)}")
     if (not isinstance(row, dict) or not DECISIONS[key](row.get("value"))
             or not isinstance(row.get("instruction"), str) or not row["instruction"].strip()):
-        raise ValueError(f"decision {key} needs a valid value and the user's own words as instruction")
+        raise ValueError(f"decision {key} needs a valid value and an instruction (the user's own words, or 'fallback: <why>')")
     return {"value": row["value"], "instruction": row["instruction"].strip()}
 
 
@@ -65,7 +65,7 @@ def init(order: dict, job_dir: Path | None = None) -> tuple[Path, dict]:
     count = order.get("requested_outputs")
     if type(count) is not int or count < 1:
         raise ValueError("requested_outputs must be a positive integer")
-    paths = [Path(row["path"] if isinstance(row, dict) else row).resolve() for row in order.get("sources", [])]
+    paths = [Path(row.get("path", "") if isinstance(row, dict) else str(row)).resolve() for row in order.get("sources") or []]
     if not paths:
         raise ValueError("sources must list the original video files")
     for path in paths:
@@ -80,7 +80,9 @@ def init(order: dict, job_dir: Path | None = None) -> tuple[Path, dict]:
         raise ValueError(f"asset_root is not a folder: {asset_root}")
     celebrities = []
     for row in order.get("celebrities", []):
-        plate = Path(row.get("nameplate", "") if isinstance(row.get("nameplate"), str) else row.get("nameplate", {}).get("path", ""))
+        row = row if isinstance(row, dict) else {"person_id": row}
+        nameplate = row.get("nameplate")
+        plate = Path(nameplate if isinstance(nameplate, str) else nameplate.get("path", "") if isinstance(nameplate, dict) else "")
         if not rules.person_id(row.get("person_id")) or not str(row.get("name", "")).strip() or not plate.is_file():
             raise ValueError(f"celebrity needs person_id (person:xxx), name and an existing nameplate PNG: {row}")
         if problem := overlay_problem(plate):

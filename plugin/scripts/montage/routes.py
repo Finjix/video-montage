@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 import time
 from collections import Counter, defaultdict
+from itertools import count as count_from
 from pathlib import Path
 
 from montage import batch, plan as PLAN, rules
@@ -83,25 +84,44 @@ def cut(source: dict, run: list[dict], registered: set[str]) -> tuple[dict | Non
             "pieces": (min(min(o["pieces"]) for o in options), max(max(o["pieces"]) for o in options))}, ""
 
 
-def relations(left: dict, right: dict) -> list[str]:
-    """Relations the machine checks allow for the join left -> right (in preference order)."""
+def relation_limits(left: dict, right: dict) -> tuple[list[str], list[str]]:
+    """Relations the machine checks allow for the join left -> right (in preference order), and what limits them."""
     text = rules.normalize(right["text"])
-    allowed = set(rules.RELATIONS)
+    allowed, why = set(rules.RELATIONS), []
     for connector, permitted in rules.CONNECTORS.items():
         if text.startswith(connector):
             allowed &= permitted
+            why.append(f"the second clip opens with {connector}")
             break
     if rules.contains(right["text"], rules.RESULT_ANCHORS):
         allowed &= rules.CAUSAL
+        why.append("the second clip states a result")
     if rules.matches(right["text"], rules.FIRST_PERSON_RESULTS) and not rules.contains(left["text"], rules.FIRST_PERSON_SUBJECTS):
         allowed &= {"speaker_experience"}
+        why.append("a first-person result follows a clip without a spoken subject")
     left_text = rules.normalize(left["text"])
     if left_text.startswith("只要") and not any(term in left_text for term in ("就", "便", "即可", "才能")):
         allowed &= {"condition_result"}
+        why.append("the first clip opens with 只要 and no result")
     if (left["last_speaker"] and right["first_speaker"] and left["last_speaker"] != right["first_speaker"]
             and re.search(rules.PERSONAL, left["text"]) and re.search(rules.PERSONAL, right["text"])):
         allowed &= TWO_SPEAKERS
-    return [name for name in PREFERRED if name in allowed] + sorted(allowed - set(PREFERRED))
+        why.append("two speakers' first-person accounts")
+    return [name for name in PREFERRED if name in allowed] + sorted(allowed - set(PREFERRED)), why
+
+
+def relations(left: dict, right: dict) -> list[str]:
+    return relation_limits(left, right)[0]
+
+
+def quotes(reason: str, text: str) -> bool:
+    """The reason quotes at least one word (two or more Chinese characters) exactly as the clip says it."""
+    spoken = rules.normalize(text)
+    return any(run in spoken for run in re.findall(r"[\u3400-\u9fff]{2,}", reason))
+
+
+def boundary(left: dict, right: dict) -> tuple:
+    return left["source"], left["units"].split("-")[-1], right["source"], right["units"].split("-")[0]
 
 
 # ----------------------------------------------------------------------------------- search
@@ -233,9 +253,26 @@ class Usage:
         self.profiles.append(profile)
 
 
-def select(candidates: list[dict], count: int) -> list[dict]:
+def signature(output: dict) -> tuple:
+    return tuple((clip.get("source"), clip.get("units")) for clip in output.get("clips") or [] if isinstance(clip, dict))
+
+
+def previous_ids(job: Path) -> dict[tuple, str]:
+    """Clip sequence -> plan_id in the current plan (else the last draft): a re-run keeps those videos and their IDs,
+    so render and package reuse their work."""
+    for name in ("config/plan.json", "config/plan-draft.json"):
+        try:
+            rows = read(job / name).get("outputs") or []
+        except (OSError, ValueError, AttributeError):
+            continue
+        return {signature(row): row["plan_id"] for row in rows if isinstance(row, dict) and isinstance(row.get("plan_id"), str)}
+    return {}
+
+
+def select(candidates: list[dict], count: int, keep=frozenset()) -> list[dict]:
     """Greedy pick: strong joins before weak, a celebrity still under its fair share of the batch first (so one whose
-    clips only hand over still appears), one celebrity before mixed casts, least-used clips first."""
+    clips only hand over still appears), videos of the previous plan (`keep`), one celebrity before mixed casts,
+    least-used clips first."""
     usage, chosen, clip_uses, opening_uses, featured = Usage(), [], Counter(), Counter(), Counter()
     for candidate in candidates:
         candidate["profile"] = Usage.keys(candidate["resolved"])
@@ -244,7 +281,7 @@ def select(candidates: list[dict], count: int) -> list[dict]:
     remaining = list(candidates)
     while len(chosen) < count and remaining:
         remaining.sort(key=lambda c: (c["weak"], all(featured[p] >= share for p in c["resolved"]["protagonists"]),
-                                      len(c["resolved"]["protagonists"]) > 1,
+                                      signature(c["output"]) not in keep, len(c["resolved"]["protagonists"]) > 1,
                                       min((featured[p] for p in c["resolved"]["protagonists"]), default=0),
                                       opening_uses[c["route"][0]["key"]] * 3 + sum(clip_uses[x["key"]] for x in c["route"]),
                                       abs(len(c["route"]) - 3)))
@@ -269,7 +306,7 @@ def joins_file(path: Path, by_key: dict) -> tuple[dict, list[str]]:
     rows = value.get("joins") if isinstance(value, dict) else None
     if not isinstance(rows, list):
         raise ValueError('joins file: {"joins": [{"from": "S01:U02-U05", "to": "S03:U07", "relation": ..., "reason": ...}]}')
-    accepted, problems = {}, []
+    accepted, problems, reused = {}, [], {}
     for number, row in enumerate(rows, 1):
         if (not isinstance(row, dict) or not {"from", "to", "relation", "reason"} <= set(row)
                 or not all(isinstance(row[key], str) for key in ("from", "to", "relation", "reason"))):
@@ -279,14 +316,26 @@ def joins_file(path: Path, by_key: dict) -> tuple[dict, list[str]]:
         if not left or not right:
             problems.append(f"join {number}: unknown clip {row['from'] if not left else row['to']} (use keys from routes.md)")
             continue
-        if row["relation"] not in relations(left, right):
-            problems.append(f"join {number} {row['from']} -> {row['to']}: relation must be one of {relations(left, right)}")
+        where = f"join {number} {row['from']} -> {row['to']}"
+        allowed, why = relation_limits(left, right)
+        if row["relation"] not in allowed:
+            problems.append(f"{where}: relation must be one of {allowed}" + (f" ({'; '.join(why)})" if why else ""))
             continue
         if not rules.specific(row["reason"]):
-            problems.append(f"join {number} {row['from']} -> {row['to']}: reason must name the words that link the clips")
+            problems.append(f"{where}: reason must name the words that link the clips")
+            continue
+        missing = [side for side, clip in (("first", left), ("second", right)) if not quotes(row["reason"], clip["text"])]
+        if missing:
+            problems.append(f"{where}: the reason must quote the linking words of both clips as spoken; nothing quoted from "
+                            f"the {' and '.join(missing)} clip")
             continue
         accepted[(row["from"], row["to"])] = {"relation": row["relation"], "reason": row["reason"].strip(),
                                               "weak": bool(row.get("weak"))}
+        reused.setdefault(rules.normalize(row["reason"]), {}).setdefault(boundary(left, right), number)
+    for joins in reused.values():
+        if len(joins) > 1:
+            problems.append(f"joins {', '.join(map(str, sorted(joins.values())))} share one reason across different clip "
+                            "boundaries; judge each join on its own words and write its own reason")
     return accepted, problems
 
 
@@ -313,13 +362,18 @@ def run(job: Path, state: dict, *, joins: Path | None, mix: bool, max_clips: int
                                  verify=verifier(sources, registered, games, min_sources, reasons))
     for row in verified:
         row["weak"] = sum(accepted[(a["key"], b["key"])]["weak"] for a, b in zip(row["route"], row["route"][1:]))
-    chosen = select(verified, count)
+    previous = previous_ids(job)
+    chosen = select(verified, count, frozenset(previous))
+    kept = {signature(row["output"]): previous[signature(row["output"])] for row in chosen if signature(row["output"]) in previous}
+    free = (f"P{number:02d}" for number in count_from(1) if f"P{number:02d}" not in kept.values())
     outputs = []
-    for number, row in enumerate(chosen, 1):
-        output = dict(row["output"], plan_id=f"P{number:02d}")
+    for row in chosen:
+        output = dict(row["output"], plan_id=kept.get(signature(row["output"])) or next(free))
         if row["weak"]:
             output["note"] = "weak join (topic link only): list it in the final summary"
         outputs.append(output)
+    order = sorted(range(len(outputs)), key=lambda i: (len(outputs[i]["plan_id"]), outputs[i]["plan_id"]))
+    chosen, outputs = [chosen[i] for i in order], [outputs[i] for i in order]
     resolved = [dict(row["resolved"], plan_id=output["plan_id"]) for row, output in zip(chosen, outputs)]
     audit, _ = batch.audit(resolved, state.get("decisions", {})) if resolved else ([], {})
     target = job / "config/plan-draft.json"
@@ -327,6 +381,15 @@ def run(job: Path, state: dict, *, joins: Path | None, mix: bool, max_clips: int
     lines = [f"routes through the accepted joins: {len(verified)}" + (" (search stopped at the time limit)" if truncated else ""),
              f"draft plan: {target} ({len(outputs)} of {count} outputs, {sum(1 for r in chosen if r['weak'])} with weak joins)"]
     lines += [f"  batch: {problem}" for problem in audit]
+    if kept:
+        lines.append(f"kept {len(kept)} videos of the previous plan under their plan IDs (render and package reuse them)")
+    names = {row["person_id"]: row.get("name") or row["person_id"].split(":", 1)[1] for row in state["celebrities"]}
+    cast = Counter(p for row in chosen for p in row["resolved"]["protagonists"])
+    lines.append("cast: " + ", ".join(f"{names[p]} {cast[p]}" for p in names))
+    if absent := [names[p] for p in names if not cast[p]]:
+        lines.append(f"no video features {', '.join(absent)}: accept joins into or out of their clips in routes.md (a "
+                     "celebrity whose own clips finish no video hands over to another), or cut finer beats; if nothing "
+                     "works, say why in the final summary")
     if len(outputs) < count:
         openings = Counter(row["route"][0]["key"] for row in verified)
         lines += [f"short by {count - len(outputs)}: the accepted joins allow {len(openings)} openings "
@@ -360,7 +423,8 @@ def explore(job, found, unusable, sources, registered, games, min_sources, mix, 
              + f", {len(joins)} distinct joins. Batch: {count} videos.",
              "A route is clips in role order, neighbours from different sources (a source may return later: a b a c).",
              "Judge each join below as a viewer: does the second clip answer, continue, prove or pay off the first?",
-             "Accept the good ones in a joins file and run `routes --joins <file>` to build the batch."]
+             "Accept the good ones in a joins file, each with a reason quoting the linking words of both clips, and run",
+             "`routes --joins <file>` to build the batch. This file is long: read every part of it."]
     if stranded:
         lines.append(f"Own clips finish no video for {', '.join(names[p] for cast in sorted(stranded) for p in cast)}: "
                      "their clips hand over to or from another celebrity.")
@@ -384,11 +448,13 @@ def explore(job, found, unusable, sources, registered, games, min_sources, mix, 
             allowed = relations(by_key[left], by_key[right])
             constraint = "" if len(allowed) == len(rules.RELATIONS) else f"  [{', '.join(allowed)}]"
             lines.append(f"   -> {right}  {by_key[right]['first_text']}...  ({uses}){constraint}")
+    (job / "reports").mkdir(parents=True, exist_ok=True)
     (job / "reports/routes.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     write(job / "reports/routes.json", {"clips": found, "joins": [{"from": a, "to": b, "routes": n} for (a, b), n in sorted(joins.items())]})
-    example = '{"joins": [{"from": "S01:U02-U05", "to": "S03:U07-U09", "relation": "explanation", "reason": "...", "weak": false}]}'
-    result = [f"routes: {job / 'reports/routes.md'} ({len(found)} clips, {len(verified)} verified routes, {len(joins)} joins, "
-              f"{len(openings)} openings)" + ("; time limit reached" if truncated else "")]
+    example = ('{"joins": [{"from": "S01:U02-U05", "to": "S03:U07-U09", "relation": "explanation", '
+               '"reason": "S01 asks 最要紧的是什么; S03 answers 提升温度", "weak": false}]}')
+    result = [f"routes: {job / 'reports/routes.md'} ({len(lines)} lines: {len(found)} clips, {len(verified)} verified "
+              f"routes, {len(joins)} joins, {len(openings)} openings)" + ("; time limit reached" if truncated else "")]
     if unusable:
         result.append(f"{len(unusable)} beats cannot be cut alone (reasons listed in routes.md)")
     if len(openings) * batch.LIMITS["opening"] < count:
