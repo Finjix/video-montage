@@ -256,7 +256,7 @@ class Routes(unittest.TestCase):
             path.write_text(json.dumps({"joins": [
                 {"from": "S01:U01-U02", "to": "S02:U03-U04", "relation": "contrast", "reason": "synthetic contrast join"},
                 {"from": "S01:U01-U02", "to": "S02:U04", "relation": "benefit", "reason": "ok"}]}), encoding="utf-8")
-            accepted, problems = ROUTES.joins_file(path, by_key)
+            accepted, problems, _ = ROUTES.joins_file(path, by_key)
         self.assertEqual(accepted, {})
         self.assertEqual(len(problems), 2)
 
@@ -270,7 +270,7 @@ class Routes(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "joins.json"
             path.write_text(json.dumps({"joins": joins}, ensure_ascii=False), encoding="utf-8")
-            accepted, problems = ROUTES.joins_file(path, by_key)
+            accepted, problems, _ = ROUTES.joins_file(path, by_key)
         self.assertIn("nothing quoted from the first and second clip", problems[0])
         self.assertIn("nothing quoted from the second clip", problems[1])
         self.assertIn("joins 3, 4 share one reason", problems[2])
@@ -284,7 +284,7 @@ class Routes(unittest.TestCase):
             row, errors = PLAN.resolve_output(output, sources, {WU}, GAMES, 3)
             self.assertEqual(errors, [])
             resolved.append(row)
-        usage = ROUTES.Usage()
+        usage = ROUTES.Usage(3)
         usage.add(ROUTES.Usage.keys(resolved[0]))
         self.assertFalse(usage.fits(ROUTES.Usage.keys(resolved[1])))
         self.assertTrue(batch.audit(resolved[:2], {})[0])
@@ -292,7 +292,8 @@ class Routes(unittest.TestCase):
 
     def test_usage_counts_one_text_from_two_sources_twice(self):
         def profile(n):
-            return {"keys": {"text": ["点击即玩", "点击即玩"]}, "texts": [f"t{n}"], "speech": f"q{n:02d}w{n:02d}e{n:02d}"}
+            return {"keys": {"text": ["点击即玩", "点击即玩"]}, "texts": [f"t{n}"], "speech": f"q{n:02d}w{n:02d}e{n:02d}",
+                    "places": {}}
         usage = ROUTES.Usage()
         for n in range(batch.LIMITS["text"] // 2):
             self.assertTrue(usage.fits(profile(n)))
@@ -304,8 +305,152 @@ class Routes(unittest.TestCase):
             path = Path(folder) / "joins.json"
             path.write_text(json.dumps({"joins": [{"from": ["S01"], "to": "S02:U01", "relation": "benefit", "reason": 12345678901234}]}),
                             encoding="utf-8")
-            accepted, problems = ROUTES.joins_file(path, {})
+            accepted, problems, _ = ROUTES.joins_file(path, {})
         self.assertEqual((accepted, len(problems)), ({}, 1))
+
+
+def topical(data: dict) -> dict:
+    """The synthetic catalog with topics: every source's hook, steps and cta make the same points."""
+    for source in data["sources"]:
+        for beat, topic in zip(source["beats"], ("question", "chop-first", "build-up", "click")):
+            beat["topic"] = topic
+    return data
+
+
+def resolved_route(clips: list[tuple[str, str]], data: dict | None = None):
+    data = data or catalog()
+    sources = {s["id"]: s for s in data["sources"]}
+    links = [{"relation": "progression", "reason": "synthetic join between the two clips"}] * (len(clips) - 1)
+    output = {"plan_id": "P", "clips": [{"source": a, "units": b} for a, b in clips], "transitions": links}
+    return PLAN.resolve_output(output, sources, {WU, XU}, GAMES, 3)
+
+
+class Positions(unittest.TestCase):
+    def test_positions_count_from_both_ends(self):
+        self.assertEqual(batch.positions(4), [("head", 0), ("head", 1), ("tail", 1), ("tail", 0)])
+        self.assertEqual(batch.positions(5), [("head", 0), ("head", 1), ("head", 2), ("tail", 1), ("tail", 0)])
+        self.assertEqual(batch.position_cap(50), 12)
+        self.assertEqual(batch.position_cap(3), 2)
+
+    def test_two_shared_positions_of_four_break_the_quarter(self):
+        a, _ = resolved_route([("S01", "U01"), ("S02", "U02"), ("S03", "U03"), ("S04", "U04")])
+        b, _ = resolved_route([("S01", "U01"), ("S03", "U02"), ("S05", "U03"), ("S04", "U04")])   # same opening and ending
+        c, _ = resolved_route([("S01", "U01"), ("S03", "U02"), ("S05", "U03"), ("S06", "U04")])   # same opening only
+        a, b, c = (dict(row, plan_id=pid) for row, pid in ((a, "P1"), (b, "P2"), (c, "P3")))
+        self.assertEqual(batch.same_position_share(batch.places(a["clips"]), batch.places(b["clips"])), 0.5)
+        errors, summary = batch.audit([a, b], {})
+        self.assertTrue(any("50% of their positions" in e for e in errors), errors)
+        self.assertEqual(summary["most_shared_positions"], 0.5)
+        usage = ROUTES.Usage(3)
+        usage.add(ROUTES.Usage.keys(a))
+        self.assertFalse(usage.fits(ROUTES.Usage.keys(b)))
+        self.assertTrue(usage.fits(ROUTES.Usage.keys(c)))
+        self.assertFalse([e for e in batch.audit([a, c], {})[0] if "positions" in e])
+
+    def test_endings_compare_from_the_end_whatever_the_length(self):
+        long, _ = resolved_route([("S01", "U01"), ("S02", "U02"), ("S03", "U02"), ("S05", "U03"), ("S04", "U04")])
+        short, _ = resolved_route([("S06", "U01"), ("S05", "U02"), ("S03", "U03"), ("S04", "U04")])
+        self.assertEqual(batch.shared_positions(batch.places(long["clips"]), batch.places(short["clips"])), 1)
+
+    def test_one_piece_at_one_position_in_more_than_a_quarter_of_the_batch(self):
+        rows = []
+        for number, (a, b, c) in enumerate([("S02", "S03", "S04"), ("S03", "S04", "S05"), ("S04", "S05", "S06"),
+                                            ("S05", "S06", "S02"), ("S06", "S02", "S03"), ("S02", "S04", "S06"),
+                                            ("S03", "S05", "S02"), ("S04", "S06", "S03")]):
+            row, errors = resolved_route([("S01", "U01"), (a, "U02"), (b, "U03"), (c, "U04")])
+            self.assertEqual(errors, [])
+            rows.append(dict(row, plan_id=f"P{number}"))
+        errors, _ = batch.audit(rows, {})
+        self.assertTrue(any("the same material at one position (limit 2)" in e and "clip 1" in e for e in errors), errors)
+
+
+class TopicsAndFlags(unittest.TestCase):
+    def test_a_topic_join_covers_every_pair_and_a_rejection_removes_one(self):
+        found, _ = ROUTES.clips(topical(catalog()), {WU, XU})
+        by_key = {clip["key"]: clip for clip in found}
+        joins = [{"from": "topic:question", "to": "topic:chop-first", "relation": "answer", "reason": "你知道无尽冬日 is answered by 开局先砍树"},
+                 {"from": "S01:U01", "to": "S02:U02", "relation": "explanation", "reason": "S01 asks 无尽冬日第0招; S02 says 先砍树第1步"},
+                 {"from": "S01:U01", "to": "S03:U02", "reject": True, "reason": "S03 answers a different question"},
+                 {"from": "topic:chop-first", "to": "topic:question", "relation": "answer", "reason": "先砍树 then 你知道 again"}]
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "joins.json"
+            path.write_text(json.dumps({"joins": joins}, ensure_ascii=False), encoding="utf-8")
+            accepted, problems, notes = ROUTES.joins_file(path, by_key)
+        self.assertEqual(problems, [])
+        self.assertTrue(any("never used" in note for note in notes), notes)   # a hook never follows
+        self.assertEqual(accepted[("S01:U01", "S02:U02")]["relation"], "explanation")   # the clip join wins
+        self.assertNotIn(("S01:U01", "S03:U02"), accepted)
+        self.assertNotIn(("S01:U01", "S01:U02"), accepted)                              # one source never joins itself
+        self.assertEqual(accepted[("S02:U01", "S04:U02")]["relation"], "answer")
+        self.assertEqual(len([pair for pair in accepted if pair[0].endswith(":U01") and pair[1].endswith(":U02")]), 6 * 5 - 1)
+
+    def test_a_point_is_made_once_per_video(self):
+        data = topical(catalog())
+        data["sources"][2]["beats"][2]["also"] = ["chop-first"]
+        _, errors = resolved_route([("S01", "U01"), ("S02", "U02"), ("S03", "U03"), ("S04", "U04")], data)
+        self.assertTrue(any("makes the point of clip 2 again (topic chop-first)" in e for e in errors), errors)
+        found, _ = ROUTES.clips(data, {WU, XU})
+        clip = next(c for c in found if c["key"] == "S03:U03")
+        self.assertEqual(clip["points"], ["build-up", "chop-first"])
+
+    def test_opening_and_closing_flags(self):
+        data = catalog()
+        data["sources"][0]["beats"][0]["opening"] = False
+        data["sources"][3]["beats"][3]["closing"] = False
+        _, errors = resolved_route([("S01", "U01"), ("S02", "U02"), ("S03", "U03"), ("S04", "U04")], data)
+        self.assertTrue(any("opening: false" in e for e in errors), errors)
+        self.assertTrue(any("closing: false" in e for e in errors), errors)
+        found, _ = ROUTES.clips(data, {WU, XU})
+        walker = ROUTES.Walker(found, lambda a, b: "progression", min_sources=3, mix=True)
+        self.assertNotIn("S01:U01", {clip["key"] for clip in walker.starts})
+
+    def test_two_cta_beats_but_not_three(self):
+        from montage import rules
+        beat = lambda role: {"id": "B", "role": role, "kind": "talk"}
+        clips = [{"kind": "talk", "beats": [beat(role)]} for role in ("hook", "body", "cta", "cta")]
+        self.assertEqual(rules.structure_errors(clips), [])
+        self.assertTrue(any("more than 2 cta" in e for e in rules.structure_errors(clips + [{"kind": "talk", "beats": [beat("cta")]}])))
+
+    def test_one_phrase_in_two_mouths_is_refused(self):
+        from montage import rules
+        clips = [{"text": t, "unit_texts": [t]} for t in ("温度蹭蹭往上涨，", "幸存者才能活下来。", "那战力就蹭蹭往上涨。")]
+        self.assertTrue(any("蹭蹭往上涨" in e for e in rules.repeated_clauses(clips)))
+        named = [{"text": t, "unit_texts": [t]} for t in ("在无尽冬日要想富，", "在无尽冬日，你只需要碎片时间上线点一点，")]
+        self.assertEqual(rules.repeated_clauses(named), [])        # the game name may come back
+
+    def test_annotation_fields_are_checked(self):
+        from montage import catalog as CATALOG
+        state = {"sources": [{"id": "S01"}]}
+        beat = {"units": "U01", "kind": "talk", "role": "hook", "gist": "a synthetic beat for the test"}
+        CATALOG.check_annotations({"sources": {"S01": {"beats": [dict(beat, topic="chop-first", also=["furnace"],
+                                                                      opening=False, closing=False)]}}}, state)
+        for bad in ({"topic": "Chop First"}, {"also": "furnace"}, {"closing": True}, {"flavour": "x"}):
+            with self.assertRaises(ValueError):
+                CATALOG.check_annotations({"sources": {"S01": {"beats": [dict(beat, **bad)]}}}, state)
+
+
+class ComposeAndSolve(unittest.TestCase):
+    def test_compose_keeps_the_quarter_and_prefers_more_clips(self):
+        data = topical(catalog())
+        found, _ = ROUTES.clips(data, {WU, XU})
+        sources = {s["id"]: s for s in data["sources"]}
+        accepted = {(a["key"], b["key"]): {"relation": "progression", "reason": "synthetic", "weak": False}
+                    for a in found for b in found if ROUTES.Walker.may_follow(a, b)}
+        walker = ROUTES.Walker(found, lambda a, b: (accepted.get((a["key"], b["key"])) or {}).get("relation"),
+                               min_sources=3, mix=True)
+        chosen = ROUTES.compose(walker, ROUTES.verifier(sources, {WU, XU}, GAMES, 3), 6, accepted, seconds=30)
+        self.assertEqual(len(chosen), 6)
+        resolved = [dict(row["resolved"], plan_id=f"P{n}") for n, row in enumerate(chosen)]
+        self.assertEqual([e for e in batch.audit(resolved, {})[0]], [])
+        places = [batch.places(row["clips"]) for row in resolved]
+        self.assertTrue(all(batch.same_position_share(a, b) <= .25 for i, a in enumerate(places) for b in places[i + 1:]))
+
+    def test_a_narrow_band_off_the_six_frame_grid_is_found(self):
+        option = lambda pieces, cost: {"pieces": pieces, "total": sum(pieces), "cost": cost}
+        rows = [[option([460], 0), option([448], 1)], [option([149], 0)], [option([300], 0)], [option([300], 0)]]
+        choice = PLAN.solve(rows)
+        self.assertIsNotNone(choice)
+        self.assertEqual([o["pieces"][0] for o in choice], [448, 149, 300, 300])
 
 
 class InitChecks(unittest.TestCase):

@@ -98,6 +98,35 @@ def repair(feasible: list[list[dict]]) -> list[dict] | None:
     return None
 
 
+def merge(intervals) -> list[tuple[int, int]]:
+    """Union of closed integer intervals, sorted and disjoint (empty ones dropped)."""
+    result = []
+    for low, high in sorted(row for row in intervals if row[0] <= row[1]):
+        if result and low <= result[-1][1] + 1:
+            result[-1] = (result[-1][0], max(result[-1][1], high))
+        else:
+            result.append((low, high))
+    return result
+
+
+def intersect(left: list[tuple[int, int]], right: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    result, i, j = [], 0, 0
+    while i < len(left) and j < len(right):
+        low, high = max(left[i][0], right[j][0]), min(left[i][1], right[j][1])
+        if low <= high:
+            result.append((low, high))
+        if left[i][1] < right[j][1]:
+            i += 1
+        else:
+            j += 1
+    return result
+
+
+def bands(row: list[dict]) -> list[tuple[int, int]]:
+    """Every band floor L (shots in [L, L+MAX_SPREAD], L >= MIN_SHOT) some option of one clip fits."""
+    return merge((max(MIN_SHOT, max(o["pieces"]) - MAX_SPREAD), min(o["pieces"])) for o in row)
+
+
 def solve(options: list[list[dict]]) -> list[dict] | None:
     """One option per clip: every shot in [L, L+MAX_SPREAD] with L >= MIN_SHOT, 17-30 s, least padding."""
     usable = [[o for o in row if min(o["pieces"]) >= MIN_SHOT] for row in options]
@@ -106,18 +135,30 @@ def solve(options: list[list[dict]]) -> list[dict] | None:
     cheapest = repair(usable)
     if cheapest and max(max(o["pieces"]) for o in cheapest) - min(min(o["pieces"]) for o in cheapest) <= MAX_SPREAD:
         return cheapest
-    lows = sorted({min(o["pieces"]) // 6 * 6 for row in usable for o in row} | {MIN_SHOT})
-    best = None
-    for low in lows:
-        low = max(low, MIN_SHOT)
-        feasible = [[o for o in row if min(o["pieces"]) >= low and max(o["pieces"]) <= low + MAX_SPREAD] for row in usable]
-        if any(not row for row in feasible):
-            continue
-        choice = repair(feasible)
-        if choice is not None:
-            cost = sum(o["cost"] for o in choice)
-            if best is None or cost < best[0]:
-                best = (cost, choice)
+    window = bands(usable[0])
+    for row in usable[1:]:
+        window = intersect(window, bands(row))
+    if not window:
+        return None
+
+    def best_of(lows):
+        best = None
+        for low in lows:
+            feasible = [[o for o in row if min(o["pieces"]) >= low and max(o["pieces"]) <= low + MAX_SPREAD] for row in usable]
+            if (sum(min(o["total"] for o in row) for row in feasible) > MAX_FRAMES
+                    or sum(max(o["total"] for o in row) for row in feasible) < MIN_FRAMES):
+                continue
+            choice = repair(feasible)
+            if choice is not None:
+                cost = sum(o["cost"] for o in choice)
+                if best is None or cost < best[0]:
+                    best = (cost, choice)
+        return best
+
+    inside = lambda low: any(a <= low <= b for a, b in window)
+    grid = sorted({max(min(o["pieces"]) // 6 * 6, MIN_SHOT) for row in usable for o in row} | {MIN_SHOT})
+    # the 6-frame grid first (stable cut choices), then the window edges a narrow band needs
+    best = best_of([low for low in grid if inside(low)]) or best_of(sorted({edge for interval in window for edge in interval}))
     return best[1] if best else None
 
 
@@ -195,7 +236,8 @@ def clip_beats(source: dict, units: list[dict]) -> tuple[list[dict], list[str]]:
     loose = [unit["id"] for unit in units if not any(unit["id"] in beat["units"] for beat in covered)]
     if loose:
         problems.append(f"{source['id']} {', '.join(loose)} belong to no beat (cannot be planned)")
-    return [{key: beat[key] for key in ("id", "kind", "role", "gist")} for beat in covered], problems
+    return [{**{key: beat.get(key) for key in ("id", "kind", "role", "gist", "topic")}, "also": beat.get("also", []),
+             "opening": beat.get("opening", True), "closing": beat.get("closing", True)} for beat in covered], problems
 
 
 def resolve_output(output: dict, sources: dict, registered: set[str], games: list[str], min_sources: int,
@@ -371,7 +413,8 @@ def script(output: dict) -> list[str]:
             links = output["transitions"]
             link = links[number - 2] if number - 2 < len(links) else {}
             lines.append(f"   -> {link.get('relation', '(missing)')}: {link.get('reason', '(missing)')}")
-        beats = ", ".join(f"{beat['id']} {beat['kind']}/{beat['role']}" for beat in clip["beats"])
+        beats = ", ".join(f"{beat['id']} {beat['kind']}/{beat['role']}" + (f" #{beat['topic']}" if beat.get("topic") else "")
+                          + "".join(f" +{topic}" for topic in beat.get("also", [])) for beat in clip["beats"])
         lines.append(f"{number}. {clip['source']} {clip['units'][0]}-{clip['units'][-1]} [{beats}] {clip['duration']:.1f} s")
         lines.append(f"   {clip['text']}")
         lines += [f"   ({beat['gist']})" for beat in clip["beats"]]

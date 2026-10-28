@@ -9,8 +9,8 @@ inspects or prefetches it; it needs no job). Long commands print progress lines 
 | `init --work-order -` | validates the order (JSON on stdin or a file), creates the delivery folder and job dir, reports the asset pack | seconds |
 | `prepare` | frame clock, camera cuts, speech recognition, units with clean cut points, sheets (`--fresh` recognizes again) | ~1 min per 10 sources (first use: +30-60 min of downloads) |
 | `annotate --file <json>` | applies people, speakers, transcript fixes and beats; rewrites the catalog | seconds (+ aligner load when text changed) |
-| `routes [--mix]` | cuttable clips, unusable beats with reasons, joins of verified routes → `reports/routes.md` | seconds, at most `--seconds` (40) |
-| `routes --joins <json>` | builds `config/plan-draft.json` for the whole batch from the accepted joins | seconds |
+| `routes [--mix]` | cuttable clips, unusable beats with reasons, topics, joins of sampled verified routes → `reports/routes.md` | at most `--seconds` (40) |
+| `routes --joins <json> [--fresh]` | composes `config/plan-draft.json` for the whole batch from the accepted joins | 10-60 s |
 | `check --plan <json>` | exact cut frames and every rule → `reports/check.json`, `reports/scripts.md` | < 1 s |
 | `render --plan <json>` | clean videos, QC, subtitle drafts, cut sheets (changed outputs only) | ~15 s per 3 videos |
 | `package [--config <json>]` | designs, encodes, checks and publishes (changed outputs only) | ~25-40 s per video, 4 in parallel |
@@ -60,9 +60,13 @@ One file for all sources; re-run `annotate` with the complete file after every c
           "text": {"U12": "樾哥，", "U20": "", "U31": ["第一句，", "第二句。"]},
           "exclude": ["U09"],
           "beats": [{"units": "U02-U05", "kind": "talk", "role": "hook", "gist": "asks who still fails at the cold start and promises the fix"},
-                    {"units": "U06-U10", "kind": "talk", "role": "body", "gist": "chop trees first, feed the furnace, temperature rises"},
+                    {"units": "U06", "kind": "talk", "role": "body", "topic": "chop-trees-first", "gist": "chop trees first at the start"},
+                    {"units": "U07-U08", "kind": "talk", "role": "body", "topic": "furnace-heat", "also": ["furnace"],
+                     "opening": false, "gist": "the wood feeds the furnace and the temperature rises"},
+                    {"units": "U09", "kind": "talk", "role": "payoff", "topic": "easy-hooked", "closing": false,
+                     "gist": "one minute to learn, three to get hooked, a tally that leads into the cta"},
                     {"units": "U11-U12", "kind": "scene", "role": "body", "gist": "friend asks why the furnace never lights"},
-                    {"units": "U30-U31.2", "kind": "talk", "role": "cta", "gist": "no download needed, click to play"}],
+                    {"units": "U30-U31.2", "kind": "talk", "role": "cta", "topic": "click-to-play", "gist": "no download needed, click to play"}],
           "notes": "U12 is 樾哥 (he is addressed by name)"}}}
 ```
 
@@ -77,42 +81,55 @@ One file for all sources; re-run `annotate` with the complete file after every c
 - `exclude`: units that must never be used, e.g. beside a transition (zoom blur, flash) a sheet shows but the
   catalog missed. `exclude` and `speakers` name units by their current IDs (a split unit is `U31.1`...).
 - `beats`: the only material a plan may use: runs of whole units with `kind`, `role` and an English `gist` of at
-  least 12 letters, never overlapping. How to cut them: [editing](editing.md#beats).
+  least 12 letters, never overlapping; optional `topic` (slug: the point it makes, shared by stand-ins from other
+  sources), `also` (further points), `opening: false`, `closing: false`. How to cut them: [editing](editing.md#beats).
 
 ## Routes (`routes`)
 
-`reports/routes.md` has three parts:
+`reports/routes.md` has four parts:
 - **Clips**: every run of one to three consecutive talk beats of one source that can be cut cleanly (key
-  `S01:U02-U05`), with roles, length range, shot-length range, cast, how many verified routes it opens or closes,
-  its words and gists.
+  `S01:U02-U05`), with roles, topics (`+` marks `also` points, `never first`/`never last` the flags), length range,
+  shot-length range, cast, how many sampled routes it opens or closes, its words and gists.
 - **Beats that cannot be cut alone**, each with the reason (no clean pause, edge shot under 60 frames, rejected
   interval, a shot without a registered celebrity). Join such a beat to a neighbour or re-cut it.
-- **Joins**: for each clip its last sentence, then every clip that can follow it in a route that passes every
-  machine check (its first sentence, the number of such routes, and in brackets the only relations allowed when the
-  checks limit them).
+- **Topics**: each topic with its speakers, the clips opening with it and the clips ending on it.
+- **Joins**: grouped by what a clip ends on (its topic, else the clip and its last sentence), then what can follow
+  it in a route that passes every machine check (a topic with the first sentence of each clip opening with it, or a
+  clip), the routes and pairs using it, and in brackets the only relations allowed when the checks limit them.
 
-The file often runs to a thousand lines or more: read it in parts until you have seen every join you judge. Routes
-keep one celebrity per video; `--mix` adds cross-celebrity routes. A celebrity whose own clips finish no video
-(`routes.md` names them) hands over to or from another celebrity without `--mix`. Neighbouring clips come from
-different source files (a source may return later: a b a c). Write the joins you accept:
+Videos have no clip limit (`--max-clips` is an optional cap); the sampler shows routes of every length. Read the
+file in parts until you have seen every join you judge. Routes keep one celebrity per video; `--mix` adds
+cross-celebrity routes. A celebrity whose own clips finish no video (`routes.md` names them) hands over to or from
+another celebrity without `--mix`. Neighbouring clips come from different source files (a source may return later:
+a b a c). Write the joins you accept:
 
 ```json
-{"joins": [{"from": "S08:U06-U09", "to": "S04:U07-U09", "relation": "explanation", "reason": "S08 asks 最要紧的是什么; S04 answers 提升温度"},
+{"joins": [{"from": "topic:chop-trees-first", "to": "topic:furnace-heat", "relation": "progression", "reason": "先砍树, then the wood 生熔炉"},
+           {"from": "S08:U06-U09", "to": "S04:U07-U09", "relation": "explanation", "reason": "S08 asks 最要紧的是什么; S04 answers 提升温度"},
+           {"from": "S30:U04-U05", "to": "topic:chop-trees-first", "reject": true, "reason": "大聪手把手教你 must go on in 大聪's own voice"},
            {"from": "S04:U07-U09", "to": "S20:U35-U36", "relation": "benefit", "reason": "after 升级熔炉 the 礼包码 gives the resources", "weak": true}]}
 ```
 
+- `from` / `to`: a clip key, or `topic:<slug>`: on the from side every clip ending on that topic, on the to side
+  every clip opening with it. A clip-to-clip join overrides a topic join for its pair; `"reject": true` (with a
+  reason) removes the pairs it names from every accepted join.
 - `relation`: one of the bracketed relations when routes.md lists them, otherwise any from
-  [editing](editing.md#transitions).
-- `reason`: one per join, quoting the linking words of both clips exactly as spoken (two or more Chinese
-  characters from each). A reason without both quotes, or one reason reused for joins at different clip boundaries,
-  is refused: every join is judged on its own words, never as a cross product of openings and endings.
+  [editing](editing.md#transitions). Pairs of a topic join whose words do not take the relation are left out (the
+  run says how many).
+- `reason`: one per join, quoting the linking words of both sides exactly as spoken (two or more Chinese
+  characters from each; for a topic, from one of its clips). A reason without both quotes, or one reason reused for
+  joins at different boundaries, is refused: every join is judged on its own words, never as a cross product of
+  openings and endings. A join the checks can never use is reported as a note, not an error.
 
-`routes --joins <file>` walks only those joins, verifies every route with the full `check`, then selects the batch:
-strong joins before `weak` ones, every celebrity up to its fair share of the batch, videos of the current plan,
-one celebrity before mixed casts, least-used clips and openings first, inside the batch limits. It writes
-`config/plan-draft.json` (outputs with a weak join carry a note), prints the videos per celebrity and says how many
-outputs it found and what limited it. A video already in `config/plan.json` keeps its plan ID, so render and
-package reuse its work.
+`routes --joins <file>` composes the batch video by video through those joins, verifying every route with the full
+`check`: videos of the current plan that still pass and fit first (`--fresh` ignores them), then strong joins before
+`weak` ones and videos of six or more clips before shorter ones; each video opens with the least-used hook of a
+celebrity under their fair share and continues with the least-used material at each position, preferring a source
+file it has not used yet, all inside the batch limits (two videos share at most 25% of their positions, one piece of
+material sits at one position in at most 25% of the batch). It writes `config/plan-draft.json` (outputs with a weak
+join carry a note) and prints the clips and sources per video, the repetition figures, the videos per celebrity and,
+when short, what limited it. A video already in `config/plan.json` keeps its plan ID, so render and package reuse its
+work.
 
 ## Plan (`check`, `render`)
 

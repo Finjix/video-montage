@@ -55,11 +55,13 @@ Packaging: [packaging](references/packaging.md).
 2. `prepare` analyses the footage (about 1 min per 10 sources once cached). While it runs, settle the BGM:
    `bgm-assets`, then `fetch-bgm` for any shortfall.
 3. Read the whole catalog and every sheet, then `annotate --file` people, transcript fixes and the beats of every
-   source, all in one file.
+   source, all in one file. Cut beats fine (one sentence where it stands alone) and give beats that make the same
+   point the same `topic`, so every slot of a script has stand-ins from several sources.
 4. `routes` lists every clip that can be cut cleanly and every join that occurs in a route passing all machine
    checks (`reports/routes.md`; read all of it, in parts when it is long). Judge each join on its own words, write
-   the ones you accept with a relation and a reason that quotes the linking words of both clips, then
-   `routes --joins <file>` writes a draft plan for the whole batch within the batch limits and prints the cast split.
+   the ones you accept (clip to clip, or topic to topic when every pair reads) with a relation and a reason that
+   quotes the linking words of both sides, then `routes --joins <file>` composes a draft plan for the whole batch
+   within the batch limits (no two videos share more than 25% of their positions) and prints the cast split.
 5. `check --plan` the draft and read `reports/scripts.md` as a viewer. To replace a video, change the joins (or the
    beats) and run `routes --joins` again: videos still chosen keep their plan IDs and renders. `render --plan` makes
    the clean videos, subtitle drafts and cut sheets; look at every sheet and subtitle file and fix the annotations,

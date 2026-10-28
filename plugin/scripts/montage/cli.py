@@ -96,7 +96,9 @@ def summary_lines(outputs: list[dict], errors: dict, summary: dict) -> list[str]
     lines = [PLAN.describe(output) for output in outputs]
     if summary:
         lines.append(f"batch: {summary['openings']} openings, {summary['opening_cameras']} opening cameras, "
-                     f"{summary['closings']} closings, most-used unit x{summary['most_used_unit']}")
+                     f"{summary['closings']} closings, most-used unit x{summary['most_used_unit']}, at most "
+                     f"{summary['most_shared_positions']:.0%} of positions shared by two videos, one piece of material at one "
+                     f"position in at most {summary['most_used_at_one_position']} videos")
     if errors:
         lines.append(f"{sum(len(v) for v in errors.values())} problems:")
         lines += errors_lines(errors)
@@ -117,7 +119,8 @@ def cmd_routes(args) -> int:
     from montage import routes as ROUTES
     job = args.job_dir.resolve()
     state = JOB.load(job)
-    show(ROUTES.run(job, state, joins=args.joins, mix=args.mix, max_clips=args.max_clips, seconds=args.seconds))
+    show(ROUTES.run(job, state, joins=args.joins, mix=args.mix, max_clips=args.max_clips, seconds=args.seconds,
+                    fresh=args.fresh))
     return 0
 
 
@@ -279,8 +282,9 @@ def main() -> None:
     routes = command("routes", cmd_routes)
     routes.add_argument("--joins", type=Path, help="accepted joins; builds config/plan-draft.json for the whole batch")
     routes.add_argument("--mix", action="store_true", help="also route across celebrities")
-    routes.add_argument("--max-clips", type=int, default=4)
+    routes.add_argument("--max-clips", type=int, help="optional cap on clips per video (default: none, the 17-30 s window decides)")
     routes.add_argument("--seconds", type=float, default=40.0, help="search time limit")
+    routes.add_argument("--fresh", action="store_true", help="with --joins: compose the batch anew, ignoring the current plan's videos")
     command("render", cmd_render).add_argument("--plan", type=Path, required=True)
     packaging = command("package", cmd_package)
     packaging.add_argument("--config", type=Path)

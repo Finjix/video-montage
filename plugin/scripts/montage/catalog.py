@@ -42,6 +42,8 @@ SHEET_TILE = (135, 240)
 BEAT_KINDS = ("talk", "scene")                 # talk: a message that stands alone for the viewer; scene: acting that needs the other lines
 BEAT_ROLES = ("hook", "body", "payoff", "cta")  # position in a video: opener, middle, result, call to action
 UNIT_RANGE = re.compile(r"U\d+(?:\.\d+)?(?:-U\d+(?:\.\d+)?)?")
+TOPIC = re.compile(r"[a-z0-9][a-z0-9-]{1,39}")  # beats sharing a topic make the same point and can stand in for each other
+BEAT_FIELDS = ("units", "kind", "role", "gist", "topic", "also", "opening", "closing")
 
 
 # ----------------------------------------------------------------------------------- media analysis
@@ -542,11 +544,20 @@ def check_annotations(value: dict, state: dict) -> dict:
             raise ValueError(f"{sid} exclude: a list of unit IDs")
         beats = row.get("beats", [])
         if not isinstance(beats, list):
-            raise ValueError(f"{sid}: beats is a list of {{units, kind, role, gist}}")
+            raise ValueError(f"{sid}: beats is a list of {{units, kind, role, gist[, topic]}}")
         for number, beat in enumerate(beats, 1):
             where = f"{sid} beat {number}"
-            if not isinstance(beat, dict) or set(beat) != {"units", "kind", "role", "gist"}:
-                raise ValueError(f"{where}: a beat has exactly units, kind, role and gist")
+            if not isinstance(beat, dict) or not {"units", "kind", "role", "gist"} <= set(beat) <= set(BEAT_FIELDS):
+                raise ValueError(f"{where}: a beat has units, kind, role and gist, and optionally {', '.join(BEAT_FIELDS[4:])}")
+            for flag, verb in (("opening", "open"), ("closing", "end")):
+                if flag in beat and beat[flag] is not False:
+                    raise ValueError(f"{where}: {flag} is only ever false (a beat no video may {verb} on); leave it out otherwise")
+            if "also" in beat and (not isinstance(beat["also"], list) or not all(isinstance(t, str) and TOPIC.fullmatch(t)
+                                                                                 for t in beat["also"])):
+                raise ValueError(f"{where}: also is a list of topic slugs (other points the beat makes)")
+            if "topic" in beat and (not isinstance(beat["topic"], str) or not TOPIC.fullmatch(beat["topic"])):
+                raise ValueError(f"{where}: topic is a short English slug such as \"chop-trees-first\" (lowercase letters, "
+                                 f"digits, -), got {beat['topic']!r}")
             if not isinstance(beat["units"], str) or not UNIT_RANGE.fullmatch(beat["units"]):
                 raise ValueError(f"{where}: units look like \"U06-U10\" or \"U06\", got {beat['units']!r}")
             if beat["kind"] not in BEAT_KINDS or beat["role"] not in BEAT_ROLES:
@@ -671,8 +682,9 @@ def resolve_beats(sid: str, units: list[dict], specs: list[dict]) -> list[dict]:
     for (a, b, spec), (c, _, other) in zip(found, found[1:]):
         if c <= b:
             raise ValueError(f"{sid}: beats {spec['units']} and {other['units']} overlap")
-    return [{"id": f"B{number:02d}", "units": ids[a:b + 1], "kind": spec["kind"], "role": spec["role"], "gist": spec["gist"].strip()}
-            for number, (a, b, spec) in enumerate(found, 1)]
+    return [{"id": f"B{number:02d}", "units": ids[a:b + 1], "kind": spec["kind"], "role": spec["role"], "gist": spec["gist"].strip(),
+             "topic": spec.get("topic"), "also": list(spec.get("also", [])), "opening": spec.get("opening", True),
+             "closing": spec.get("closing", True)} for number, (a, b, spec) in enumerate(found, 1)]
 
 
 def build(job: Path, state: dict, *, model=None) -> dict:
@@ -742,7 +754,7 @@ def markdown(catalog: dict, registered: set[str]) -> str:
     lines = ["# Source catalog", "",
              "Units are clauses; `|` marks a sentence end. `in`/`out`: the clip may start before / end after this unit",
              "(clean silence and a stable picture). `x` excluded, `R` user-rejected interval, `*` corrected text.",
-             "`>> Bnn` opens a beat the agent defined (kind/role: gist); units outside every beat cannot be planned.", ""]
+             "`>> Bnn` opens a beat the agent defined (kind/role #topic: gist); units outside every beat cannot be planned.", ""]
     for source in catalog["sources"]:
         fps = source["fps_num"] / source["fps_den"]
         lines.append(f"## {source['id']} {source['name']}")
@@ -765,6 +777,8 @@ def markdown(catalog: dict, registered: set[str]) -> str:
                 limits = [text for text, ok in (("cannot start a clip", by_id[beat["units"][0]]["in_frames"]),
                                                 ("cannot end a clip", by_id[beat["units"][-1]]["out_frames"])) if not ok]
                 lines.append(f">> {beat['id']} {beat['units'][0]}-{beat['units'][-1]} {beat['kind']}/{beat['role']}"
+                             + (f" #{beat['topic']}" if beat.get("topic") else "") + "".join(f" +{t}" for t in beat.get("also", []))
+                             + ("" if beat.get("opening", True) else " (never first)") + ("" if beat.get("closing", True) else " (never last)")
                              + (f" ({', '.join(limits)}; join a neighbour)" if limits else "") + f": {beat['gist']}")
             first = math.floor(unit["start"] * fps)
             last = math.ceil(unit["end"] * fps)

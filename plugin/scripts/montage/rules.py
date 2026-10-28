@@ -7,6 +7,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from difflib import SequenceMatcher
+from functools import lru_cache
 
 RELATIONS = {
     "hook_response", "question_answer", "answer", "explanation", "problem_solution", "claim_support",
@@ -38,9 +39,12 @@ GAMEPLAY_BRIDGE = r"怎么(?:玩|上手|开始)|如何(?:玩|上手|开始)|玩�
 PERSONAL = r"我(?!们)|本人|(?:这个|该|这)(?:账号|帐号|个号)"
 # Words that lean on a line the viewer has not heard: a video cannot open on them.
 LEANING_OPENINGS = re.compile(r"^(?:然后|接着|随后|所以|因此|于是|但是|但(?!凡)|不过|可是|而且|并且|另外|其次|同时|还有(?!谁|人)"
-                              r"|再(?!也)|就是|为什么呢|为啥呢|这下|那么"
+                              r"|再(?!也)|就是|为什么呢|为啥呢|这下|那么|妥妥的|还得"
                               r"|有啊|有呀|当然有|当然了|那当然|那可不|没错|错(?!过))")   # answers to an unheard line
 RESTATED = 0.75   # similarity at which a clip's opening restates the previous clip's closing words
+REPEATED = 0.8    # similarity at which two clauses of one video say the same thing twice
+SHARED_PHRASE = 5  # characters two clips of one video may not both say ("蹭蹭往上涨"), game names aside
+MAX_CTA = 2       # e.g. a gift code and 点击即玩 as two beats, possibly from two speakers
 ROLE_RANK = {"hook": 0, "body": 1, "payoff": 2, "cta": 3}
 GENERIC_REASONS = re.compile(r"(?:sametopic|samegame|coherent|smooth|natural|flows?|continues?|good|ok|fine|"
                              r"同一(?:个)?(?:游戏|人物|话题|主角)|语义连贯|逻辑连贯|衔接自然|增加(?:新的)?信息|接着介绍|继续介绍|通过审核)+")
@@ -71,6 +75,79 @@ def matches(text: str, patterns: list[str]) -> bool:
     return any(re.search(pattern, value) for pattern in patterns)
 
 
+def restated(tail: str, head: str) -> bool:
+    """`head` (normalized) opens by restating `tail`, the clause just before it."""
+    return min(len(tail), len(head)) >= 4 and tail != head and SequenceMatcher(None, tail, head).ratio() >= RESTATED
+
+
+def discovery_jump(left: str, right: str) -> bool:
+    """A discovery hook (入坑, 全球三亿人都在玩...) followed by a mechanic (砍树, 升级熔炉...) with no gameplay bridge."""
+    left, right = normalize(left), normalize(right)
+    return bool(re.search(DISCOVERY, left) and re.search(MECHANISM, right) and not re.search(GAMEPLAY_BRIDGE, left + right))
+
+
+def marks(text: str) -> tuple[str, ...]:
+    """Words of a clip the route-level text rules look at (see `blocked`)."""
+    return tuple(name for name, hit in (("result", contains(text, RESULT_ANCHORS)), ("chop", contains(text, ["砍树"])),
+                                        ("furnace", contains(text, ["熔炉"])), ("bridge", contains(text, ACQUISITION_BRIDGES)),
+                                        ("redundant", contains(text, REDUNDANT))) if hit)
+
+
+def blocked(before: frozenset, clip: tuple[str, ...]) -> bool:
+    """Incremental form of output_errors' route-level text rules: a clip with `clip` marks cannot follow clips whose
+    marks add up to `before` (a result after 砍树 and 熔炉 needs a survivor bridge; one 易如反掌/so easy per video)."""
+    if "result" in clip and {"chop", "furnace"} <= before and "bridge" not in before:
+        return True
+    return "redundant" in clip and "redundant" in before
+
+
+def opening_problem(text: str) -> str | None:
+    """Why a clip cannot open a video (`text` normalized), or None."""
+    if text.startswith("因为") and not any(term in text for term in ("所以", "因此")):
+        return "clip 1 opens with 因为 without its result"
+    if lean := LEANING_OPENINGS.match(text):
+        return f"clip 1 opens with {lean[0]}, which leans on an earlier line; open on words that stand alone"
+    return None
+
+
+GAME_WORDS = ("无尽冬日",)
+
+
+@lru_cache(maxsize=200_000)
+def same_clause(left: str, right: str) -> str:
+    """What two normalized clauses both say: the whole clause when they are near copies ("开局一定要先砍树" /
+    "开局一定要砍树"), else a shared phrase of SHARED_PHRASE+ characters outside the game name ("蹭蹭往上涨"); "" if none."""
+    if min(len(left), len(right)) >= 6 and 3 * min(len(left), len(right)) >= 2 * max(len(left), len(right)):
+        matcher = SequenceMatcher(None, left, right)
+        if matcher.quick_ratio() >= REPEATED and matcher.ratio() >= REPEATED:
+            return right
+    a, b = left, right
+    for word in GAME_WORDS:
+        a, b = a.replace(word, "|"), b.replace(word, "#")
+    match = SequenceMatcher(None, a, b, autojunk=False).find_longest_match(0, len(a), 0, len(b))
+    return a[match.a:match.a + match.size] if match.size >= SHARED_PHRASE else ""
+
+
+def repeated_clauses(clips: list[dict]) -> list[str]:
+    """A clause spoken twice in one video, word for word or nearly (two speakers saying one line)."""
+    errors, spoken = [], {}
+    units = [(number, normalize(text)) for number, clip in enumerate(clips, 1) for text in clip.get("unit_texts") or [clip["text"]]]
+    for number, text in units:
+        if len(text) >= 4 and spoken.setdefault(text, number) != number:
+            errors.append(f"clip {number} repeats a clause of clip {spoken[text]}: {text}")
+    for index, (number, text) in enumerate(units):
+        for other, earlier in units[:index]:
+            if other != number and text != earlier and (phrase := same_clause(earlier, text)):
+                errors.append(f"clip {number} says what clip {other} said ({phrase}): {earlier} / {text}")
+                break
+    return errors
+
+
+def points(beat: dict) -> list[str]:
+    """The points a beat makes: its topic and the topics it `also` speaks to (each once per video)."""
+    return list(dict.fromkeys(([beat["topic"]] if beat.get("topic") else []) + list(beat.get("also") or [])))
+
+
 def structure_errors(clips: list[dict]) -> list[str]:
     """Talk-first and narrative order over the beats of an output (clips carry beats, kind and frames)."""
     errors = []
@@ -79,20 +156,30 @@ def structure_errors(clips: list[dict]) -> list[str]:
         errors.append(f"clips {', '.join(map(str, scenes))} contain acted scene beats; videos are talk to the viewer only")
     beats = [(number, beat) for number, clip in enumerate(clips, 1) for beat in clip["beats"]]
     previous = None
+    topics = {}
     for position, (number, beat) in enumerate(beats):
         if previous and ROLE_RANK[beat["role"]] < ROLE_RANK[previous["role"]]:
             errors.append(f"clip {number} {beat['id']} is a {beat['role']} beat after a {previous['role']} beat; "
                           "the order is hook, body, payoff, cta")
         if beat["role"] == "hook" and position:
             errors.append(f"clip {number} {beat['id']}: a hook beat can only open the video")
+        for topic in points(beat):
+            if topics.setdefault(topic, number) != number:
+                errors.append(f"clip {number} {beat['id']} makes the point of clip {topics[topic]} again "
+                              f"(topic {topic}); a video makes each point once")
         previous = beat
     roles = [beat["role"] for _, beat in beats]
-    if roles.count("cta") > 1:
-        errors.append("more than one cta beat")
+    if roles.count("cta") > MAX_CTA:
+        errors.append(f"more than {MAX_CTA} cta beats")
     if "body" not in roles:
         errors.append("needs at least one body beat between its opening and its ending")
     if roles and roles[-1] not in {"payoff", "cta"}:
         errors.append(f"the last beat is a {roles[-1]} beat; the video must end on a payoff or cta beat")
+    if beats and not beats[0][1].get("opening", True):
+        errors.append(f"clip 1 opens on {beats[0][1]['id']}, a beat marked opening: false (it leans on an earlier line)")
+    if beats and not beats[-1][1].get("closing", True):
+        errors.append(f"clip {beats[-1][0]} ends on {beats[-1][1]['id']}, a beat marked closing: false (it leads into what "
+                      "follows); add the clip it leads into")
     return errors
 
 
@@ -114,10 +201,8 @@ def output_errors(clips: list[dict], transitions: list[dict], games: list[str]) 
                 if relation not in allowed:
                     errors.append(f"{where} starts with {connector}; the transition into it must be one of {sorted(allowed)}")
                 break
-        if index == 0 and text.startswith("因为") and not any(term in text for term in ("所以", "因此")):
-            errors.append("clip 1 opens with 因为 without its result")
-        if index == 0 and (lean := LEANING_OPENINGS.match(text)):
-            errors.append(f"clip 1 opens with {lean[0]}, which leans on an earlier line; open on words that stand alone")
+        if index == 0 and (problem := opening_problem(text)):
+            errors.append(problem)
         if text.startswith("只要") and not any(term in text for term in ("就", "便", "即可", "才能")):
             if index >= len(transitions) or transitions[index].get("relation") != "condition_result":
                 errors.append(f"{where} opens with 只要; the next transition must be condition_result")
@@ -137,24 +222,19 @@ def output_errors(clips: list[dict], transitions: list[dict], games: list[str]) 
                 errors.append(f"{where}: 海量福利 only in the final clip")
             if not contains(clip["text"], CONCRETE_BENEFITS):
                 errors.append(f"{where}: 海量福利 needs a concrete benefit (礼包码, 兑换...)")
-    units = [(number, normalize(text)) for number, clip in enumerate(clips, 1) for text in clip.get("unit_texts") or [clip["text"]]]
-    spoken = {}
-    for number, text in units:
-        if len(text) >= 4 and spoken.setdefault(text, number) != number:
-            errors.append(f"clip {number} repeats a clause of clip {spoken[text]}: {text}")
+    errors += repeated_clauses(clips)
     for index, transition in enumerate(transitions, 1):
         where = f"transition {index}"
         left, right = clips[index - 1], clips[index]
         tail = normalize((left.get("unit_texts") or [left["text"]])[-1])
         head = normalize((right.get("unit_texts") or [right["text"]])[0])
-        if min(len(tail), len(head)) >= 4 and tail != head and SequenceMatcher(None, tail, head).ratio() >= RESTATED:
+        if restated(tail, head):
             errors.append(f"{where}: clip {index + 1} opens by restating the end of clip {index} ({tail} / {head})")
         if transition.get("relation") not in RELATIONS:
             errors.append(f"{where}: relation must be one of {sorted(RELATIONS)}")
         if not specific(transition.get("reason")):
             errors.append(f"{where}: reason must say concretely what links the two clips")
-        if (re.search(DISCOVERY, normalize(left["text"])) and re.search(MECHANISM, normalize(right["text"]))
-                and not re.search(GAMEPLAY_BRIDGE, normalize(left["text"] + right["text"]))):
+        if discovery_jump(left["text"], right["text"]):
             errors.append(f"{where}: a discovery hook cannot jump to a mechanic without a spoken gameplay bridge (怎么玩, 开局, 首先...)")
         if (left.get("last_speaker") and right.get("first_speaker") and left["last_speaker"] != right["first_speaker"]
                 and re.search(PERSONAL, left["text"]) and re.search(PERSONAL, right["text"])
