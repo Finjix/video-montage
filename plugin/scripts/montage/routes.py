@@ -127,15 +127,23 @@ def boundary(left: dict, right: dict) -> tuple:
 # ----------------------------------------------------------------------------------- search
 
 def search(found: list[dict], links, *, min_sources: int, mix: bool, max_clips: int, seconds: float,
-           verify, stranded: frozenset = frozenset(), limit: int | None = None) -> tuple[list[dict], bool]:
+           verify, stranded: frozenset = frozenset(), limit: int | None = None,
+           min_cast: int = 1) -> tuple[list[dict], bool]:
     """Routes hook/body -> ... -> payoff/cta through `links(left, right)` (relation or None), verified by `verify`.
 
     Start clips take turns so a time limit still samples every opening. Without `mix` a route keeps one cast,
     except that clips of a `stranded` cast (one whose own clips finish no route) may hand over to or from it.
+    `min_cast` > 1 (the user's decision) mixes casts and keeps only routes featuring that many celebrities.
     """
     deadline = time.monotonic() + seconds
 
+    def featured(route):
+        return {p for c in route for p in c["cast"]}
+
     def allowed(route, clip):
+        if min_cast > 1:
+            room = 0 if clip["roles"][-1] == "cta" else max_clips - len(route) - 1
+            return len(featured(route) | set(clip["cast"])) + room >= min_cast
         if mix or clip["cast"] in stranded:
             return True
         casts = {c["cast"] for c in route if c["cast"] not in stranded}
@@ -149,7 +157,7 @@ def search(found: list[dict], links, *, min_sources: int, mix: bool, max_clips: 
         if low > PLAN.MAX_FRAMES:
             return
         if (len({c["sha256"] for c in route}) >= max(2, min_sources) and last["roles"][-1] in ("payoff", "cta") and "body" in roles
-                and high >= PLAN.MIN_FRAMES and len(route) >= PLAN.MIN_SHOTS
+                and high >= PLAN.MIN_FRAMES and len(route) >= PLAN.MIN_SHOTS and len(featured(route)) >= min_cast
                 and max(c["ceiling"] for c in route) - PLAN.MAX_SPREAD <= min(c["floor"] for c in route)):
             yield route, relations_so_far
         if len(route) >= max_clips or last["roles"][-1] == "cta":
@@ -165,7 +173,8 @@ def search(found: list[dict], links, *, min_sources: int, mix: bool, max_clips: 
             if relation:
                 yield from walk(route + [clip], relations_so_far + [relation])
 
-    walkers = [walk([clip], []) for clip in found if clip["roles"][0] in ("hook", "body")]
+    walkers = [walk([clip], []) for clip in found if clip["roles"][0] in ("hook", "body")
+               and len(clip["cast"]) + max_clips - 1 >= min_cast]
     verified, truncated = [], False
     while walkers:
         if time.monotonic() > deadline:
@@ -195,7 +204,7 @@ def stranded_casts(found: list[dict], links, *, min_sources: int, max_clips: int
                                    verify=verify, limit=1)[0])
 
 
-def verifier(sources: dict, registered: set[str], games: list[str], min_sources: int, reasons=None):
+def verifier(sources: dict, registered: set[str], games: list[str], min_sources: int, reasons=None, min_cast: int = 1):
     cache = {}
 
     def verify(route, chosen):
@@ -204,7 +213,7 @@ def verifier(sources: dict, registered: set[str], games: list[str], min_sources:
         output = {"plan_id": "candidate", "clips": [{"source": c["source"], "units": c["units"]} for c in route],
                   "transitions": [{"relation": relation, "reason": (reasons or {}).get((a["key"], b["key"]), PLACEHOLDER)}
                                   for a, b, relation in zip(route, route[1:], chosen)]}
-        resolved, errors = PLAN.resolve_output(output, sources, registered, games, min_sources, cache)
+        resolved, errors = PLAN.resolve_output(output, sources, registered, games, min_sources, cache, min_cast)
         if errors:
             return None
         return {"route": route, "relations": chosen, "output": output, "resolved": resolved}
@@ -342,6 +351,9 @@ def joins_file(path: Path, by_key: dict) -> tuple[dict, list[str]]:
 def run(job: Path, state: dict, *, joins: Path | None, mix: bool, max_clips: int, seconds: float) -> list[str]:
     if max_clips < PLAN.MIN_SHOTS:
         raise ValueError(f"--max-clips {max_clips} finds no route: a video needs >= {PLAN.MIN_SHOTS} clips")
+    min_cast = state.get("decisions", {}).get("min_celebrities_per_output", {}).get("value", 1)
+    if min_cast > max_clips:
+        raise ValueError(f"--max-clips {max_clips} cannot feature {min_cast} celebrities per video; raise --max-clips")
     catalog = read(job / "catalog/catalog.json")
     sources = {source["id"]: source for source in catalog["sources"]}
     registered = {row["person_id"] for row in state["celebrities"]}
@@ -352,14 +364,16 @@ def run(job: Path, state: dict, *, joins: Path | None, mix: bool, max_clips: int
     found, unusable = clips(catalog, registered)
     by_key = {clip["key"]: clip for clip in found}
     if joins is None:
-        return explore(job, found, unusable, sources, registered, games, min_sources, mix, max_clips, seconds, count)
+        return explore(job, found, unusable, sources, registered, games, min_sources, mix, max_clips, seconds, count,
+                       min_cast)
     accepted, problems = joins_file(joins, by_key)
     if problems:
         raise ValueError("joins file problems:\n  " + "\n  ".join(problems))
     reasons = {key: row["reason"] for key, row in accepted.items()}
     verified, truncated = search(found, lambda a, b: (accepted.get((a["key"], b["key"])) or {}).get("relation"),
                                  min_sources=min_sources, mix=True, max_clips=max_clips, seconds=seconds,
-                                 verify=verifier(sources, registered, games, min_sources, reasons))
+                                 verify=verifier(sources, registered, games, min_sources, reasons, min_cast),
+                                 min_cast=min_cast)
     for row in verified:
         row["weak"] = sum(accepted[(a["key"], b["key"])]["weak"] for a, b in zip(row["route"], row["route"][1:]))
     previous = previous_ids(job)
@@ -401,13 +415,14 @@ def run(job: Path, state: dict, *, joins: Path | None, mix: bool, max_clips: int
     return lines
 
 
-def explore(job, found, unusable, sources, registered, games, min_sources, mix, max_clips, seconds, count) -> list[str]:
+def explore(job, found, unusable, sources, registered, games, min_sources, mix, max_clips, seconds, count,
+            min_cast=1) -> list[str]:
     links = lambda a, b: (relations(a, b) or [None])[0]
-    verify = verifier(sources, registered, games, min_sources)
-    stranded = frozenset() if mix else stranded_casts(found, links, min_sources=min_sources, max_clips=max_clips,
-                                                       verify=verify)
+    verify = verifier(sources, registered, games, min_sources, min_cast=min_cast)
+    stranded = frozenset() if mix or min_cast > 1 else stranded_casts(found, links, min_sources=min_sources,
+                                                                       max_clips=max_clips, verify=verify)
     verified, truncated = search(found, links, min_sources=min_sources, mix=mix, max_clips=max_clips, seconds=seconds,
-                                 verify=verify, stranded=stranded)
+                                 verify=verify, stranded=stranded, min_cast=min_cast)
     joins = Counter()
     openings, closings = Counter(), Counter()
     for row in verified:
@@ -421,7 +436,8 @@ def explore(job, found, unusable, sources, registered, games, min_sources, mix, 
              f"{len(found)} cuttable clips, {len(verified)} routes pass every machine check"
              + (" (search stopped at the time limit; raise --seconds for more)" if truncated else "")
              + f", {len(joins)} distinct joins. Batch: {count} videos.",
-             "A route is clips in role order, neighbours from different sources (a source may return later: a b a c).",
+             "A route is clips in role order, neighbours from different sources (a source may return later: a b a c)."
+             + (f" Every route features {min_cast} celebrities (the user's decision)." if min_cast > 1 else ""),
              "Judge each join below as a viewer: does the second clip answer, continue, prove or pay off the first?",
              "Accept the good ones in a joins file, each with a reason quoting the linking words of both clips, and run",
              "`routes --joins <file>` to build the batch. This file is long: read every part of it."]

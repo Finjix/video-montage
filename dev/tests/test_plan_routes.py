@@ -124,7 +124,8 @@ class PlanRobustness(unittest.TestCase):
 
     def test_an_opening_that_leans_on_an_earlier_line_is_refused(self):
         sources = {s["id"]: s for s in catalog()["sources"]}
-        for text in ("再去砍树就行了。", "为什么呢？因为温度最重要。", "就是六个字：要想富先砍树。"):
+        for text in ("再去砍树就行了。", "为什么呢？因为温度最重要。", "就是六个字：要想富先砍树。",
+                     "有啊，试试无尽冬日。", "错错错，在无尽冬日上线点一点。"):
             sources["S01"]["units"][0]["text"] = text
             _, errors = PLAN.resolve_output({"plan_id": "P01", "clips": FOUR_CLIPS, "transitions": FOUR_LINKS}, sources, {WU}, GAMES, 3)
             self.assertTrue(any("leans on an earlier line" in e for e in errors), (text, errors))
@@ -210,6 +211,24 @@ class Routes(unittest.TestCase):
                                     stranded=stranded)
         self.assertTrue(verified)
         self.assertTrue(all(len({clip["cast"] for clip in row["route"]}) == 1 for row in verified))
+
+    def test_min_cast_keeps_only_routes_featuring_that_many_celebrities(self):
+        data = catalog(wu_sources=3)
+        found, _ = ROUTES.clips(data, {WU, XU})
+        sources = {s["id"]: s for s in data["sources"]}
+        links = lambda a, b: (ROUTES.relations(a, b) or [None])[0]
+        verified, _ = ROUTES.search(found, links, min_sources=3, mix=False, max_clips=4, seconds=10, min_cast=2,
+                                    verify=ROUTES.verifier(sources, {WU, XU}, GAMES, 3, min_cast=2))
+        self.assertTrue(verified)
+        self.assertTrue(all(set(row["resolved"]["protagonists"]) == {WU, XU} for row in verified))
+        _, errors = PLAN.resolve_output({"plan_id": "P01", "clips": FOUR_CLIPS, "transitions": FOUR_LINKS},
+                                        sources, {WU, XU}, GAMES, 3, min_cast=3)
+        self.assertTrue(any("features 2 celebrities" in error for error in errors))
+
+    def test_min_cast_above_max_clips_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "cannot feature 5 celebrities"):
+            ROUTES.run(Path("no-job"), dict(state(1), decisions={"min_celebrities_per_output": {"value": 5}}),
+                       joins=None, mix=False, max_clips=4, seconds=1)
 
     def test_three_sources_still_give_four_shot_routes(self):
         data = catalog()

@@ -35,7 +35,9 @@ inspects or prefetches it; it needs no job). Long commands print progress lines 
   constant-frame-rate copy with FFmpeg and use that).
 - `celebrities`: every selected celebrity with a transparent 9:16 nameplate PNG; IDs look like `person:wu-yue`.
 - `decisions` (optional): `min_sources_per_output` 1 or 2 (default 3 different source files per video);
-  `bgm_repetition` `true` (one track may serve more than eight videos).
+  `bgm_repetition` `true` (one track may serve more than eight videos); `min_celebrities_per_output` 2-8 when the
+  user asks for several celebrities in every video (`check` enforces it, `routes` mixes casts and lists only routes
+  featuring that many; raise `--max-clips` above it for routes where a source returns).
 
 ## Catalog (`prepare`)
 

@@ -17,6 +17,7 @@ REBURN_NOTE = ("修改本目录 subtitle-*.txt 的文字或时间码后，把整
 DECISIONS = {
     "min_sources_per_output": lambda v: type(v) is int and v in (1, 2),
     "bgm_repetition": lambda v: v is True,
+    "min_celebrities_per_output": lambda v: type(v) is int and 2 <= v <= 8,
 }
 
 
@@ -92,6 +93,9 @@ def init(order: dict, job_dir: Path | None = None) -> tuple[Path, dict]:
     if not celebrities or len({c["person_id"] for c in celebrities}) != len(celebrities):
         raise ValueError("celebrities must list each selected celebrity once")
     decisions = {key: check_decision(key, value) for key, value in (order.get("decisions") or {}).items()}
+    cast = decisions.get("min_celebrities_per_output", {}).get("value", 1)
+    if cast > len(celebrities):
+        raise ValueError(f"decisions.min_celebrities_per_output is {cast} but only {len(celebrities)} celebrities are registered")
     minimum = decisions.get("min_sources_per_output", {}).get("value", 3)
     if len(paths) < minimum:
         raise ValueError(f"{len(paths)} source files cannot give each video {minimum} different sources; ask the user now "

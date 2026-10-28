@@ -38,7 +38,8 @@ GAMEPLAY_BRIDGE = r"怎么(?:玩|上手|开始)|如何(?:玩|上手|开始)|玩�
 PERSONAL = r"我(?!们)|本人|(?:这个|该|这)(?:账号|帐号|个号)"
 # Words that lean on a line the viewer has not heard: a video cannot open on them.
 LEANING_OPENINGS = re.compile(r"^(?:然后|接着|随后|所以|因此|于是|但是|但(?!凡)|不过|可是|而且|并且|另外|其次|同时|还有(?!谁|人)"
-                              r"|再(?!也)|就是|为什么呢|为啥呢|这下|那么)")
+                              r"|再(?!也)|就是|为什么呢|为啥呢|这下|那么"
+                              r"|有啊|有呀|当然有|当然了|那当然|那可不|没错|错(?!过))")   # answers to an unheard line
 RESTATED = 0.75   # similarity at which a clip's opening restates the previous clip's closing words
 ROLE_RANK = {"hook": 0, "body": 1, "payoff": 2, "cta": 3}
 GENERIC_REASONS = re.compile(r"(?:sametopic|samegame|coherent|smooth|natural|flows?|continues?|good|ok|fine|"
