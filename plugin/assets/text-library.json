@@ -2,11 +2,16 @@
   "schema": "video-montage-text-library/v1",
   "entries": [
     {"id": "game:wu-jin-dong-ri", "category": "game", "text": "无尽冬日"},
+
     {"id": "person:wu-yue", "category": "person", "text": "吴樾"},
     {"id": "person:lin-zi-cong", "category": "person", "text": "林子聪"},
     {"id": "person:xu-jun-cong", "category": "person", "text": "许君聪"},
     {"id": "person:cao-xing-yun", "category": "person", "text": "曹星云"},
-    {"id": "term:da-cong", "category": "term", "text": "大聪"},
+
+    {"id": "term:da-cong-666", "category": "term", "text": "大聪666"},
+    {"id": "term:da-cong-888", "category": "term", "text": "大聪888"},
+    {"id": "term:jin-zi-666", "category": "term", "text": "金子666"},
+    {"id": "term:jin-zi-888", "category": "term", "text": "金子888"},
     {"id": "term:bu-gan-bu-ke", "category": "term", "text": "不肝不氪"}
   ]
 }
