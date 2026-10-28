@@ -26,6 +26,8 @@ CUT_DIFFERENCE = 0.07       # adjacent-frame mean difference that marks a camera
 SOFT_CUT, ISOLATION = 0.03, 3.0  # a same-background cut (zoom-in, jump cut) stays under CUT_DIFFERENCE but towers over every neighbour
 ENDPOINT_DIFFERENCE = 0.12  # 13-frame endpoint distance at a clip edge (dissolves, fast zooms)
 EDGE_SECONDS = 0.5          # time at each clip edge that must stay free of dissolves, flashes and fast motion
+ZOOM_STEP, ZOOM_ISOLATION = 0.005, 4.0  # a punch-in / snap zoom: >= 0.5 % scale in one frame, 4x every neighbour
+ZOOM_NEIGHBOURS, ZOOM_CUT_GUARD = 5, 5    # frames compared on each side; frames beside a camera cut carry no scale
 HOP = 0.01                  # energy envelope resolution (seconds)
 CLAUSE_PAUSE = 0.35         # a pause this long always ends a unit
 SENTENCE_PAUSE = 0.6
@@ -71,14 +73,46 @@ def tiny(frame: np.ndarray) -> np.ndarray:
     return (frame.reshape(19, 6, 16, 4, 3).mean(axis=(1, 3, 4)) * 255).astype(np.uint8)
 
 
-def visual_series(path: Path, frames: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Per-frame adjacent difference, 13-frame endpoint distance and fingerprints on 64x114 thumbnails."""
+def frame_zoom(before: np.ndarray, after: np.ndarray, iterations: int = 4) -> float:
+    """Log scale from one grey thumbnail to the next (zoom about the centre plus a shift), by reweighted least
+    squares on brightness constancy: pixels a gesture or a face moves through count less than the whole frame,
+    so only a camera or digital zoom reads as scale."""
+    h, w = before.shape
+    ys, xs = np.mgrid[0:h, 0:w].astype(np.float32)
+    rx, ry = xs - (w - 1) / 2, ys - (h - 1) / 2
+    log_scale, tx, ty = 0.0, 0.0, 0.0
+    weight = np.ones_like(before)
+    for _ in range(iterations):
+        factor = math.exp(-log_scale)
+        sx, sy = (w - 1) / 2 + rx * factor - tx, (h - 1) / 2 + ry * factor - ty
+        x0 = np.clip(np.floor(sx).astype(int), 0, w - 2)
+        y0 = np.clip(np.floor(sy).astype(int), 0, h - 2)
+        fx, fy = np.clip(sx - x0, 0, 1), np.clip(sy - y0, 0, 1)
+        warped = (before[y0, x0] * (1 - fx) * (1 - fy) + before[y0, x0 + 1] * fx * (1 - fy)
+                  + before[y0 + 1, x0] * (1 - fx) * fy + before[y0 + 1, x0 + 1] * fx * fy)
+        gy, gx = np.gradient(warped)
+        jacobian = np.stack([-(gx * rx + gy * ry), -gx, -gy], -1)
+        error = after - warped
+        valid = ((sx > 1) & (sx < w - 2) & (sy > 1) & (sy < h - 2)).ravel()
+        rows, values, weights = jacobian.reshape(-1, 3)[valid], error.ravel()[valid], weight.ravel()[valid]
+        delta = np.linalg.lstsq(rows * weights[:, None], values * weights, rcond=None)[0]
+        log_scale, tx, ty = log_scale + float(delta[0]), tx + float(delta[1]), ty + float(delta[2])
+        residual = np.abs(error - jacobian @ delta)
+        spread = 1.4826 * float(np.median(residual)) + 1e-4
+        weight = 1.0 / (1.0 + (residual / (2.5 * spread)) ** 2)
+    return log_scale
+
+
+def visual_series(path: Path, frames: int) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Per-frame adjacent difference, 13-frame endpoint distance, zoom (log scale from the previous frame) and
+    fingerprints on 64x114 thumbnails."""
     size = THUMB_W * THUMB_H * 3
     command = [str(FFMPEG), "-v", "error", "-nostdin", "-threads", "0", "-i", str(path), "-an",
                "-vf", f"scale={THUMB_W}:{THUMB_H}:flags=area,format=rgb24", "-fps_mode", "passthrough",
                "-f", "rawvideo", "-"]
     adjacent = np.zeros(frames, np.float32)
     endpoint = np.full(frames, np.nan, np.float32)
+    zoom = np.zeros(frames, np.float32)
     prints = np.zeros((frames, 19, 16), np.uint8)
     window: deque = deque(maxlen=13)
     count = 0
@@ -91,13 +125,15 @@ def visual_series(path: Path, frames: int) -> tuple[np.ndarray, np.ndarray, np.n
             prints[count] = tiny(frame.reshape(THUMB_H, THUMB_W, 3))
             if window:
                 adjacent[count] = float(np.mean(np.abs(frame - window[-1])))
+                zoom[count] = frame_zoom(window[-1].reshape(THUMB_H, THUMB_W, 3).mean(axis=2),
+                                         frame.reshape(THUMB_H, THUMB_W, 3).mean(axis=2))
             window.append(frame)
             if len(window) == 13:
                 endpoint[count - 12] = float(np.mean(np.abs(window[-1] - window[0])))
             count += 1
     if count != frames:
         raise ValueError(f"{path.name}: decoded {count} frames, timestamps list {frames}")
-    return adjacent, endpoint, prints
+    return adjacent, endpoint, zoom, prints
 
 
 def camera_cuts(adjacent: np.ndarray) -> list[int]:
@@ -137,18 +173,39 @@ def edge_frames(fps: float) -> int:
     return max(13, round(EDGE_SECONDS * fps))
 
 
-def head_stable(adjacent: np.ndarray, endpoint: np.ndarray, frame: int, edge: int) -> bool:
-    """A clip may start at `frame`: no transition inside its first `edge` frames."""
+def zooming(zoom: np.ndarray | None, frames: int, cuts: list[int]) -> np.ndarray:
+    """Frames where the framing snaps closer or wider (a punch-in, the start of a quick push, a whip): one frame
+    scales far more than its neighbours, so a speaker leaning in or gesturing does not count. Right after a cut to
+    another clip such a snap reads as a jump; inside a clip it is the source's own move and stays."""
+    flags = np.zeros(frames, bool)
+    if zoom is None or len(zoom) != frames:
+        return flags
+    size = np.abs(zoom.astype(np.float64))
+    size[0] = 0.0
+    for cut in cuts:
+        size[max(0, cut - ZOOM_CUT_GUARD):cut + ZOOM_CUT_GUARD + 1] = 0.0
+    for frame in np.nonzero(size >= ZOOM_STEP)[0]:
+        around = np.concatenate([size[max(0, frame - ZOOM_NEIGHBOURS):frame], size[frame + 1:frame + ZOOM_NEIGHBOURS + 1]])
+        flags[frame] = not around.size or size[frame] >= ZOOM_ISOLATION * float(np.max(around))
+    return flags
+
+
+def head_stable(adjacent: np.ndarray, endpoint: np.ndarray, frame: int, edge: int, zoom: np.ndarray | None = None) -> bool:
+    """A clip may start at `frame`: no transition or zoom inside its first `edge` frames."""
     end = min(len(adjacent), frame + edge)
     if end - frame < 13:
+        return False
+    if zoom is not None and zoom[frame + 1:end].any():
         return False
     return float(np.max(adjacent[frame + 1:end])) <= CUT_DIFFERENCE and not endpoint[frame] > ENDPOINT_DIFFERENCE
 
 
-def tail_stable(adjacent: np.ndarray, endpoint: np.ndarray, frame: int, edge: int) -> bool:
-    """A clip may end before `frame` (exclusive): no transition inside its last `edge` frames."""
+def tail_stable(adjacent: np.ndarray, endpoint: np.ndarray, frame: int, edge: int, zoom: np.ndarray | None = None) -> bool:
+    """A clip may end before `frame` (exclusive): no transition or zoom inside its last `edge` frames."""
     start = max(0, frame - edge)
     if frame - start < 13 or frame > len(adjacent):
+        return False
+    if zoom is not None and zoom[start + 1:frame].any():
         return False
     return float(np.max(adjacent[start + 1:frame])) <= CUT_DIFFERENCE and not endpoint[frame - 13] > ENDPOINT_DIFFERENCE
 
@@ -211,8 +268,9 @@ def unit_text(words: list[dict]) -> str:
     return "".join(word["word"] for word in words).strip()
 
 
-def finish_units(units: list[dict], env: np.ndarray, clock: dict, series: tuple[np.ndarray, np.ndarray]) -> list[dict]:
-    """Protected speech span and clean in/out frames of every unit (neighbours bound the cut window)."""
+def finish_units(units: list[dict], env: np.ndarray, clock: dict, series: tuple) -> list[dict]:
+    """Protected speech span and clean in/out frames of every unit (neighbours bound the cut window). `series` is
+    (adjacent, endpoint) plus the per-frame zoom in catalogs prepared with it."""
     fps = clock["fps_num"] / clock["fps_den"]
     limit = threshold(env)
     for index, unit in enumerate(units):
@@ -221,7 +279,8 @@ def finish_units(units: list[dict], env: np.ndarray, clock: dict, series: tuple[
         upper = units[index + 1]["words"][0]["start"] if index + 1 < len(units) else clock["duration"]
         lo, hi = island(env, limit, words[0]["start"], words[-1]["end"], lower, upper)
         unit["protect"] = [round(max(lower, lo - LEAD), 3), round(min(upper, hi + TAIL), 3)]
-    adjacent, endpoint = mask_cuts(*series, clock["cuts"])
+    adjacent, endpoint = mask_cuts(series[0], series[1], clock["cuts"])
+    zoom = zooming(series[2] if len(series) > 2 else None, clock["frames"], clock["cuts"])
     edge = edge_frames(fps)
     for index, unit in enumerate(units):
         # A neighbour's decay outside this unit's protected span is muted by render; only its words bound the window.
@@ -229,11 +288,11 @@ def finish_units(units: list[dict], env: np.ndarray, clock: dict, series: tuple[
         after = units[index + 1]["words"][0]["start"] if index + 1 < len(units) else clock["duration"]
         first = math.ceil(max(before, unit["protect"][0] - MAX_HEAD) * fps - 1e-9)
         last = math.floor((unit["protect"][0] - SILENT_EDGE) * fps + 1e-9)
-        unit["in_frames"] = ranges(f for f in range(max(0, first), last + 1) if head_stable(adjacent, endpoint, f, edge))
+        unit["in_frames"] = ranges(f for f in range(max(0, first), last + 1) if head_stable(adjacent, endpoint, f, edge, zoom))
         first = math.ceil((unit["protect"][1] + SILENT_EDGE) * fps - 1e-9)
         last = math.floor(min(after, unit["protect"][1] + MAX_TAIL) * fps + 1e-9)
         unit["out_frames"] = ranges(f for f in range(first, min(clock["frames"], last) + 1)
-                                    if tail_stable(adjacent, endpoint, f, edge))
+                                    if tail_stable(adjacent, endpoint, f, edge, zoom))
         unit["text"] = unit_text(unit["words"])
         unit["start"], unit["end"] = unit["words"][0]["start"], unit["words"][-1]["end"]
     return units
@@ -356,8 +415,8 @@ def analyse(source: dict, clock: dict, directory: Path) -> dict:
     """Visual pass of one source (CPU): differences, fingerprints, camera cuts and the contact sheet."""
     started = time.monotonic()
     path = Path(source["path"])
-    adjacent, endpoint, prints = visual_series(path, clock["frames"])
-    np.savez_compressed(directory / f"{source['id']}.npz", adjacent=adjacent, endpoint=endpoint, prints=prints)
+    adjacent, endpoint, zoom, prints = visual_series(path, clock["frames"])
+    np.savez_compressed(directory / f"{source['id']}.npz", adjacent=adjacent, endpoint=endpoint, zoom=zoom, prints=prints)
     cuts = camera_cuts(adjacent)
     shots = shots_of(cuts, clock["frames"])
     sheet = source_sheet(path, source["id"], shots, directory / f"{source['id']}.jpg")
@@ -637,7 +696,8 @@ def build(job: Path, state: dict, *, model=None) -> dict:
         cuts = [cut for number, cut in enumerate(source["cuts"], 2) if number not in merged]
         units = apply_text(sid, raw_units(raw[sid]["words"]), note.get("text", {}), cache)
         # A merged detection (flash, fast motion) is no camera change: it stays an unstable edge, not a masked cut.
-        units = finish_units(units, env, {**source, "cuts": cuts}, (series["adjacent"], series["endpoint"]))
+        units = finish_units(units, env, {**source, "cuts": cuts},
+                             (series["adjacent"], series["endpoint"], series["zoom"] if "zoom" in series.files else None))
         deleted = {uid for uid, text in note.get("text", {}).items() if not "".join(text if isinstance(text, list) else [text]).strip()}
         known = {unit["id"] for unit in units} | deleted
         for field in ("exclude", "speakers"):
