@@ -46,23 +46,32 @@ class Plates(unittest.TestCase):
         self.assertEqual(spots["lower-right"][1] + 908, self.N.LOWER_BOTTOM)
         self.assertEqual(self.N.preference(self.plate), ["upper-left", "upper-right", "lower-left", "lower-right"])
 
-    def test_the_designed_spot_wins_unless_it_covers_a_face(self):
+    def test_the_plate_stands_beside_the_speaker(self):
         opaque = self.N.mask(self.plate)
-        centre = {0: [(520, 500, 920, 1000)]}
-        self.assertEqual(self.N.place(self.plate, opaque, centre, [0])[0], "upper-left")
+        spot, where = self.N.place(self.plate, opaque, {0: [(520, 500, 920, 1000)]}, [0])   # centred: designed side
+        self.assertEqual(spot, "upper-left")
+        self.assertLess(where[spot]["distance"], 150)
+        self.assertGreater(where[spot]["x"], 79)                                            # not at the frame edge
         left = {0: [(0, 500, 500, 1000)], 12: [(40, 520, 540, 1020)]}
-        spot, cover = self.N.place(self.plate, opaque, left, [0, 12])
+        spot, where = self.N.place(self.plate, opaque, left, [0, 12])
         self.assertEqual(spot, "upper-right")
-        self.assertGreater(cover["upper-left"], .3)
-        high = {0: [(0, 380, 400, 700), (1000, 380, 1440, 700)]}       # two faces high on both sides
-        self.assertEqual(self.N.place(self.plate, opaque, high, [0])[0], "lower-left")
+        self.assertGreater(where["upper-left"]["cover"], .3)
+        self.assertLess(where[spot]["x"], 700)                                              # next to the face, not at 1076
+        self.assertEqual(where[spot]["cover"], 0)
+
+    def test_a_one_frame_detection_does_not_push_the_plate_away(self):
+        opaque = self.N.mask(self.plate)
+        face = (280, 870, 530, 1250)
+        found = {0: [face], 12: [face, (630, 950, 1110, 1670)], 24: [face], 36: [face]}   # game art on one frame
+        spot, where = self.N.place(self.plate, opaque, found, [0, 12, 24, 36])
+        self.assertEqual(spot, "upper-right")
+        self.assertEqual(where[spot]["x"], 530 + self.N.GAP)
 
     def test_with_faces_everywhere_the_least_covered_spot_is_taken(self):
         opaque = self.N.mask(self.plate)
-        everywhere = {0: [(0, 300, 1440, 1700)]}
-        spot, cover = self.N.place(self.plate, opaque, everywhere, [0])
-        self.assertTrue(all(value > self.N.CLEAR for value in cover.values()))
-        self.assertEqual(cover[spot], min(cover.values()))
+        spot, where = self.N.place(self.plate, opaque, {0: [(0, 300, 1440, 1700)]}, [0])
+        self.assertTrue(all(value["cover"] > self.N.CLEAR for value in where.values()))
+        self.assertEqual(where[spot]["cover"], min(value["cover"] for value in where.values()))
 
 
 @unittest.skipUnless(HAVE_IMAGING and importlib.util.find_spec("cv2"), "needs numpy, Pillow and OpenCV")
@@ -96,7 +105,8 @@ class PackagePlacement(unittest.TestCase):
         item, warnings = self.item(), {}
         self.P.place_nameplates([item], self.plates, warnings)
         layer = item["layers"][0]
-        self.assertEqual((layer["position"], layer["x"], layer["y"]), ("upper-right", 1076, 391))
+        self.assertEqual((layer["position"], layer["y"]), ("upper-right", 391))
+        self.assertTrue(500 < layer["x"] < 760)                                             # beside the face
         self.assertEqual(warnings, {})
         again = self.item(previous={"nameplates": item["nameplates"]})
         self.P.place_nameplates([again], self.plates, {})

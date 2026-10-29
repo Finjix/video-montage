@@ -47,3 +47,7 @@ Uploading the ZIP, developer identity verification and market review remain port
 - 91 regression tests pass under the private Python (new `test_nameplates.py`: trimming at frame scale for 1440 and 1080 artwork, spot geometry, placement order, least-covered fallback, cached face checks, configured spots with notes).
 - A scratch copy of that job with 6 of its videos: `package` found faces under 24 nameplates in 5.5 s, published all six (-23.0..-22.7 LUFS); the plates are cut to 285x908 and sit at their spots above the subtitles.
 - `dev/smoke/e2e.py` on real footage: END_TO_END_PASS (one plate note on P01); `python dev/build_plugin.py` passes (70 files, 3.3 MB ZIP, the YuNet model adds 232 KB).
+- Follow-up (user: a plate at the far frame edge sat too far from the speaker, P39): plates now stand beside the face
+  on their side and move out only to clear faces and shoulders; one-frame detections are ignored (P39's game art
+  had pushed its plate to x 1044, now 564). On the 220 windows: 103 upper-left, 98 upper-right, 17 lower-left,
+  2 lower-right; the same 12 windows touch a face at every spot. 93 regression tests pass.

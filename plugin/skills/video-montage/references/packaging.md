@@ -35,9 +35,12 @@ never create or edit artwork.
 ## Nameplates
 
 `package` cuts each celebrity's nameplate PNG to its visible plate (`temp/nameplates/<person>.png`, at frame scale)
-and shows it at one of four spots: `upper-left` (where the artwork puts it), `upper-right` (the same margin on the
-other side), `lower-left` and `lower-right` (lower, ending above the subtitles). Without a config entry it samples
-the window's frames, finds the faces and takes the first spot in that order that leaves every face clear.
+and stands it beside the speaker at one of four spots: a side (`left`/`right` of the speaker) and a height (`upper`
+at the artwork's height, `lower` ending above the subtitles): `upper-left`, `upper-right`, `lower-left`,
+`lower-right`. On its side the plate stands next to the face and moves toward the frame edge only as far as it must
+to clear every face (and, where it can, the shoulders); with no face found it keeps the artwork's margin. Without a
+config entry it takes the nearest spot that leaves every face clear, the artwork's side first among equals. A face
+found on fewer than a third of the sampled frames (game art, a pattern) is ignored.
 
 Look at the nameplate tiles (labelled with their spot, e.g. `f96 upper-right`) that open each `<plan_id>-final.jpg`. Choose another spot
 in `outputs.<plan_id>.nameplates` (`{"<person_id>": "<spot>"}`) when the plate covers the face, a hand gesture or

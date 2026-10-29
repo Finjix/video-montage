@@ -446,8 +446,9 @@ def prepare_items(job: Path, state: dict, config: dict) -> tuple[list[dict], dic
 
 
 def place_nameplates(items: list[dict], plates: dict[str, dict], warnings: dict[str, list[str]]) -> None:
-    """Give every nameplate layer its spot: the config's, or the first that leaves the sampled faces clear. The face
-    check is reused from the last run while the clean video, the window and the plate are unchanged."""
+    """Give every nameplate layer its spot and position beside the speaker: the config's spot, or the nearest that
+    leaves the sampled faces clear. The face check is reused from the last run while the clean video, the window and
+    the plate are unchanged."""
     def window(layer):
         return layer["person_id"], layer["start_frame"], layer["end_frame_exclusive"], layer["sha256"]
     todo = []
@@ -465,9 +466,9 @@ def place_nameplates(items: list[dict], plates: dict[str, dict], warnings: dict[
         found = nameplates.faces(Path(item["clean"]), sorted({n for layer in item["plates"] for n in nameplates.samples(layer)}))
         rows = []
         for layer in item["plates"]:
-            spot, cover = nameplates.place(plates[layer["person_id"]], masks[layer["person_id"]], found, nameplates.samples(layer))
+            spot, where = nameplates.place(plates[layer["person_id"]], masks[layer["person_id"]], found, nameplates.samples(layer))
             rows.append({"person_id": layer["person_id"], "start_frame": layer["start_frame"],
-                         "end_frame_exclusive": layer["end_frame_exclusive"], "plate": layer["sha256"], "auto": spot, "cover": cover})
+                         "end_frame_exclusive": layer["end_frame_exclusive"], "plate": layer["sha256"], "auto": spot, "spots": where})
         return rows
     if todo:
         log(f"package: finding faces under {sum(len(item['plates']) for item in todo)} nameplates")
@@ -479,18 +480,19 @@ def place_nameplates(items: list[dict], plates: dict[str, dict], warnings: dict[
         for layer, row in zip(item["plates"], item["plate_rows"]):
             configured = layer["position"] is not None
             chosen = layer["position"] or row["auto"]
-            layer.update(position=chosen, **dict(zip("xy", nameplates.spots(plates[layer["person_id"]])[chosen])))
+            cover = {spot: value["cover"] for spot, value in row["spots"].items()}
+            layer.update(position=chosen, x=row["spots"][chosen]["x"], y=row["spots"][chosen]["y"])
             rows.append({**row, "position": chosen, "configured": configured})
-            clear = [spot for spot in nameplates.preference(plates[layer["person_id"]]) if row["cover"][spot] <= nameplates.CLEAR]
+            clear = [spot for spot in nameplates.preference(plates[layer["person_id"]]) if cover[spot] <= nameplates.CLEAR]
             where = f"nameplate {layer['person_id']} (f{layer['start_frame']}-{layer['end_frame_exclusive'] - 1})"
             # A configured spot is a decision already taken; it is only questioned when another spot is clear.
-            if row["cover"][chosen] <= nameplates.CLEAR or (configured and not clear):
+            if cover[chosen] <= nameplates.CLEAR or (configured and not clear):
                 continue
             if not configured:
-                note = (f"{where} touches a face at every spot (least: {chosen} {row['cover'][chosen]:.0%}); check its tile "
+                note = (f"{where} touches a face at every spot (least: {chosen} {cover[chosen]:.0%}); check its tile "
                         f"in sheets/{item['plan_id']}-final.jpg and set outputs.{item['plan_id']}.nameplates if another spot reads better")
             else:
-                note = f"{where} at {chosen} covers {row['cover'][chosen]:.0%} of a face" + (f"; {clear[0]} is clear" if clear else "")
+                note = f"{where} at {chosen} covers {cover[chosen]:.0%} of a face" + (f"; {clear[0]} is clear" if clear else "")
             warnings.setdefault(item["plan_id"], []).append(note)
         item["nameplates"] = {"version": nameplates.VERSION, "clean": item["clean_sha256"], "rows": rows}
         del item["plates"], item["plate_rows"]
