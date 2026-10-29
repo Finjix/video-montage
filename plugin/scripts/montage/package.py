@@ -22,7 +22,7 @@ from montage import job as JOB
 from montage import catalog as CATALOG
 from montage import rules, runtime
 from montage.common import FFMPEG, digest, log, pool, probe, read, run, sha, write
-from montage.packaging import design, design_renderer, flower_effects, segmentation
+from montage.packaging import design, design_renderer, flower_effects, nameplates, segmentation
 from montage.packaging import fonts as subtitle_fonts
 
 VERSION = 2
@@ -194,13 +194,18 @@ def encode(item: dict, work: Path, target: Path) -> dict:
         command = [str(FFMPEG), "-hide_banner", "-nostdin", "-y", "-i", item["clean"]]
         filters, current, index = [], "[0:v]", 1
         for layer in item["layers"]:
-            scaled = folder / f"layer-{index}.png"
-            run([FFMPEG, "-v", "error", "-nostdin", "-y", "-i", layer["path"], "-vf",
-                 "scale=1440:2560:flags=lanczos,format=rgba", "-frames:v", "1", scaled])
-            command += ["-loop", "1", "-framerate", "60", "-i", str(scaled)]
+            if "x" in layer:
+                # A nameplate is already cut to its visible size at frame scale.
+                command += ["-loop", "1", "-framerate", "60", "-i", layer["path"]]
+            else:
+                scaled = folder / f"layer-{index}.png"
+                run([FFMPEG, "-v", "error", "-nostdin", "-y", "-i", layer["path"], "-vf",
+                     "scale=1440:2560:flags=lanczos,format=rgba", "-frames:v", "1", scaled])
+                command += ["-loop", "1", "-framerate", "60", "-i", str(scaled)]
             enable = (f":enable='gte(n,{layer['start_frame']})*lt(n,{layer['end_frame_exclusive']})'"
                       if "start_frame" in layer else "")
-            filters.append(f"{current}[{index}:v]overlay=0:0:format=auto:shortest=0{enable}[v{index}]")
+            filters.append(f"{current}[{index}:v]overlay={layer.get('x', 0)}:{layer.get('y', 0)}:format=auto:shortest=0"
+                           f"{enable}[v{index}]")
             current, index = f"[v{index}]", index + 1
         command += ["-f", "concat", "-safe", "0", "-i", track["path"]]
         filters.append(f"[{index}:v]fps=60:round=up,format=rgba[track]")
@@ -267,7 +272,7 @@ def finish(item: dict, work: Path) -> dict:
         result = item["previous"]
         if Path(result["path"]).is_file() and sha(Path(result["path"])) == result["sha256"]:
             log(f"package: {item['plan_id']} unchanged")
-            return {**result, "bgm_auto": item["bgm_auto"], "reused": True}
+            return {**result, "bgm_auto": item["bgm_auto"], "nameplates": item["nameplates"], "reused": True}
     result = encode(item, work, staged)
     loudness = correct_loudness(item, staged, work)
     errors = []
@@ -290,15 +295,19 @@ def finish(item: dict, work: Path) -> dict:
     return {"plan_id": item["plan_id"], "key": item["key"], "staged": str(staged), "errors": errors, "frames": item["frames"],
             "clean": {"path": item["clean"], "sha256": item["clean_sha256"]}, "subtitle": item["subtitle"],
             "lufs": loudness["lufs"], "true_peak": loudness["true_peak"], "voice_gain_db": item["voice_gain_db"],
-            "bgm": item["bgm"], "voice_over_music_db": item["voice_over_music_db"], "bgm_auto": item["bgm_auto"], **result}
+            "bgm": item["bgm"], "voice_over_music_db": item["voice_over_music_db"], "bgm_auto": item["bgm_auto"],
+            "nameplates": item["nameplates"], **result}
 
 
 def final_sheet(row: dict, video: Path, target: Path) -> None:
+    """Each nameplate in the middle of its window (labelled with its spot), then up to 16 settled cues."""
+    plates = {(p["start_frame"] + p["end_frame_exclusive"]) // 2: p["position"] for p in row["nameplates"]["rows"]}
     events = row["design"]["events"]
     numbers = sorted({min(row["frames"] - 1, (e["start_frame"] + e["entrance_frames"] + e["end_frame_exclusive"]) // 2)
-                      for e in events})[:16]
-    images = CATALOG.grab(video, numbers)
-    CATALOG.tile_sheet([(images[n], f"f{n}") for n in numbers], target, title=f"{row['plan_id']} packaged (settled cues)")
+                      for e in events} - set(plates))[:16]
+    images = CATALOG.grab(video, [*plates, *numbers])
+    tiles = [(images[n], f"f{n} {spot}") for n, spot in plates.items()] + [(images[n], f"f{n}") for n in numbers]
+    CATALOG.tile_sheet(tiles, target, title=f"{row['plan_id']} packaged (nameplates with their spot, then settled cues)")
 
 
 # ----------------------------------------------------------------------------------- batch
@@ -308,7 +317,8 @@ def prepare_items(job: Path, state: dict, config: dict) -> tuple[list[dict], dic
     library = read(job / "config/text_library.json")
     games_all = [e["text"] for e in library["entries"] if e["category"] == "game"]
     terms = [e["text"] for e in library["entries"]]
-    plates = {row["person_id"]: row["nameplate"] for row in state["celebrities"]}
+    sources = {row["person_id"]: row["nameplate"] for row in state["celebrities"]}
+    plates = {}
     records = [read(path) for path in sorted((job / "clean").glob("*.json"))]
     plan_ids = [row["plan_id"] for row in read(job / "config/plan.json")["outputs"]]
     by_id = {record["plan_id"]: record for record in records}
@@ -354,9 +364,20 @@ def prepare_items(job: Path, state: dict, config: dict) -> tuple[list[dict], dic
         except ValueError as error:
             problems.append(str(error))
         layers = []
+        spots = own.get("nameplates", {})
         try:
+            people = [window["person_id"] for window in output["nameplates"]]
+            if not isinstance(spots, dict) or any(spot not in nameplates.SPOTS for spot in spots.values()):
+                raise ValueError(f"outputs.{pid}.nameplates maps person IDs to one of {', '.join(nameplates.SPOTS)}")
+            if set(spots) - set(people):
+                raise ValueError(f"outputs.{pid}.nameplates names {', '.join(sorted(set(spots) - set(people)))}, who has no "
+                                 f"nameplate in {pid} (nameplates: {', '.join(people)})")
             for window in output["nameplates"]:
-                layers.append({**overlay(plates[window["person_id"]]["path"]), **window})
+                person = window["person_id"]
+                if person not in plates:
+                    plates[person] = nameplates.trim(sources[person], person, job / "nameplates")
+                layers.append({"path": plates[person]["path"], "sha256": plates[person]["sha256"], **window,
+                               "position": spots.get(person)})
             pin = own.get("text_pin") or pick(pins, ordinal)
             if not pin:
                 raise ValueError("no text pin: set defaults.text_pins or outputs.<id>.text_pin")
@@ -365,7 +386,7 @@ def prepare_items(job: Path, state: dict, config: dict) -> tuple[list[dict], dic
             if not chosen:
                 raise ValueError("no disclaimer: set defaults.disclaimer")
             layers.append(overlay(chosen))
-        except ValueError as error:
+        except (ValueError, OSError) as error:
             problems.append(str(error))
         track = own.get("bgm") or pick(tracks, ordinal)
         if not track:
@@ -407,7 +428,8 @@ def prepare_items(job: Path, state: dict, config: dict) -> tuple[list[dict], dic
     except ValueError as error:
         errors.setdefault("batch", []).append(str(error))
     ready = [item for item in items if item["plan_id"] not in errors and "bgm" in item]
-    log(f"package: {len(ready)} of {len(plan_ids)} outputs ready; setting their BGM levels")
+    log(f"package: {len(ready)} of {len(plan_ids)} outputs ready; placing nameplates and setting BGM levels")
+    place_nameplates(ready, plates, warnings)
     gains = bgm_gains(ready)
     for item in ready:
         item["font_path"] = subtitle_fonts.FONTS[item["design"]["font"]]["path"]
@@ -421,6 +443,57 @@ def prepare_items(job: Path, state: dict, config: dict) -> tuple[list[dict], dic
             item["previous"] = None
         prepared.append(item)
     return prepared, errors, warnings
+
+
+def place_nameplates(items: list[dict], plates: dict[str, dict], warnings: dict[str, list[str]]) -> None:
+    """Give every nameplate layer its spot: the config's, or the first that leaves the sampled faces clear. The face
+    check is reused from the last run while the clean video, the window and the plate are unchanged."""
+    def window(layer):
+        return layer["person_id"], layer["start_frame"], layer["end_frame_exclusive"], layer["sha256"]
+    todo = []
+    for item in items:
+        item["plates"] = [layer for layer in item["layers"] if "person_id" in layer]
+        known = (item["previous"] or {}).get("nameplates") or {}
+        rows = ({(r["person_id"], r["start_frame"], r["end_frame_exclusive"], r["plate"]): r for r in known["rows"]}
+                if known.get("version") == nameplates.VERSION and known.get("clean") == item["clean_sha256"] else {})
+        item["plate_rows"] = [rows.get(window(layer)) for layer in item["plates"]]
+        if None in item["plate_rows"]:
+            todo.append(item)
+    masks = {person: nameplates.mask(plate) for person, plate in plates.items()} if todo else {}
+
+    def detect(item):
+        found = nameplates.faces(Path(item["clean"]), sorted({n for layer in item["plates"] for n in nameplates.samples(layer)}))
+        rows = []
+        for layer in item["plates"]:
+            spot, cover = nameplates.place(plates[layer["person_id"]], masks[layer["person_id"]], found, nameplates.samples(layer))
+            rows.append({"person_id": layer["person_id"], "start_frame": layer["start_frame"],
+                         "end_frame_exclusive": layer["end_frame_exclusive"], "plate": layer["sha256"], "auto": spot, "cover": cover})
+        return rows
+    if todo:
+        log(f"package: finding faces under {sum(len(item['plates']) for item in todo)} nameplates")
+        with pool(len(todo)) as executor:
+            for item, rows in zip(todo, executor.map(detect, todo)):
+                item["plate_rows"] = rows
+    for item in items:
+        rows = []
+        for layer, row in zip(item["plates"], item["plate_rows"]):
+            configured = layer["position"] is not None
+            chosen = layer["position"] or row["auto"]
+            layer.update(position=chosen, **dict(zip("xy", nameplates.spots(plates[layer["person_id"]])[chosen])))
+            rows.append({**row, "position": chosen, "configured": configured})
+            clear = [spot for spot in nameplates.preference(plates[layer["person_id"]]) if row["cover"][spot] <= nameplates.CLEAR]
+            where = f"nameplate {layer['person_id']} (f{layer['start_frame']}-{layer['end_frame_exclusive'] - 1})"
+            # A configured spot is a decision already taken; it is only questioned when another spot is clear.
+            if row["cover"][chosen] <= nameplates.CLEAR or (configured and not clear):
+                continue
+            if not configured:
+                note = (f"{where} touches a face at every spot (least: {chosen} {row['cover'][chosen]:.0%}); check its tile "
+                        f"in sheets/{item['plan_id']}-final.jpg and set outputs.{item['plan_id']}.nameplates if another spot reads better")
+            else:
+                note = f"{where} at {chosen} covers {row['cover'][chosen]:.0%} of a face" + (f"; {clear[0]} is clear" if clear else "")
+            warnings.setdefault(item["plan_id"], []).append(note)
+        item["nameplates"] = {"version": nameplates.VERSION, "clean": item["clean_sha256"], "rows": rows}
+        del item["plates"], item["plate_rows"]
 
 
 def bgm_gains(items: list[dict]) -> dict[str, dict]:

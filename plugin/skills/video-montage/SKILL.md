@@ -41,7 +41,7 @@ default below, carry on, and report it in the final summary.
 | Too few BGM tracks in the pack | download licensed tracks yourself ([packaging](references/packaging.md#bgm)) |
 | BGM downloads fail from at least three different sources | `decide --key bgm_repetition --value true --instruction "fallback: <sources tried>"` |
 | The ladder is exhausted and videos still lack three sources | `decide --key min_sources_per_output --value 2 --instruction "fallback: <why>"` for the rest |
-| Layout, text pin, entrance or font choice | the packaging defaults, adjusted only after looking at the sheets |
+| Layout, nameplate spot, text pin, entrance or font choice | the packaging defaults, adjusted only after looking at the sheets |
 
 Stop to ask only when nothing can continue: the sources are missing or unreadable, or the first-use download has no
 network. Say what you tried and the minimum you need.
@@ -67,7 +67,7 @@ Packaging: [packaging](references/packaging.md).
    the clean videos, subtitle drafts and cut sheets; look at every sheet and subtitle file and fix the annotations,
    joins or subtitle files.
 6. `package [--config]` packages, checks and publishes every video. Look at the packaged sheets; adjust the config
-   and re-run when a layout covers a face or a cue reads badly.
+   and re-run when a nameplate or layout covers a face or a cue reads badly.
 7. Final summary, in your reply (not only in a file): videos delivered and the folder; videos per celebrity, and
    why any registered celebrity has none; transcript inferences and their basis; weak routes by `plan_id`; BGM
    tracks with license and why each fits; every fallback default you took.

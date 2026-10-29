@@ -167,7 +167,8 @@ work.
 
 ## After `package`
 
-Videos land in the delivery folder as `<plan_id>.mp4`; `temp/sheets/<plan_id>-final.jpg` shows each settled cue.
+Videos land in the delivery folder as `<plan_id>.mp4`; `temp/sheets/<plan_id>-final.jpg` shows each nameplate in the
+middle of its window (labelled with its spot), then each settled cue.
 Outputs without problems are published even while others still have problems; re-running redoes only what changed.
 
 ## Revisions and reburns

@@ -11,6 +11,7 @@ it. Everything has a working default; the config only records your choices.
               "disclaimer": "D:/pack/免责/竖版免责声明.png",
               "bgm": ["D:/pack/bgm/a.mp3", "<path printed by fetch-bgm>"]},
  "outputs": {"P01": {"text_pin": "D:/pack/文字钉/WZD05.png", "bgm": "D:/pack/bgm/a.mp3",
+                     "nameplates": {"person:wu-yue": "lower-right"},
                      "cues": [{"index": 1, "entrance": "shout_wave"},
                               {"index": 4, "text": "温度就是头等大事", "y": 0.82},
                               {"index": 6, "color": "white", "spans": [{"start": 2, "end": 4, "color": "yellow"}]}]}}}
@@ -19,7 +20,8 @@ it. Everything has a working default; the config only records your choices.
 - Lists in `defaults` are used round-robin over the outputs; an output's own value wins.
 - Without a config: text pins rotate through the pack's pin folder (`文字钉`/`pin`), the single PNG in a
   `免责`/`disclaimer` folder is the disclaimer, and the BGM rotates through the pack's audio and registered downloads.
-- Nameplates come from the plan (first solo appearance) and the work order; they are not configured here.
+- Nameplate windows come from the plan (first solo appearance) and the artwork from the work order; only their spot is
+  configured here ([nameplates](#nameplates)).
 - A cue override names its 1-based `index`; adding the cue `text` makes the override skip (with a note) if that cue's
   text changes later. Fields: `color`, `spans`, `font_size`, `entrance`, `x`, `y`, `max_width`.
 
@@ -29,6 +31,20 @@ Exactly one text pin per video, shown for its whole length: choose pins whose co
 them in `catalog/assets.jpg`), spread them over the batch, and check on the packaged sheet that the pin covers no
 face, subtitle or nameplate. The disclaimer covers the whole video. Overlays are the pack's transparent 9:16 PNGs;
 never create or edit artwork.
+
+## Nameplates
+
+`package` cuts each celebrity's nameplate PNG to its visible plate (`temp/nameplates/<person>.png`, at frame scale)
+and shows it at one of four spots: `upper-left` (where the artwork puts it), `upper-right` (the same margin on the
+other side), `lower-left` and `lower-right` (lower, ending above the subtitles). Without a config entry it samples
+the window's frames, finds the faces and takes the first spot in that order that leaves every face clear.
+
+Look at the nameplate tiles (labelled with their spot, e.g. `f96 upper-right`) that open each `<plan_id>-final.jpg`. Choose another spot
+in `outputs.<plan_id>.nameplates` (`{"<person_id>": "<spot>"}`) when the plate covers the face, a hand gesture or
+the phone showing the game, or sits on the side the speaker turns to. A note names every automatic plate that touches a
+face at all four spots (extreme close-ups, a speaker leaning across the frame) and every configured spot that covers a
+face while another spot is clear; for the first, pick the spot that hides the least of the face (hair or an ear over
+an eye or the mouth) and record it in the config, which ends the note.
 
 ## Subtitle design
 

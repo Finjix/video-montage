@@ -40,3 +40,10 @@ Uploading the ZIP, developer identity verification and market review remain port
 - Real footage, `dev/smoke/e2e.py` with the installed runtime cache (ASR on the RTX 5060): init → prepare (10 sources, 238 units, 99 shots) → annotate → check → render (-23.15 / -22.75 / -22.65 LUFS) → package published all three; an unchanged second `package` kept identical hashes.
 - `routes` on that catalog, 40 s limit: 39 344 verified routes, 1 563 joins, 73 openings (HEAD before this pass: 48 021 / 1 622 / 76; the difference is the new opening and restatement checks). `routes --joins` with 356 quoted joins built the 3-output draft and printed `cast: 吴樾 2, 林子聪 1, 许君聪 1`.
 - `python dev/build_plugin.py` passes (67 files, 3.08 MB ZIP).
+
+## 2026-10-29 nameplate placement
+
+- Input: the 55-video batch in `D:\四明星50条`, where the fixed upper-left plate covered faces. On its 220 nameplate windows (YuNet faces on frames every 12 frames), the old spot touched a face in 51 windows (11 over 10% of the face). The new default picks 174 upper-left, 30 upper-right, 14 lower-left and 2 lower-right; 12 windows touch a face at every spot (at most 6.6%) and get a note: one opener whose speaker leans across the frame and extreme close-ups.
+- 91 regression tests pass under the private Python (new `test_nameplates.py`: trimming at frame scale for 1440 and 1080 artwork, spot geometry, placement order, least-covered fallback, cached face checks, configured spots with notes).
+- A scratch copy of that job with 6 of its videos: `package` found faces under 24 nameplates in 5.5 s, published all six (-23.0..-22.7 LUFS); the plates are cut to 285x908 and sit at their spots above the subtitles.
+- `dev/smoke/e2e.py` on real footage: END_TO_END_PASS (one plate note on P01); `python dev/build_plugin.py` passes (70 files, 3.3 MB ZIP, the YuNet model adds 232 KB).
