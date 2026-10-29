@@ -12,8 +12,6 @@ STATE = "job.json"
 SOURCE_SUFFIXES = {".mp4", ".mov", ".mkv"}
 PNG_SIGNATURE = bytes.fromhex("89504e470d0a1a0a")
 DELIVERY_NAME = re.compile(r"自动化混剪_\d{8}_\d{6}")
-REBURN_NOTE = ("修改本目录 subtitle-*.txt 的文字或时间码后，把整个输出文件夹交给 AI，要求重新烧录。\n"
-               "保留 temp 文件夹，AI 会用它重新打包并覆盖成片。\n")
 DECISIONS = {
     "min_sources_per_output": lambda v: type(v) is int and v in (1, 2),
     "bgm_repetition": lambda v: v is True,
@@ -115,7 +113,6 @@ def init(order: dict, job_dir: Path | None = None) -> tuple[Path, dict]:
     job.mkdir(parents=True)
     write(job / "config/text_library.json", library)
     (job / "subtitles").mkdir()
-    (job / "subtitles" / "修改字幕后让AI重新烧录").write_text(REBURN_NOTE, encoding="utf-8")
     order = {**order, "sources": [str(p) for p in paths], "asset_root": str(asset_root), "celebrities": celebrities}
     order.pop("decisions", None)
     state = {"delivery_dir": str(delivery), "job_dir": str(job), "order": order, "celebrities": celebrities,

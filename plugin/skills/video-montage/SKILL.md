@@ -89,5 +89,8 @@ Packaging: [packaging](references/packaging.md).
    no video is a gap to work on, never an outcome to accept silently.
 7. **Packaged by default.** A batch means finished videos with subtitles, nameplates, one text pin, disclaimer and
    BGM. Deliver unpackaged (`package --clean`) only when the user asks.
-8. **Delivery folder.** It holds only `<plan_id>.mp4` files and `temp/`. Your inputs live in `temp/config/`,
-   downloads in `temp/config/bgm/`, scratch work in `temp/`. Revisions and reburns reuse the same folder.
+8. **Delivery folder.** It holds only `<plan_id>.mp4` files and `temp/`. `temp/` holds only what a revision or
+   reburn needs, never for people: the pipeline's own folders, your current inputs in `temp/config/` (one file
+   per purpose; overwrite drafts instead of keeping copies) and the chosen BGM in `temp/config/bgm/`. Logs, scratch
+   scripts, downloaded pages and trial files go to the system temp folder and are deleted when the batch is done.
+   Revisions and reburns reuse the same folder.

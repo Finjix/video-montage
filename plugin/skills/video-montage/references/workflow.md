@@ -11,7 +11,7 @@ inspects or prefetches it; it needs no job). Long commands print progress lines 
 | `annotate --file <json>` | applies people, speakers, transcript fixes and beats; rewrites the catalog | seconds (+ aligner load when text changed) |
 | `routes [--mix]` | cuttable clips, unusable beats with reasons, topics, joins of sampled verified routes → `reports/routes.md` | at most `--seconds` (40) |
 | `routes --joins <json> [--fresh]` | composes `config/plan-draft.json` for the whole batch from the accepted joins | 10-60 s |
-| `check --plan <json>` | exact cut frames and every rule → `reports/check.json`, `reports/scripts.md` | < 1 s |
+| `check --plan <json>` | exact cut frames and every rule → `reports/scripts.md` | < 1 s |
 | `render --plan <json>` | clean videos, QC, subtitle drafts, cut sheets (changed outputs only) | ~15 s per 3 videos |
 | `package [--config <json>]` | designs, encodes, checks and publishes (changed outputs only) | ~25-40 s per video, 4 in parallel |
 | `package --clean` | publishes the clean videos unpackaged (explicit user request only) | seconds |

@@ -85,8 +85,6 @@ def cmd_annotate(args) -> int:
 def resolve(job: Path, state: dict, plan_path: Path) -> tuple[dict, list[dict], dict, dict]:
     plan = read(plan_path)
     outputs, errors, summary = PLAN.resolve(plan, job, state)
-    report = {"outputs": outputs, "errors": errors, "batch": summary}
-    write(job / "reports/check.json", report)
     scripts = [line for output in outputs for line in (*PLAN.script(output), "")]
     (job / "reports/scripts.md").write_text("\n".join(scripts), encoding="utf-8")
     return plan, outputs, errors, summary
@@ -140,7 +138,6 @@ def cmd_render(args) -> int:
             path.unlink()
     games, terms = library_terms(job)
     results = RENDER.render_all(job, outputs, games, terms)
-    write(job / "reports/render.json", results)
     problems = {row["plan_id"]: row["errors"] for row in results if row["errors"]}
     notes = {row["plan_id"]: row["notes"] for row in results if row["notes"]}
     lines = [f"{row['plan_id']}: {'reused' if row['reused'] else 'rendered'}, {row['qc']['lufs']} LUFS, sheet {row['sheet']}"
