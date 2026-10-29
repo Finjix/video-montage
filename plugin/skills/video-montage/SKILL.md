@@ -92,5 +92,5 @@ Packaging: [packaging](references/packaging.md).
 8. **Delivery folder.** It holds only `<plan_id>.mp4` files and `temp/`. `temp/` holds only what a revision or
    reburn needs, never for people: the pipeline's own folders, your current inputs in `temp/config/` (one file
    per purpose; overwrite drafts instead of keeping copies) and the chosen BGM in `temp/config/bgm/`. Logs, scratch
-   scripts, downloaded pages and trial files go to the system temp folder and are deleted when the batch is done.
+   scripts, downloaded pages and trial files also go in `temp/`.
    Revisions and reburns reuse the same folder.
