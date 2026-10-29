@@ -9,7 +9,7 @@ from pathlib import Path
 from montage import job as JOB
 from montage import plan as PLAN
 from montage.common import read, write
-from montage import runtime
+from montage import runtime, text_library
 
 RULE_FAILURE = 2
 
@@ -23,7 +23,7 @@ def errors_lines(errors: dict[str, list[str]]) -> list[str]:
 
 
 def library_terms(job: Path) -> tuple[list[str], tuple[str, ...]]:
-    library = read(job / "config/text_library.json")
+    library = text_library.load(job)
     games = [e["text"] for e in library["entries"] if e["category"] == "game"]
     return games, tuple(e["text"] for e in library["entries"])
 

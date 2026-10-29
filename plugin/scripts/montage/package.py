@@ -20,7 +20,7 @@ from montage import audio as AUDIO
 from montage import bgm as BGM
 from montage import job as JOB
 from montage import catalog as CATALOG
-from montage import rules, runtime
+from montage import rules, runtime, text_library
 from montage.common import FFMPEG, digest, log, pool, probe, read, run, sha, write
 from montage.packaging import design, design_renderer, flower_effects, nameplates, segmentation
 from montage.packaging import fonts as subtitle_fonts
@@ -314,7 +314,7 @@ def final_sheet(row: dict, video: Path, target: Path) -> None:
 
 def prepare_items(job: Path, state: dict, config: dict) -> tuple[list[dict], dict[str, list[str]], dict[str, list[str]]]:
     asset_root = Path(state["order"]["asset_root"])
-    library = read(job / "config/text_library.json")
+    library = text_library.load(job)
     games_all = [e["text"] for e in library["entries"] if e["category"] == "game"]
     terms = [e["text"] for e in library["entries"]]
     sources = {row["person_id"]: row["nameplate"] for row in state["celebrities"]}
@@ -437,7 +437,7 @@ def prepare_items(job: Path, state: dict, config: dict) -> tuple[list[dict], dic
         item["bgm_auto"] = gains[item["plan_id"]]
         item["bgm"]["gain_db"] = item["bgm_auto"]["gain_db"]
         item["voice_over_music_db"] = item["bgm_auto"]["voice_over_music_db"]
-        item["key"] = digest([VERSION, item["clean_sha256"], sha(Path(item["subtitle"])), item["design"]["cues"],
+        item["key"] = digest([VERSION, AUDIO.TARGET_LUFS, item["clean_sha256"], sha(Path(item["subtitle"])), item["design"]["cues"],
                               item["design"]["font"], item["layers"], item["bgm"]])
         if not (item["previous"] and item["previous"].get("key") == item["key"]):
             item["previous"] = None

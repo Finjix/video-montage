@@ -18,7 +18,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 from montage import asr as ASR
-from montage import rules
+from montage import rules, text_library
 from montage.common import FFMPEG, FFPROBE, FONT, REJECTED, digest, log, pool, probe, read, run, write
 
 THUMB_W, THUMB_H = 64, 114
@@ -499,7 +499,7 @@ def prepare(job: Path, state: dict, *, fresh: bool = False) -> dict:
         else:
             log("prepare: loading speech recognizer")
             model = ASR.build()
-            library = read(job / "config/text_library.json")
+            library = text_library.load(job)
             started = time.monotonic()
             words = ASR.recognize(model, samples, recognition_context(state["order"], library))
             log(f"prepare: speech recognized for {len(sources)} sources ({time.monotonic() - started:.1f} s)")
@@ -698,6 +698,7 @@ def build(job: Path, state: dict, *, model=None) -> dict:
     align_corrections(sources, raw, annotations, cache, model)
     write(cache_path, cache)
     registered = {row["person_id"] for row in state["celebrities"]}
+    spellings = text_library.spellings(text_library.load(job))
     catalog = []
     for source in sources:
         sid = source["id"]
@@ -707,6 +708,7 @@ def build(job: Path, state: dict, *, model=None) -> dict:
         merged = {int(number) for number, row in note.get("shots", {}).items() if row.get("merge")}
         cuts = [cut for number, cut in enumerate(source["cuts"], 2) if number not in merged]
         units = apply_text(sid, raw_units(raw[sid]["words"]), note.get("text", {}), cache)
+        units = [{**unit, "words": text_library.respell(unit["words"], spellings)} for unit in units]
         # A merged detection (flash, fast motion) is no camera change: it stays an unstable edge, not a masked cut.
         units = finish_units(units, env, {**source, "cuts": cuts},
                              (series["adjacent"], series["endpoint"], series["zoom"] if "zoom" in series.files else None))

@@ -77,7 +77,9 @@ One file for all sources; re-run `annotate` with the complete file after every c
 - `cameras`: optional groups of shots from one camera setup (they count as one opening camera).
 - `speaker` / `speakers`: who talks (default: the single registered celebrity in `people`).
 - `text`: corrected unit text; `""` deletes the unit (noise, hallucination); a list splits it into `U31.1`,
-  `U31.2`... Keep the words in spoken order: the aligner re-times them.
+  `U31.2`... Keep the words in spoken order: the aligner re-times them. Library terms with digits take their
+  library spelling on their own (金子六六六 -> `金子666`); the library is the plugin's current
+  `assets/text-library.json` plus the job's copy, so entries added after `init` apply on the next `annotate`.
 - `exclude`: units that must never be used, e.g. beside a transition (zoom blur, flash) a sheet shows but the
   catalog missed. `exclude` and `speakers` name units by their current IDs (a split unit is `U31.1`...).
 - `beats`: the only material a plan may use: runs of whole units with `kind`, `role` and an English `gist` of at

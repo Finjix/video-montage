@@ -12,7 +12,7 @@ import numpy as np
 
 from montage.common import FFMPEG, run
 
-TARGET_LUFS = -23.0       # finished video, BGM included
+TARGET_LUFS = -18.0       # finished video, BGM included
 TOLERANCE_LU = 1.0
 TRUE_PEAK_DB = -3.0       # per balanced voice segment
 DELIVERY_PEAK_DB = -1.0

@@ -115,4 +115,4 @@ serve as music (only sound effects, for example).
 ## Loudness
 
 Voices are balanced per clip at render time. `package` sets the BGM gain so the voice stays at least 4 dB above the
-music, then corrects the mix until the finished video lands at -23 LUFS (+/- 1 LU, true peak at most -1 dBTP).
+music, then corrects the mix until the finished video lands at -18 LUFS (+/- 1 LU, true peak at most -1 dBTP).

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import math
 
-from montage import batch, timeline as CATALOG, rules
+from montage import batch, timeline as CATALOG, rules, text_library
 from montage.common import read
 
 MIN_FRAMES, MAX_FRAMES = 1020, 1800      # 17-30 s at 60 fps, clean and final (no speed change)
@@ -359,7 +359,7 @@ def resolve(plan: dict, job, state: dict) -> tuple[list[dict], dict[str, list[st
     catalog = read(job / "catalog/catalog.json")
     sources = {source["id"]: source for source in catalog["sources"]}
     registered = {row["person_id"] for row in state["celebrities"]}
-    library = read(job / "config/text_library.json")
+    library = text_library.load(job)
     games = [entry["text"] for entry in library["entries"] if entry["category"] == "game"]
     decisions = state.get("decisions", {})
     min_sources = decisions.get("min_sources_per_output", {}).get("value", MIN_SOURCES)

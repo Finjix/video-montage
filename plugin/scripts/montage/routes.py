@@ -16,7 +16,7 @@ from collections import Counter, defaultdict
 from itertools import count as count_from
 from pathlib import Path
 
-from montage import batch, plan as PLAN, rules
+from montage import batch, plan as PLAN, rules, text_library
 from montage.common import read, write
 
 SEARCH_SECONDS = 40
@@ -623,7 +623,7 @@ def run(job: Path, state: dict, *, joins: Path | None, mix: bool, max_clips: int
     catalog = read(job / "catalog/catalog.json")
     sources = {source["id"]: source for source in catalog["sources"]}
     registered = {row["person_id"] for row in state["celebrities"]}
-    library = read(job / "config/text_library.json")
+    library = text_library.load(job)
     games = [entry["text"] for entry in library["entries"] if entry["category"] == "game"]
     min_sources = state.get("decisions", {}).get("min_sources_per_output", {}).get("value", PLAN.MIN_SOURCES)
     count = state["order"]["requested_outputs"]
