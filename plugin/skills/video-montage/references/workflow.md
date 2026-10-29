@@ -123,8 +123,9 @@ a b a c). Write the joins you accept:
 
 `routes --joins <file>` composes the batch video by video through those joins, verifying every route with the full
 `check`: videos of the current plan that still pass and fit first (`--fresh` ignores them), then strong joins before
-`weak` ones and videos of six or more clips before shorter ones; each video opens with the least-used hook of a
-celebrity under their fair share and continues with the least-used material at each position, preferring a source
+`weak` ones and videos of six or more clips before shorter ones; each video opens, for a celebrity under their fair
+share, on the point and source file that have opened fewest videos (any clip that can open, not only hooks) and
+continues with the least-used material at each position, preferring a source
 file it has not used yet, all inside the batch limits (two videos share at most 25% of their positions, one piece of
 material sits at one position in at most 25% of the batch). It writes `config/plan-draft.json` (outputs with a weak
 join carry a note) and prints the clips and sources per video, the repetition figures, the videos per celebrity and,

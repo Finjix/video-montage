@@ -429,6 +429,38 @@ class TopicsAndFlags(unittest.TestCase):
                 CATALOG.check_annotations({"sources": {"S01": {"beats": [dict(beat, **bad)]}}}, state)
 
 
+class Openings(unittest.TestCase):
+    def test_a_standalone_payoff_may_open_but_a_cta_may_not(self):
+        from montage import rules
+        beat = lambda role: {"id": "B", "role": role, "kind": "talk"}
+        video = lambda *roles: [{"kind": "talk", "beats": [beat(role)]} for role in roles]
+        self.assertEqual(rules.structure_errors(video("payoff", "body", "payoff", "cta")), [])
+        self.assertTrue(any("after a payoff" in e for e in rules.structure_errors(video("body", "payoff", "body", "cta"))))
+        self.assertTrue(any("cta beat" in e for e in rules.structure_errors(video("cta", "body", "payoff"))))
+
+    def test_openers_join_on_without_role_order(self):
+        data = topical(catalog())
+        for number, source in enumerate(data["sources"]):
+            source["beats"][2]["role"] = "payoff"          # a standalone payoff, no leaning 然后
+            source["units"][2]["text"] = f"建筑升级第{number}级超爽。"
+        found, _ = ROUTES.clips(data, {WU, XU})
+        by_key = {clip["key"]: clip for clip in found}
+        walker = ROUTES.Walker(found, lambda a, b: "progression", min_sources=3, mix=True)
+        self.assertNotIn("S01:U04", {clip["key"] for clip in walker.starts})    # a cta never opens
+        payoff = by_key["S01:U03"]
+        self.assertFalse(ROUTES.Walker.may_follow(payoff, by_key["S02:U02"]))
+        self.assertIn("S02:U02", {c["key"] for c in walker.after_opening["S01:U03"]})
+        self.assertNotIn("S02:U02", {c["key"] for c in walker.next["S01:U03"]})
+        joins = [{"from": "topic:build-up", "to": "topic:chop-first", "relation": "explanation",
+                  "reason": "建筑升级第0级超爽 explained by 开局先砍树"}]
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "joins.json"
+            path.write_text(json.dumps({"joins": joins}, ensure_ascii=False), encoding="utf-8")
+            accepted, problems, _ = ROUTES.joins_file(path, by_key)
+        self.assertEqual(problems, [])
+        self.assertIn(("S01:U03", "S02:U02"), accepted)
+
+
 class ComposeAndSolve(unittest.TestCase):
     def test_compose_keeps_the_quarter_and_prefers_more_clips(self):
         data = topical(catalog())

@@ -34,9 +34,11 @@ the catalog has a clean `out` after one unit and `in` before the next and both s
   ("这个号很稳，三天就能升满" after "怎么玩的？") is `talk`. `scene` is acting: it needs the other line (a bare "对！",
   "不是我", "那怎么办"), a reaction, gag, banter, a question to someone on screen, role-play inside a story. In doubt:
   `talk` if the words alone are a complete message to a viewer.
-- `role`: `hook` opens a video by itself (a question, claim or provocation needing no context); `body` explains,
-  shows how, proves or adds a point; `payoff` is the result, benefit or punchline that closes a thought; `cta` is the
-  gift code, download or click, sign-off.
+- `role`: `hook` opens a video by itself (a question, claim or provocation needing no context) and appears nowhere
+  else; `body` explains, shows how, proves or adds a point; `payoff` is the result, benefit or punchline that closes
+  a thought; `cta` is the gift code, download or click, sign-off. Openings are not reserved for hooks: any body or
+  payoff that stands alone may open a video too (`冰雪末日零下七十度，有木材当然可以为所欲为。`,
+  `一分钟上手，三分钟上头。`, `只有砍树才能点燃熔炉，`), so the batch need not open on the sources' own intros.
 - `gist`: one English sentence: what the beat says and what it does for a video.
 - `topic` (optional slug): the point the beat makes. Beats of different sources or celebrities that make the same
   point in their own words share a topic (`chop-trees-first`: 吴樾 `开局一定要先砍树`, 许君聪 `开局就得给我砍树`...),
@@ -48,8 +50,9 @@ the catalog has a clean `out` after one unit and `in` before the next and both s
   `super-relaxing` and also `quick-rounds`; `木头攒够了生熔炉，熔炉一升温度就上来了` also `furnace` and `heat`).
   A video makes each point once, so a beat that contradicts a point (`开局啊先升级熔炉` against `开局一定要先砍树`)
   lists it too.
-- `opening: false`: a body beat that leans on an earlier line (`妥妥的…`, `这温度一高…`, `就你们广告里刷到的…`) never
-  opens a video. `closing: false`: a beat that leads into what follows (a tally `一分钟上手，三分钟上头`, a clause
+- `opening: false`: a body or payoff beat that leans on an earlier line (`妥妥的…`, `这温度一高…`, `那战力…`,
+  `照我说的…`, `…也能…`, a fragment with no subject such as `轻松建起冰雪王国。`) never opens a video. Judge every
+  body and payoff beat: it opens unless marked. `closing: false`: a beat that leads into what follows (a tally `一分钟上手，三分钟上头`, a clause
   ending on a comma, `不用肝不用氪，`) never ends one.
 - Cut where the thought ends. Never separate a question from its answer, a "three things" setup from its list, a
   "why" from its "because", a teaser from its explanation, or a 所以/然后/这/他们 line from what it refers to. Leave
@@ -57,8 +60,11 @@ the catalog has a clean `out` after one unit and `in` before the next and both s
 
 ## Composing
 
-- Order: at most one `hook` (first), one or more `body`, then payoffs, at most two `cta` beats (a gift code and
-  "点击即玩" may come from two speakers); end on a payoff or cta.
+- Order: the opening clip is any clip that stands alone (a hook, or a body or payoff not marked `opening: false`;
+  never a cta); from the second clip on, one or more `body`, then payoffs, at most two `cta` beats (a gift code and
+  "点击即玩" may come from two speakers); end on a payoff or cta. A payoff that opens needs joins into the body that
+  explains it (`有木材当然可以为所欲为` -> `开局一定要先砍树`).
+- Openings vary: `routes --joins` opens each video on the point and source file that have opened fewest videos.
 - One celebrity per video by default (their own sources take turns: a b a c); vary the batch by who leads each video.
   Cross to a second celebrity only where the hand-over reads naturally (the new speaker's first line stands alone: a
   payoff, a cta, "接下来听我说") or the first celebrity's beats cannot finish the script. When the user asks for several
@@ -118,7 +124,8 @@ one ("coherent", "same game", "smooth") is refused.
 - Edges: every clip starts and ends in clean silence (at most 0.45 s before and 0.55 s after the speech) with no
   dissolve, flash or fast motion; user-rejected intervals are refused.
 - Sources: at least 3 different source files per video (unless decided otherwise).
-- Beats: clips are whole talk beats; roles in order hook, body, payoff, cta.
+- Beats: clips are whole talk beats; the first clip any standalone beat but a cta, then roles in order body,
+  payoff, cta; a hook only first.
 - Cast: every shot shows a registered celebrity as the visual subject (check the sheets); each celebrity's first
   appearance is a solo shot long enough for the nameplate (48-192 frames, 18 frames between plates).
 - Text: a game name from the text library (`无尽冬日`) in at least one clip. A clip opening with 但/但是/不过 needs

@@ -147,13 +147,20 @@ def opens_with(clip: dict) -> str:
 
 # ----------------------------------------------------------------------------------- route building
 
-def follow_problem(left: dict, right: dict) -> str | None:
-    """Why the machine checks never let `right` follow `left` in a video, or None."""
+def can_open(clip: dict) -> bool:
+    """Any clip that stands alone may open a video: not a cta, not marked opening: false, no leaning first word."""
+    return ("cta" not in clip["roles"] and clip["opens"]
+            and not rules.opening_problem(rules.normalize(clip["text"])))
+
+
+def follow_problem(left: dict, right: dict, opening: bool = False) -> str | None:
+    """Why the machine checks never let `right` follow `left` in a video, or None. With `opening`, `left` is the
+    clip a video opens on, so the role order starts again at `right`."""
     if right["sha256"] == left["sha256"]:
         return "both clips come from one source file"
     if right["roles"][0] == "hook":
         return "a hook only opens a video"
-    if rules.ROLE_RANK[right["roles"][0]] < rules.ROLE_RANK[left["roles"][-1]]:
+    if not opening and rules.ROLE_RANK[right["roles"][0]] < rules.ROLE_RANK[left["roles"][-1]]:
         return f"a {right['roles'][0]} beat cannot follow a {left['roles'][-1]} beat (hook, body, payoff, cta)"
     if left["roles"].count("cta") + right["roles"].count("cta") > rules.MAX_CTA:
         return f"more than {rules.MAX_CTA} cta beats"
@@ -202,14 +209,19 @@ class Walker:
     def __init__(self, found: list[dict], links, *, min_sources: int, mix: bool, max_clips: int | None = None,
                  min_cast: int = 1, stranded: frozenset = frozenset()):
         self.min_sources, self.mix, self.max_clips, self.min_cast, self.stranded = min_sources, mix, max_clips, min_cast, stranded
-        self.relation, self.next, self.clash = {}, defaultdict(list), {}
+        self.relation, self.next, self.after_opening, self.clash = {}, defaultdict(list), defaultdict(list), {}
+        self.starts = [clip for clip in found if can_open(clip)]
+        openers = {clip["key"] for clip in self.starts}
         for left in found:
             for right in found:
-                if self.may_follow(left, right) and (relation := links(left, right)):
+                middle = self.may_follow(left, right)
+                first = left["key"] in openers and follow_problem(left, right, opening=True) is None
+                if (middle or first) and (relation := links(left, right)):
                     self.relation[(left["key"], right["key"])] = relation
-                    self.next[left["key"]].append(right)
-        self.starts = [clip for clip in found if clip["roles"][0] in ("hook", "body") and clip["opens"]
-                       and not rules.opening_problem(rules.normalize(clip["text"]))]
+                    if middle:
+                        self.next[left["key"]].append(right)
+                    if first:
+                        self.after_opening[left["key"]].append(right)
 
     @staticmethod
     def may_follow(left: dict, right: dict) -> bool:
@@ -234,7 +246,7 @@ class Walker:
         if self.max_clips and len(route) >= self.max_clips:
             return {}
         result = {}
-        for clip in self.next[route[-1]["key"]]:
+        for clip in (self.after_opening if len(route) == 1 else self.next)[route[-1]["key"]]:
             if (step.low + clip["min_frames"] > PLAN.MAX_FRAMES or step.cta + clip["roles"].count("cta") > rules.MAX_CTA
                     or any((clip["sha256"], beat) in step.beats for beat in clip["beats"])
                     or any(point in step.points for point in clip["points"])
@@ -396,14 +408,16 @@ class Usage:
 def compose(walker: Walker, verify, count: int, accepted: dict, *, keep: list[list[dict]] = (), seconds: float,
             seed: int = 0) -> list[dict]:
     """The batch, video by video: videos of the current plan that still pass and fit first, then new routes, strong
-    joins before weak ones and videos of at least FINE_CLIPS clips before shorter ones. Each new video opens with the
-    least-used hook of a celebrity still under its fair share and continues, position by position, with the least-used
-    material a join allows, preferring (when the user asked for several celebrities) a celebrity not yet in the video,
+    joins before weak ones and videos of at least FINE_CLIPS clips before shorter ones. Each new video opens, for a
+    celebrity still under its fair share, on the point and source file that have opened fewest videos (any clip that
+    stands alone, not only hooks) and continues, position by position, with the least-used material a join allows, preferring (when the user asked for several celebrities) a celebrity not yet in the video,
     a new source file and single beats over runs, so videos are many short pieces from many sources."""
     rng = random.Random(seed)
     deadline = time.monotonic() + seconds
     usage, chosen = Usage(count), []
     at_position, opening_uses, featured, leads = Counter(), Counter(), Counter(), Counter()
+    opening_points, opening_sources = Counter(), Counter()
+    point = lambda clip: clip["topic_in"] or clip["key"]
     people = {p for clip in walker.starts for p in clip["cast"]}
     share = count // max(1, len(people))
     material = lambda clip: frozenset((clip["sha256"], clause) for clause in clip["clauses"])
@@ -421,6 +435,8 @@ def compose(walker: Walker, verify, count: int, accepted: dict, *, keep: list[li
         route = row["route"]
         at_position.update((label, c["key"]) for label, c in zip(batch.positions(len(route)), route))
         opening_uses[route[0]["key"]] += 1
+        opening_points[point(route[0])] += 1
+        opening_sources[route[0]["sha256"]] += 1
         featured.update(row["resolved"]["protagonists"])
         leads.update(route[0]["cast"])
 
@@ -472,8 +488,10 @@ def compose(walker: Walker, verify, count: int, accepted: dict, *, keep: list[li
         failed = set()
         while len(chosen) < count and time.monotonic() < deadline:
             starts = sorted((c for c in walker.starts if c["key"] not in failed and not crowded(0, c, [], target)),
-                            key=lambda c: (all(featured[p] >= share for p in c["cast"]), c["roles"][0] != "hook",
-                                           min((leads[p] for p in c["cast"]), default=0), opening_uses[c["key"]],
+                            key=lambda c: (all(featured[p] >= share for p in c["cast"]),
+                                           min((leads[p] for p in c["cast"]), default=0),
+                                           opening_points[point(c)] + opening_sources[c["sha256"]],
+                                           usage.counts["opening"][c["clauses"][0]],
                                            used(c), len(c["beats"]), rng.random()))
             row = None
             for start in starts:
@@ -548,7 +566,8 @@ def joins_file(path: Path, by_key: dict) -> tuple[dict, list[str], list[str]]:
         if reject:
             rejected.update((a["key"], b["key"]) for a in left for b in right)
             continue
-        pairs = [(a, b) for a in left for b in right if Walker.may_follow(a, b)]
+        pairs = [(a, b) for a in left for b in right
+                 if Walker.may_follow(a, b) or (can_open(a) and follow_problem(a, b, opening=True) is None)]
         if not pairs:
             notes.append(f"{where} is never used: " + (follow_problem(left[0], right[0]) if len(left) == len(right) == 1 else
                                                          "no clip of the second side may follow one of the first"))
@@ -642,7 +661,7 @@ def run(job: Path, state: dict, *, joins: Path | None, mix: bool, max_clips: int
     audit, summary = batch.audit(resolved, state.get("decisions", {})) if resolved else ([], {})
     target = job / "config/plan-draft.json"
     write(target, {"outputs": outputs})
-    openings = sum(1 for clip in walker.starts if walker.next[clip["key"]])
+    openings = sum(1 for clip in walker.starts if walker.after_opening[clip["key"]])
     endings = len({right for _, right in walker.relation if by_key[right]["roles"][-1] in ("payoff", "cta")})
     lines = [f"accepted joins: {len(accepted)} clip pairs ({openings} openings, {endings} endings)"]
     lines += [f"  note: {note}" for note in notes]
