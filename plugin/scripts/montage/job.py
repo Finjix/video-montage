@@ -16,7 +16,14 @@ DECISIONS = {
     "min_sources_per_output": lambda v: type(v) is int and v in (1, 2),
     "bgm_repetition": lambda v: v is True,
     "min_celebrities_per_output": lambda v: type(v) is int and 2 <= v <= 8,
+    "max_celebrities_per_output": lambda v: type(v) is int and 1 <= v <= 8,
 }
+
+
+def cast_range(decisions: dict) -> tuple[int, int | None]:
+    """Fewest and most registered celebrities a video may feature (the user's decisions; no maximum by default)."""
+    return (decisions.get("min_celebrities_per_output", {}).get("value", 1),
+            decisions.get("max_celebrities_per_output", {}).get("value"))
 
 
 def check_decision(key: str, row) -> dict:
@@ -91,9 +98,11 @@ def init(order: dict, job_dir: Path | None = None) -> tuple[Path, dict]:
     if not celebrities or len({c["person_id"] for c in celebrities}) != len(celebrities):
         raise ValueError("celebrities must list each selected celebrity once")
     decisions = {key: check_decision(key, value) for key, value in (order.get("decisions") or {}).items()}
-    cast = decisions.get("min_celebrities_per_output", {}).get("value", 1)
+    cast, most = cast_range(decisions)
     if cast > len(celebrities):
         raise ValueError(f"decisions.min_celebrities_per_output is {cast} but only {len(celebrities)} celebrities are registered")
+    if most is not None and most < cast:
+        raise ValueError(f"decisions.max_celebrities_per_output {most} is below min_celebrities_per_output {cast}")
     minimum = decisions.get("min_sources_per_output", {}).get("value", 3)
     if len(paths) < minimum:
         raise ValueError(f"{len(paths)} source files cannot give each video {minimum} different sources; ask the user now "
@@ -143,5 +152,8 @@ def save(job: Path, state: dict) -> None:
 def decide(job: Path, key: str, value, instruction: str) -> dict:
     state = load(job)
     state.setdefault("decisions", {})[key] = check_decision(key, {"value": value, "instruction": instruction})
+    least, most = cast_range(state["decisions"])
+    if most is not None and most < least:
+        raise ValueError(f"max_celebrities_per_output {most} is below min_celebrities_per_output {least}")
     save(job, state)
     return state["decisions"]

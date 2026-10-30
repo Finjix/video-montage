@@ -86,6 +86,7 @@ def resolve(job: Path, state: dict, plan_path: Path) -> tuple[dict, list[dict], 
     plan = read(plan_path)
     outputs, errors, summary = PLAN.resolve(plan, job, state)
     scripts = [line for output in outputs for line in (*PLAN.script(output), "")]
+    (job / "reports").mkdir(exist_ok=True)
     (job / "reports/scripts.md").write_text("\n".join(scripts), encoding="utf-8")
     return plan, outputs, errors, summary
 
@@ -118,7 +119,7 @@ def cmd_routes(args) -> int:
     job = args.job_dir.resolve()
     state = JOB.load(job)
     show(ROUTES.run(job, state, joins=args.joins, mix=args.mix, max_clips=args.max_clips, seconds=args.seconds,
-                    fresh=args.fresh))
+                    fresh=args.fresh, avoid=[path.resolve() for path in args.avoid]))
     return 0
 
 
@@ -282,6 +283,9 @@ def main() -> None:
     routes.add_argument("--max-clips", type=int, help="optional cap on clips per video (default: none, the 17-30 s window decides)")
     routes.add_argument("--seconds", type=float, default=40.0, help="search time limit")
     routes.add_argument("--fresh", action="store_true", help="with --joins: compose the batch anew, ignoring the current plan's videos")
+    routes.add_argument("--avoid", type=Path, action="append", default=[],
+                        help="with --joins: job dir of an earlier batch on the same footage; new videos keep the pairwise "
+                             "limits against its plan too (repeatable)")
     command("render", cmd_render).add_argument("--plan", type=Path, required=True)
     packaging = command("package", cmd_package)
     packaging.add_argument("--config", type=Path)

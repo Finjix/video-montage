@@ -46,6 +46,24 @@ def position_cap(count: int) -> int:
     return max(2, int(count * LIMITS["position_share"]))
 
 
+def timing(clips: list[dict]) -> dict:
+    """Material (source file plus normalized words of each unit) -> frames of the video it fills."""
+    held = {}
+    for clip in clips:
+        share = clip["frames"] / max(1, len(clip["unit_texts"]))
+        for text in clip["unit_texts"]:
+            key = (clip["sha256"], normalize(text))
+            held[key] = held.get(key, 0) + share
+    return held
+
+
+def shared_time(left: dict, right: dict) -> float:
+    """Share of the shorter video's running time that the other video also shows (same material, any position)."""
+    common = left.keys() & right.keys()
+    shared = min(sum(left[key] for key in common), sum(right[key] for key in common))
+    return shared / max(1, min(sum(left.values()), sum(right.values())))
+
+
 def trigram_similarity(left: str, right: str) -> float:
     def grams(value):
         return {value[i:i + 3] for i in range(max(1, len(value) - 2))}

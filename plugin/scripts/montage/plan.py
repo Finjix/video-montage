@@ -241,9 +241,9 @@ def clip_beats(source: dict, units: list[dict]) -> tuple[list[dict], list[str]]:
 
 
 def resolve_output(output: dict, sources: dict, registered: set[str], games: list[str], min_sources: int,
-                   cache: dict | None = None, min_cast: int = 1) -> tuple[dict, list[str]]:
-    """`cache` (optional) keeps the in/out options of each clip across many calls on one catalog; `min_cast` is the
-    number of registered celebrities each video must feature (the user's decision)."""
+                   cache: dict | None = None, min_cast: int = 1, max_cast: int | None = None) -> tuple[dict, list[str]]:
+    """`cache` (optional) keeps the in/out options of each clip across many calls on one catalog; `min_cast` and
+    `max_cast` bound the number of registered celebrities each video features (the user's decisions)."""
     if not isinstance(output, dict):
         raise PlanError("each output is an object with plan_id, clips and transitions")
     pid = output.get("plan_id")
@@ -342,6 +342,9 @@ def resolve_output(output: dict, sources: dict, registered: set[str], games: lis
     if len(featured) < min_cast:
         errors.append(f"features {len(featured)} celebrities; the user asked for >= {min_cast} per video: add clips of "
                       "the missing celebrities")
+    if max_cast is not None and len(featured) > max_cast:
+        errors.append(f"features {len(featured)} celebrities; the user asked for <= {max_cast} per video: replace the clips "
+                      "of the extra celebrities")
     transitions = output.get("transitions") or []
     if not isinstance(transitions, list) or not all(isinstance(row, dict) for row in transitions):
         errors.append("transitions is a list of {relation, reason} objects")
@@ -364,6 +367,7 @@ def resolve(plan: dict, job, state: dict) -> tuple[list[dict], dict[str, list[st
     decisions = state.get("decisions", {})
     min_sources = decisions.get("min_sources_per_output", {}).get("value", MIN_SOURCES)
     min_cast = decisions.get("min_celebrities_per_output", {}).get("value", 1)
+    max_cast = decisions.get("max_celebrities_per_output", {}).get("value")
     outputs, errors = [], {}
     rows = plan.get("outputs") if isinstance(plan, dict) else None
     if not isinstance(rows, list) or not rows:
@@ -380,7 +384,8 @@ def resolve(plan: dict, job, state: dict) -> tuple[list[dict], dict[str, list[st
     for row in rows:
         pid = row.get("plan_id") if isinstance(row, dict) else None
         try:
-            resolved, problems = resolve_output(row, sources, registered, games, min_sources, min_cast=min_cast)
+            resolved, problems = resolve_output(row, sources, registered, games, min_sources, min_cast=min_cast,
+                                                max_cast=max_cast)
         except PlanError as error:
             resolved, problems = {}, [str(error)]
         if problems:

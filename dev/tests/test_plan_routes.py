@@ -225,6 +225,22 @@ class Routes(unittest.TestCase):
                                         sources, {WU, XU}, GAMES, 3, min_cast=3)
         self.assertTrue(any("features 2 celebrities" in error for error in errors))
 
+    def test_max_cast_keeps_only_routes_featuring_no_more_celebrities(self):
+        data = catalog(wu_sources=3)
+        found, _ = ROUTES.clips(data, {WU, XU})
+        sources = {s["id"]: s for s in data["sources"]}
+        links = lambda a, b: (ROUTES.relations(a, b) or [None])[0]
+        verified, _ = ROUTES.search(found, links, min_sources=3, mix=True, max_clips=4, seconds=10, max_cast=1,
+                                    verify=ROUTES.verifier(sources, {WU, XU}, GAMES, 3, max_cast=1))
+        self.assertTrue(verified)
+        self.assertTrue(all(len(row["resolved"]["protagonists"]) == 1 for row in verified))
+        _, errors = PLAN.resolve_output({"plan_id": "P01", "clips": FOUR_CLIPS, "transitions": FOUR_LINKS},
+                                        sources, {WU, XU}, GAMES, 3, max_cast=1)
+        self.assertTrue(any("<= 1 per video" in error for error in errors))
+        self.assertEqual(JOB.cast_range({"min_celebrities_per_output": {"value": 2},
+                                         "max_celebrities_per_output": {"value": 2}}), (2, 2))
+        self.assertEqual(JOB.cast_range({}), (1, None))
+
     def test_min_cast_above_max_clips_is_refused(self):
         with self.assertRaisesRegex(ValueError, "cannot feature 5 celebrities"):
             ROUTES.run(Path("no-job"), dict(state(1), decisions={"min_celebrities_per_output": {"value": 5}}),
@@ -476,6 +492,42 @@ class ComposeAndSolve(unittest.TestCase):
         self.assertEqual([e for e in batch.audit(resolved, {})[0]], [])
         places = [batch.places(row["clips"]) for row in resolved]
         self.assertTrue(all(batch.same_position_share(a, b) <= .25 for i, a in enumerate(places) for b in places[i + 1:]))
+
+    def test_compose_keeps_the_quarter_against_another_batch(self):
+        data = topical(catalog())
+        found, _ = ROUTES.clips(data, {WU, XU})
+        sources = {s["id"]: s for s in data["sources"]}
+        accepted = {(a["key"], b["key"]): {"relation": "progression", "reason": "synthetic", "weak": False}
+                    for a in found for b in found if ROUTES.Walker.may_follow(a, b)}
+        walker = ROUTES.Walker(found, lambda a, b: (accepted.get((a["key"], b["key"])) or {}).get("relation"),
+                               min_sources=3, mix=True)
+        verify = ROUTES.verifier(sources, {WU, XU}, GAMES, 3)
+        first = ROUTES.compose(walker, verify, 3, accepted, seconds=30)
+        others = [row["profile"] for row in first]
+        second = ROUTES.compose(walker, verify, 3, accepted, seconds=30, others=others)
+        self.assertTrue(second)
+        self.assertTrue(all(batch.same_position_share(row["profile"]["places"], other["places"]) <= .25
+                            for row in second for other in others))
+        self.assertFalse(ROUTES.Usage(3, others).fits(first[0]["profile"]))
+
+    def test_an_exact_cast_size_spreads_videos_over_the_cast_groups(self):
+        lin = "person:lin-zi-cong"
+        data = catalog(wu_sources=2)
+        for source in data["sources"][4:]:
+            for shot in source["shots"]:
+                shot["people"] = [lin]
+            for unit in source["units"]:
+                unit["speaker"] = lin
+        found, _ = ROUTES.clips(data, {WU, XU, lin})
+        sources = {s["id"]: s for s in data["sources"]}
+        accepted = {(a["key"], b["key"]): {"relation": "progression", "reason": "synthetic", "weak": False}
+                    for a in found for b in found if ROUTES.Walker.may_follow(a, b)}
+        walker = ROUTES.Walker(found, lambda a, b: (accepted.get((a["key"], b["key"])) or {}).get("relation"),
+                               min_sources=3, mix=True, min_cast=2, max_cast=2)
+        chosen = ROUTES.compose(walker, ROUTES.verifier(sources, {WU, XU, lin}, GAMES, 3, min_cast=2, max_cast=2),
+                                3, accepted, seconds=30)
+        self.assertEqual(len(chosen), 3)
+        self.assertEqual(len({tuple(row["resolved"]["protagonists"]) for row in chosen}), 3)
 
     def test_a_narrow_band_off_the_six_frame_grid_is_found(self):
         option = lambda pieces, cost: {"pieces": pieces, "total": sum(pieces), "cost": cost}

@@ -10,7 +10,7 @@ inspects or prefetches it; it needs no job). Long commands print progress lines 
 | `prepare` | frame clock, camera cuts, speech recognition, units with clean cut points, sheets (`--fresh` recognizes again) | ~1 min per 10 sources (first use: +30-60 min of downloads) |
 | `annotate --file <json>` | applies people, speakers, transcript fixes and beats; rewrites the catalog | seconds (+ aligner load when text changed) |
 | `routes [--mix]` | cuttable clips, unusable beats with reasons, topics, joins of sampled verified routes → `reports/routes.md` | at most `--seconds` (40) |
-| `routes --joins <json> [--fresh]` | composes `config/plan-draft.json` for the whole batch from the accepted joins | 10-60 s |
+| `routes --joins <json> [--fresh] [--avoid <job_dir>]` | composes `config/plan-draft.json` for the whole batch from the accepted joins | 10-60 s |
 | `check --plan <json>` | exact cut frames and every rule → `reports/scripts.md` | < 1 s |
 | `render --plan <json>` | clean videos, QC, subtitle drafts, cut sheets (changed outputs only) | ~15 s per 3 videos |
 | `package [--config <json>]` | designs, encodes, checks and publishes (changed outputs only) | ~25-40 s per video, 4 in parallel |
@@ -37,7 +37,10 @@ inspects or prefetches it; it needs no job). Long commands print progress lines 
 - `decisions` (optional): `min_sources_per_output` 1 or 2 (default 3 different source files per video);
   `bgm_repetition` `true` (one track may serve more than eight videos); `min_celebrities_per_output` 2-8 when the
   user asks for several celebrities in every video (`check` enforces it, `routes` mixes casts and lists only routes
-  featuring that many; raise `--max-clips` above it for routes where a source returns).
+  featuring that many; raise `--max-clips` above it for routes where a source returns);
+  `max_celebrities_per_output` 1-8 caps it (a "two-person" batch is min 2 and max 2; with min = max below the whole
+  cast, `routes --joins` spreads the videos over the possible cast groups, each new video taking the least-used group
+  a route can still fill).
 
 ## Catalog (`prepare`)
 
@@ -132,7 +135,12 @@ file it has not used yet, all inside the batch limits (two videos share at most 
 material sits at one position in at most 25% of the batch). It writes `config/plan-draft.json` (outputs with a weak
 join carry a note) and prints the clips and sources per video, the repetition figures, the videos per celebrity and,
 when short, what limited it. A video already in `config/plan.json` keeps its plan ID, so render and package reuse its
-work.
+work. When several batches are cut from the same footage (say two-, three- and four-person batches), give each later
+batch `--avoid <job_dir>` of every earlier one (their jobs share the catalog: copy `catalog/`, the annotations and the
+joins into the new job, with the old job folder in the copied catalog's paths rewritten, before `annotate`): its videos then also share at most a third of their
+positions with any video of those plans. A newly composed video also shows another video's
+material for at most 60% of the shorter one's running time, wherever it sits, so one long clip cannot make two videos
+look alike.
 
 ## Plan (`check`, `render`)
 
