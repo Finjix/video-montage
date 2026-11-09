@@ -9,7 +9,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-MANIFEST = ROOT / "plugin/assets/runtime.json"
+MANIFEST = ROOT / "assets/runtime.json"
 
 
 def check(item):

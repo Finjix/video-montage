@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "plugin/scripts"))
+sys.path.insert(0, str(ROOT / "scripts"))
 from montage import cli, runtime
 
 

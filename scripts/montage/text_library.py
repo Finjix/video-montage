@@ -28,7 +28,7 @@ DIGITS = {"0": "0零〇", "1": "1一幺", "2": "2二两", "3": "3三", "4": "4�
 
 
 def load(job) -> dict:
-    """The job's copy plus every entry added to the plugin library since the job was created."""
+    """The job's copy plus every entry added to the skill's library since the job was created."""
     own = read(job / "config/text_library.json")
     ids, texts = {e["id"] for e in own["entries"]}, {e["text"] for e in own["entries"]}
     extra = [e for e in read(LIBRARY)["entries"] if e["id"] not in ids and e["text"] not in texts]

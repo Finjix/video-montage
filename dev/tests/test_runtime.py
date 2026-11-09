@@ -175,11 +175,11 @@ class Devices(unittest.TestCase):
 
 
 class Boundaries(unittest.TestCase):
-    def test_cache_defaults_to_plugin_directory(self):
+    def test_cache_defaults_to_skill_directory(self):
         with patch.dict(os.environ, {"VIDEO_MONTAGE_CACHE_DIR": ""}):
             self.assertEqual(runtime.cache(), (runtime.ROOT / "runtime-cache").resolve())
 
-    def test_cache_can_be_overridden_inside_plugin(self):
+    def test_cache_can_be_overridden_inside_skill(self):
         with patch.dict(os.environ, {"VIDEO_MONTAGE_CACHE_DIR": str(runtime.ROOT / "cache")}):
             self.assertEqual(runtime.cache(), (runtime.ROOT / "cache").resolve())
 
@@ -212,8 +212,7 @@ assert plan.MIN_FRAMES == 1020
                 cli.main()
         self.assertEqual(outcome.exception.code, 3)
 
-    def test_manifest_and_upload_folder(self):
-        import build_plugin
-        metadata, files = build_plugin.validate()
-        self.assertRegex(metadata["version"], r"^\d+\.\d+\.\d+$")
+    def test_skill_folder(self):
+        import check_skill
+        files = check_skill.validate()
         self.assertLess(sum(p.stat().st_size for p in files), 10 * 1024**2)

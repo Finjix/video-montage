@@ -99,7 +99,7 @@ mix: Mixkit (direct `https://assets.mixkit.co/music/<id>/<id>.mp3`), Internet Ar
 (CC0 filter), Pixabay Music. Register each track:
 
 ```text
-& "<plugin_root>/scripts/video_montage.cmd" fetch-bgm --job-dir <job_dir> --url <direct audio link>
+& "<skill_root>/scripts/video_montage.cmd" fetch-bgm --job-dir <job_dir> --url <direct audio link>
   --license mixkit --license-url <license page> --license-evidence "<statement quoted from the page>"
   --source-page <track page> --title "<title>" --creator "<artist>" --instrumental
 ```

@@ -7,15 +7,15 @@ description: Produce, revise and reburn batches of Chinese spoken-word (口播) 
 
 ## Runtime
 
-- Windows 10/11 x64 with a local executor. The plugin root is two directories above this file.
-- Every command: `& "<plugin_root>/scripts/video_montage.cmd" <command> --job-dir <job_dir> ...`. Python, FFmpeg,
-  libraries and models download into the plugin's `runtime-cache` on first use; never install or build an
+- Windows 10/11 x64 with a local shell. `<skill_root>` is the folder that holds this file.
+- Every command: `& "<skill_root>/scripts/video_montage.cmd" <command> --job-dir <job_dir> ...`. Python, FFmpeg,
+  libraries and models download into `<skill_root>/runtime-cache` on first use; never install or build an
   environment yourself. Results go to stdout, progress to stderr.
 - The first `prepare` on a machine downloads about 10 GB (PyTorch, two speech models) and can take 30-60 min; it
   prints progress lines. Wait for it to finish (settle the BGM meanwhile); never inspect or poll `runtime-cache`.
-- Read the output, not the exit code (Codex shells report every failure as 1). `error:` or a list of problems: the
+- Read the output, not the exit code (some shells report every failure as 1). `error:` or a list of problems: the
   input broke a rule; fix what it lists and run the same command again. `runtime error:` / `media error:`: fix the
-  cause it names (network, disk, a moved file) and run it again. A Python traceback is a plugin bug: do not retry it
+  cause it names (network, disk, a moved file) and run it again. A Python traceback is a skill bug: do not retry it
   unchanged; change the input that triggers it and name it in the final summary. Every command can be re-run and
   redoes only what changed.
 - The scripts do all media work, timing, route search and checking. Your part is editorial: transcript fixes,
@@ -35,7 +35,7 @@ default below, carry on, and report it in the final summary.
 
 | Situation | Default |
 | --- | --- |
-| Unclear speech | the most likely words from context, the scene and `<plugin_root>/assets/text-library.json` |
+| Unclear speech | the most likely words from context, the scene and `<skill_root>/assets/text-library.json` |
 | Who is on screen | judge from the sheets (folder names are only a hint); tag doubtful shots so they are not planned |
 | Too few coherent routes for the count, or a registered celebrity in no video | work down the ladder in [editing](references/editing.md#reaching-the-count) |
 | Too few BGM tracks in the pack | download licensed tracks yourself ([packaging](references/packaging.md#bgm)) |

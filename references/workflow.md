@@ -1,6 +1,6 @@
 # Commands and file formats
 
-All commands: `& "<plugin_root>/scripts/video_montage.cmd" <command> --job-dir <job_dir>`. Times assume a warm
+All commands: `& "<skill_root>/scripts/video_montage.cmd" <command> --job-dir <job_dir>`. Times assume a warm
 runtime cache; the first use of a feature adds its download (`runtime --feature base|media|packaging|asr [--install]`
 inspects or prefetches it; it needs no job). Long commands print progress lines on stderr: wait for them.
 
@@ -81,7 +81,7 @@ One file for all sources; re-run `annotate` with the complete file after every c
 - `speaker` / `speakers`: who talks (default: the single registered celebrity in `people`).
 - `text`: corrected unit text; `""` deletes the unit (noise, hallucination); a list splits it into `U31.1`,
   `U31.2`... Keep the words in spoken order: the aligner re-times them. Library terms with digits take their
-  library spelling on their own (金子六六六 -> `金子666`); the library is the plugin's current
+  library spelling on their own (金子六六六 -> `金子666`); the library is the skill's current
   `assets/text-library.json` plus the job's copy, so entries added after `init` apply on the next `annotate`.
 - `exclude`: units that must never be used, e.g. beside a transition (zoom blur, flash) a sheet shows but the
   catalog missed. `exclude` and `speakers` name units by their current IDs (a split unit is `U31.1`...).
