@@ -7,7 +7,8 @@ from unittest.mock import patch
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "scripts"))
+SKILL = ROOT / "skill/video-montage"
+sys.path.insert(0, str(SKILL / "scripts"))
 from montage import cli, runtime
 
 

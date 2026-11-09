@@ -18,7 +18,8 @@ sys.dont_write_bytecode = True
 sys.stdout.reconfigure(encoding="utf-8")
 sys.stderr.reconfigure(encoding="utf-8")
 ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(ROOT / "scripts"))
+SKILL = ROOT / "skill/video-montage"
+sys.path.insert(0, str(SKILL / "scripts"))
 from montage import runtime
 from montage.common import read, write, run, FFMPEG
 
@@ -30,7 +31,7 @@ PEOPLE = [("person:wu-yue", "吴樾"), ("person:lin-zi-cong", "林子聪"), ("pe
 
 
 def step(*args):
-    result = subprocess.run([sys.executable, "-B", str(ROOT / "scripts/video_montage.py"), *map(str, args)],
+    result = subprocess.run([sys.executable, "-B", str(SKILL / "scripts/video_montage.py"), *map(str, args)],
                             capture_output=True, text=True, encoding="utf-8")
     print(result.stdout, flush=True)
     if result.returncode:

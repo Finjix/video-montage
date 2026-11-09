@@ -1,13 +1,13 @@
-"""Check that the repository root is a valid, distributable Agent Skill.
+"""Check that skill/video-montage/ is a valid, distributable Agent Skill.
 
-The root folder is the skill: SKILL.md beside references/, scripts/, assets/ and requirements/. Zip the root
-folder to share it (leave out .git/, dev/ and the downloaded runtime-cache/).
+skill/video-montage/ holds SKILL.md beside references/, scripts/, assets/ and requirements/. Zip that folder to
+share it (the downloaded runtime-cache/ inside it is Git-ignored and can be left out).
 """
 import json
 import re
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[1] / "skill/video-montage"
 NAME = "video-montage"
 PARTS = ("SKILL.md", "references", "scripts", "assets", "requirements")
 

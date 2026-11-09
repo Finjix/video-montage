@@ -9,7 +9,8 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-MANIFEST = ROOT / "assets/runtime.json"
+SKILL = ROOT / "skill/video-montage"
+MANIFEST = SKILL / "assets/runtime.json"
 
 
 def check(item):

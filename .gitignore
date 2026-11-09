@@ -4,7 +4,7 @@ __pycache__/
 /dist/
 /dev/smoke/latest.json
 # Runtime downloads stay local and must not be committed.
-/runtime-cache/
-/assets/dependencies/
-/assets/packaging/animations/parameters/*.npz
+/skill/video-montage/runtime-cache/
+/skill/video-montage/assets/dependencies/
+/skill/video-montage/assets/packaging/animations/parameters/*.npz
 *.partial

@@ -4,13 +4,13 @@
 
 ## 使用与发布
 
-仓库根目录就是技能目录：`SKILL.md` 与 `references/`、`scripts/`、`assets/`（业务素材和小型包装素材）、`requirements/` 并列。把根目录压缩成 ZIP 即可分发（`.git/`、`dev/` 和首次运行后下载的 `runtime-cache/`、`assets/dependencies/` 不需要带上），解压到任意技能目录（例如 `~/.claude/skills/video-montage/`）即可使用。`python dev/check_skill.py` 检查根目录是否是可直接分发的技能。
+技能放在 `skill/video-montage/`：里面是 `SKILL.md` 与 `references/`、`scripts/`、`assets/`、`requirements/`。直接压缩 `skill/video-montage/` 文件夹即可打包分发（首次运行后在里面下载的 `runtime-cache/` 不需要带上），解压到任意技能目录（例如 `~/.claude/skills/video-montage/`）即可使用。仓库根目录只放说明文档和 `dev/`（测试与验证工具）。`python dev/check_skill.py` 检查 `skill/video-montage/` 是否是可直接分发的技能。
 
 技能只包含说明、脚本和素材。`.cmd` 入口负责转发业务参数和 JSON stdin，PowerShell 启动器负责准备环境，以兼容 Windows PowerShell 5.1 的独立 `-` 参数限制。安装时不下载运行环境，首次调用相关功能时自动准备；无需预装 Python，不需修改系统 PATH。AI 阅读 `SKILL.md` 后通过统一入口操作：
 
 ```powershell
-& "scripts/video_montage.cmd" --help
-& "scripts/video_montage.cmd" runtime --feature base
+& "skill/video-montage/scripts/video_montage.cmd" --help
+& "skill/video-montage/scripts/video_montage.cmd" runtime --feature base
 ```
 
 流程：`init` → `prepare` → `annotate` → `routes` → `check` → `render` → `package`。`routes` 列出所有能干净剪出的片段和通过全部机检的衔接，AI 只需判断衔接是否通顺，再由 `routes --joins` 生成满足批量限制的整批计划草稿。AI 只在开始时一次性确认必要信息，之后遇到不确定的问题按技能中的默认做法继续出片，并在最终总结中说明。业务参数、工单格式与已有任务文件兼容；详细格式见技能内的 `references/workflow.md`。
@@ -34,9 +34,9 @@
 
 ```powershell
 # 仅检查，不触发依赖或模型下载
-& ./scripts/video_montage.cmd runtime --feature asr
+& ./skill/video-montage/scripts/video_montage.cmd runtime --feature asr
 # 提前下载指定功能所需依赖和模型
-& ./scripts/video_montage.cmd runtime --feature asr --install
+& ./skill/video-montage/scripts/video_montage.cmd runtime --feature asr --install
 ```
 
 命令结果输出到 stdout，准备和下载进度输出到 stderr。退出码 `0` 表示成功，`2` 表示输入或剪辑规则错误，`3` 表示运行时故障。下载失败后解决提示中的网络、空间或权限问题，再运行原命令；成功文件会复用，未完成文件不会当作有效资源。
