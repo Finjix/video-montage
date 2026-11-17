@@ -6,7 +6,7 @@ inspects or prefetches it; it needs no job). Long commands print progress lines 
 
 | Command | Does | Typical time |
 | --- | --- | --- |
-| `init --work-order -` | validates the order (JSON on stdin or a file) and the asset pack (text pins, exactly one disclaimer), creates the delivery folder and job dir, reports the asset pack | seconds |
+| `init --work-order - [--job-dir <job_dir>]` | validates the order (JSON on stdin or a file) and the asset pack (text pins, exactly one disclaimer), listing every gap at once; creates the delivery folder and job dir and reports the asset pack. `--job-dir` of an earlier `init` replaces that job while it has not been prepared | seconds |
 | `prepare` | frame clock, camera cuts, speech recognition, units with clean cut points, sheets (`--fresh` recognizes again) | ~1 min per 10 sources (first use: +30-60 min of downloads) |
 | `annotate --file <json>` | applies people, speakers, transcript fixes and beats; rewrites the catalog | seconds (+ aligner load when text changed) |
 | `routes [--mix]` | cuttable clips, unusable beats with reasons, topics, joins of sampled verified routes → `reports/routes.md` | at most `--seconds` (40) |

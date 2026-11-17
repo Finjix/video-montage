@@ -36,6 +36,7 @@ try {
         [IO.Compression.ZipFile]::ExtractToDirectory($archive, $uvTemp)
         [IO.Directory]::CreateDirectory($uvDir) | Out-Null
         [IO.File]::Copy((Join-Path $uvTemp 'uv.exe'), $uv, $true)
+        Remove-Item -LiteralPath $uvTemp -Recurse -Force
         [IO.File]::Delete($archive)
     }
     $python = Join-Path $cacheRoot 'environment\Scripts\python.exe'
@@ -58,6 +59,6 @@ try {
     & $python -B (Join-Path $PSScriptRoot 'video_montage.py') @args
     exit $LASTEXITCODE
 } catch {
-    [Console]::Error.WriteLine('Runtime error: ' + $_.Exception.Message)
+    [Console]::Error.WriteLine('runtime error: ' + $_.Exception.Message)
     exit 3
 } finally { if ($null -ne $lockStream) { $lockStream.Dispose() } }

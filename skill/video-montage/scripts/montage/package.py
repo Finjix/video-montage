@@ -345,6 +345,9 @@ def prepare_items(job: Path, state: dict, config: dict) -> tuple[list[dict], dic
         output = record["output"]
         problems, notes = list(record["errors"]), []
         subtitle = job / "subtitles" / f"subtitle-{pid}.txt"
+        if not subtitle.is_file():
+            errors[pid] = [f"{subtitle.name} is missing: run render to draft it again"]
+            continue
         try:
             cues = parse_srt(subtitle, round(record["frames"] * 1000 / 60))
         except ValueError as error:

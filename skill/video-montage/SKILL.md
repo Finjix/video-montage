@@ -1,6 +1,6 @@
 ---
 name: video-montage
-description: Produce, revise and reburn batches of Chinese spoken-word (口播) celebrity montage videos (17-30 s, 1440x2560, 60 fps) from source footage, with subtitles, nameplates, text pins, disclaimer and BGM.
+description: Produce, revise and reburn batches of Chinese spoken-word (口播) celebrity montage videos (17-30 s, 1440x2560, 60 fps) from source footage, with subtitles, nameplates, text pins, disclaimer and BGM. Use when the user asks for 混剪/口播混剪 videos cut from celebrity footage, or to edit, re-subtitle or reburn videos of an earlier montage batch. Windows only.
 ---
 
 # Video montage
@@ -31,7 +31,9 @@ the footage (files and count), the asset pack (text pins, the one disclaimer, BG
 videos, the celebrities and their nameplates, and that every video is delivered fully packaged. List every gap
 (a missing disclaimer, text pin or nameplate, too few source files) and ask the user to fill it. Run `init` before
 asking so the message can name what the pack holds; `init` refuses an asset pack without text pins or with other
-than one disclaimer. Start `prepare` only after the user confirms and every gap is filled. The exception is BGM:
+than one disclaimer, listing every gap at once. When the user fills gaps or changes the order, run `init` again
+with `--job-dir` of the first run: it replaces that job until `prepare` has run, so no second folder is left behind.
+Start `prepare` only after the user confirms and every gap is filled. The exception is BGM:
 a shortfall is yours to download, so name it in the message but do not wait for it.
 
 From then on, work to the published batch without asking. An open question never stops production: take the

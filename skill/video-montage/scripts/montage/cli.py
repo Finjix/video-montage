@@ -38,7 +38,8 @@ def cmd_init(args) -> int:
              f"sources: {len(state['sources'])}, outputs requested: {count}",
              f"asset pack: {len(assets['text_pins'])} text pins, {len(assets['disclaimers'])} disclaimer PNGs, "
              f"{len(assets['audio'])} audio files (BGM needs {need} tracks; download any shortfall with fetch-bgm)"]
-    show(lines + ["next: prepare"])
+    show(lines + ["next: confirm the footage, asset pack, count and celebrities with the user; prepare only after they "
+                  f"agree (if they change the order: init again with --job-dir {job})"])
     return 0
 
 

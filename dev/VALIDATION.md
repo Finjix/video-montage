@@ -1,6 +1,22 @@
-# Plugin 0.2.0 verification
+# Verification log
 
-Verified on Windows x64, 2026-10-21.
+Newest entries last. Entries before 2026-11 describe the skill when it shipped as a Codex plugin (`plugin/`,
+`dev/build_plugin.py`, -23 LUFS); it is now the standard skill in `skill/video-montage/`, checked with
+`python dev/check_skill.py`. Reproduce:
+
+```powershell
+& ./skill/video-montage/scripts/video_montage.cmd runtime --feature packaging --install
+# Use the private environment's Python so the optional inference fallback tests run.
+& ./skill/video-montage/runtime-cache/environment/Scripts/python.exe -B dev/run_tests.py
+python -B dev/test_bootstrap.py
+python -B dev/check_skill.py
+# Requires the repository's local .素材 folder and the asr feature; creates outputs outside the repository.
+& ./skill/video-montage/runtime-cache/environment/Scripts/python.exe -B dev/smoke/e2e.py
+```
+
+## 2026-10-21 plugin 0.2.0
+
+Verified on Windows x64.
 
 - 28 regression tests cover downloads, SHA-256 validation, source fallback, interrupted-file recovery, concurrent callers, offline reuse, immutable package boundaries, Unicode cache receipts, optional imports, GPU detection and inference fallback.
 - Cold bootstrap passed with Python removed from PATH, Windows PowerShell 5.1, a plugin directory containing spaces and Chinese characters, and a separate empty cache. Chinese JSON on stdin, exit codes, subsequent offline runs and an unchanged plugin tree passed.
@@ -9,22 +25,6 @@ Verified on Windows x64, 2026-10-21.
 - Ten existing local source videos produced three integration outputs: 21.4 s, 21.15 s and 19.05 s. Planning checks, clean-render QC, packaging and publication passed. Packaging a second time preserved the output hashes. The original packager reported several subtitle cues shorter than 800 ms; these are its existing non-blocking warnings. Generated annotations are test fixtures, not editorial approval of the content.
 - Warm `prepare`, unchanged `annotate` and `check` passed with both networking and ASR model preparation explicitly blocked.
 - The upload ZIP contains 63 files, approximately 2.72 MiB compressed / 6.76 MiB extracted, with one plugin root and no runtime binaries, model weights, animation tables or bytecode. Manifest fields, icon dimensions, resource references, archive limits and ZIP integrity passed.
-
-The original `dev/` test suite and smoke fixtures were absent in the implementation checkout. The earlier 58-test baseline therefore could not be rerun; the tests above are the available verification for this change.
-
-Reproduce:
-
-```powershell
-& ./plugin/scripts/video_montage.cmd runtime --feature packaging --install
-# Use the private environment's Python so the optional inference fallback tests run.
-& "$env:LOCALAPPDATA/video-montage/environment/Scripts/python.exe" -B dev/run_tests.py
-python -B dev/test_bootstrap.py
-python -B dev/build_plugin.py
-# Requires the repository's local .素材 folder; creates outputs outside the repository.
-& "$env:LOCALAPPDATA/video-montage/environment/Scripts/python.exe" -B dev/smoke/e2e.py
-```
-
-Uploading the ZIP, developer identity verification and market review remain portal operations; no market submission was performed.
 
 ## 2026-10-26 review pass
 
@@ -51,3 +51,16 @@ Uploading the ZIP, developer identity verification and market review remain port
   on their side and move out only to clear faces and shoulders; one-frame detections are ignored (P39's game art
   had pushed its plate to x 1044, now 564). On the 220 windows: 103 upper-left, 98 upper-right, 17 lower-left,
   2 lower-right; the same 12 windows touch a face at every spot. 93 regression tests pass.
+
+## 2026-11-17 release review
+
+- Review before release: `init` now lists every gap of a work order in one refusal (asset pack with what it holds,
+  nameplates, cast decisions, source count) and `init --job-dir` replaces a job that has not been prepared, so a
+  changed order after the start confirmation leaves no second delivery folder; its next-step line points to the
+  confirmation instead of `prepare`. `package` reports a deleted subtitle file for that video instead of aborting
+  the run. The launcher prints `runtime error:` like the CLI and removes its uv extraction folder.
+- 102 regression tests pass under the system Python 3.13 (new `test_job_init.py`); `dev/test_bootstrap.py` passes
+  (cold start, Unicode path, JSON stdin, offline reuse, skill folder unchanged); `dev/check_skill.py` passes
+  (66 files, 7.3 MB); `dev/check_download_manifest.py` verified every pinned model file and the FFmpeg archive; the
+  pinned animation tables at commit 31afb920 answer on raw.githubusercontent.com.
+- Not run: `dev/smoke/e2e.py` on real footage (no runtime cache on this machine; it needs the ~10 GB ASR download).
