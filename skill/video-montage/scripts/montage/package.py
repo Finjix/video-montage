@@ -579,5 +579,3 @@ def package(job: Path, state: dict, config: dict) -> dict:
     return {"published": published, "errors": errors, "warnings": warnings,
             "complete": all(pid in rows for pid in plan_ids) and not errors}
 
-
-from montage.delivery import deliver_clean

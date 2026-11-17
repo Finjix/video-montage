@@ -26,9 +26,13 @@ description: Produce, revise and reburn batches of Chinese spoken-word (口播) 
 
 ## Talking to the user
 
-Confirm once, at the start, in a single message, and only what you cannot work out yourself: the footage, the asset
-pack, the count, the celebrities and their nameplates. Add any gap `init` reports (a missing disclaimer or text pin,
-too few source files). If everything is clear, ask nothing and start.
+Always confirm before any command that does media work, in a single message, even when the request looks complete:
+the footage (files and count), the asset pack (text pins, the one disclaimer, BGM tracks found), the number of
+videos, the celebrities and their nameplates, and that every video is delivered fully packaged. List every gap
+(a missing disclaimer, text pin or nameplate, too few source files) and ask the user to fill it. Run `init` before
+asking so the message can name what the pack holds; `init` refuses an asset pack without text pins or with other
+than one disclaimer. Start `prepare` only after the user confirms and every gap is filled. The exception is BGM:
+a shortfall is yours to download, so name it in the message but do not wait for it.
 
 From then on, work to the published batch without asking. An open question never stops production: take the
 default below, carry on, and report it in the final summary.
@@ -51,7 +55,8 @@ network. Say what you tried and the minimum you need.
 Commands and file formats: [workflow](references/workflow.md). Editorial rules: [editing](references/editing.md).
 Packaging: [packaging](references/packaging.md).
 
-1. `init --work-order -` (JSON on stdin) creates `<output_root>/自动化混剪_YYYYMMDD_HHMMSS/temp`, the job dir.
+1. `init --work-order -` (JSON on stdin) creates `<output_root>/自动化混剪_YYYYMMDD_HHMMSS/temp`, the job dir. Then
+   send the confirmation message ([talking to the user](#talking-to-the-user)) and wait for the user's answer.
 2. `prepare` analyses the footage (about 1 min per 10 sources once cached). While it runs, settle the BGM:
    `bgm-assets`, then `fetch-bgm` for any shortfall.
 3. Read the whole catalog and every sheet, then `annotate --file` people, transcript fixes and the beats of every
@@ -87,8 +92,8 @@ Packaging: [packaging](references/packaging.md).
    already allowed up to the batch limits.
 6. **Every celebrity counts.** Each registered celebrity leads or joins videos when their footage allows; one with
    no video is a gap to work on, never an outcome to accept silently.
-7. **Packaged by default.** A batch means finished videos with subtitles, nameplates, one text pin, disclaimer and
-   BGM. Deliver unpackaged (`package --clean`) only when the user asks.
+7. **Always packaged.** Every delivered video has subtitles, nameplates, one text pin, the disclaimer and BGM. There
+   is no unpackaged delivery, even on request: `package` refuses a video missing any of them.
 8. **Delivery folder.** It holds only `<plan_id>.mp4` files and `temp/`. `temp/` holds only what a revision or
    reburn needs, never for people: the pipeline's own folders, your current inputs in `temp/config/` (one file
    per purpose; overwrite drafts instead of keeping copies) and the chosen BGM in `temp/config/bgm/`. Logs, scratch

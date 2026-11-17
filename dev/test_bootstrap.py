@@ -40,9 +40,16 @@ def main():
     # init reads only the PNG header: a transparent 9:16 plate is 1080x1920
     nameplate.write_bytes(bytes.fromhex("89504e470d0a1a0a") + b"\x00\x00\x00\rIHDR" + (1080).to_bytes(4, "big")
                           + (1920).to_bytes(4, "big") + b"\x08\x06\x00\x00\x00")
-    order = {"requested_outputs": 3, "sources": [str(source) for source in sources], "asset_root": str(folder),
+    for name in ("文字钉/文字钉.png", "免责/免责声明.png"):
+        (folder / name).parent.mkdir()
+        (folder / name).write_bytes(nameplate.read_bytes())
+    order ={"requested_outputs": 3, "sources": [str(source) for source in sources], "asset_root": str(folder),
              "output_root": str(folder / "output"),
              "request": "中文 stdin 测试", "celebrities": [{"person_id": "person:test", "name": "测试", "nameplate": str(nameplate)}]}
+    (folder / "免责/免责声明.png").unlink()
+    invoke(["init", "--work-order", "-"], json.dumps(order, ensure_ascii=False), expected=2)
+    assert not (folder / "output").exists(), "a refused init must not create the delivery folder"
+    (folder / "免责/免责声明.png").write_bytes(nameplate.read_bytes())
     result = invoke(["init", "--work-order", "-"], json.dumps(order, ensure_ascii=False))
     job = Path(result.splitlines()[0].split(": ", 1)[1])
     saved = json.loads((job / "job.json").read_text(encoding="utf-8"))

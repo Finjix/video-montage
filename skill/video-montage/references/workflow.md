@@ -6,7 +6,7 @@ inspects or prefetches it; it needs no job). Long commands print progress lines 
 
 | Command | Does | Typical time |
 | --- | --- | --- |
-| `init --work-order -` | validates the order (JSON on stdin or a file), creates the delivery folder and job dir, reports the asset pack | seconds |
+| `init --work-order -` | validates the order (JSON on stdin or a file) and the asset pack (text pins, exactly one disclaimer), creates the delivery folder and job dir, reports the asset pack | seconds |
 | `prepare` | frame clock, camera cuts, speech recognition, units with clean cut points, sheets (`--fresh` recognizes again) | ~1 min per 10 sources (first use: +30-60 min of downloads) |
 | `annotate --file <json>` | applies people, speakers, transcript fixes and beats; rewrites the catalog | seconds (+ aligner load when text changed) |
 | `routes [--mix]` | cuttable clips, unusable beats with reasons, topics, joins of sampled verified routes → `reports/routes.md` | at most `--seconds` (40) |
@@ -14,7 +14,6 @@ inspects or prefetches it; it needs no job). Long commands print progress lines 
 | `check --plan <json>` | exact cut frames and every rule → `reports/scripts.md` | < 1 s |
 | `render --plan <json>` | clean videos, QC, subtitle drafts, cut sheets (changed outputs only) | ~15 s per 3 videos |
 | `package [--config <json>]` | designs, encodes, checks and publishes (changed outputs only) | ~25-40 s per video, 4 in parallel |
-| `package --clean` | publishes the clean videos unpackaged (explicit user request only) | seconds |
 | `status` | what exists so far and the next step | - |
 | `decide --key K --value V --instruction "<text>"` | records a decision (the user's words, or `fallback: ...`) | - |
 | `bgm-assets`, `fetch-bgm ...` | BGM inventory and licensed downloads ([packaging](packaging.md#bgm)) | - |

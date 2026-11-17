@@ -38,11 +38,6 @@ def cmd_init(args) -> int:
              f"sources: {len(state['sources'])}, outputs requested: {count}",
              f"asset pack: {len(assets['text_pins'])} text pins, {len(assets['disclaimers'])} disclaimer PNGs, "
              f"{len(assets['audio'])} audio files (BGM needs {need} tracks; download any shortfall with fetch-bgm)"]
-    if not assets["text_pins"]:
-        lines.append("warning: no text pin PNGs found (folder 文字钉/pin); ask the user now or set defaults.text_pins later")
-    if len(assets["disclaimers"]) != 1:
-        lines.append("warning: expected exactly one disclaimer PNG (folder 免责/disclaimer); ask the user now or set "
-                     "defaults.disclaimer later")
     show(lines + ["next: prepare"])
     return 0
 
@@ -157,11 +152,6 @@ def cmd_render(args) -> int:
 def cmd_package(args) -> int:
     job = args.job_dir.resolve()
     state = JOB.load(job)
-    if args.clean:
-        from montage.delivery import deliver_clean
-        published = deliver_clean(job, state)
-        show(f"published unpackaged: {', '.join(published)} -> {state['delivery_dir']}")
-        return 0
     runtime.ensure("packaging")
     from montage import package as PACKAGE
     stored = job / "config/packaging.json"
@@ -289,7 +279,6 @@ def main() -> None:
     command("render", cmd_render).add_argument("--plan", type=Path, required=True)
     packaging = command("package", cmd_package)
     packaging.add_argument("--config", type=Path)
-    packaging.add_argument("--clean", action="store_true", help="deliver the clean videos without packaging (only on explicit request)")
     command("status", cmd_status)
     decide = command("decide", cmd_decide)
     decide.add_argument("--key", required=True, choices=sorted(JOB.DECISIONS))

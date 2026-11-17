@@ -13,7 +13,7 @@
 & "skill/video-montage/scripts/video_montage.cmd" runtime --feature base
 ```
 
-流程：`init` → `prepare` → `annotate` → `routes` → `check` → `render` → `package`。`routes` 列出所有能干净剪出的片段和通过全部机检的衔接，AI 只需判断衔接是否通顺，再由 `routes --joins` 生成满足批量限制的整批计划草稿。AI 只在开始时一次性确认必要信息，之后遇到不确定的问题按技能中的默认做法继续出片，并在最终总结中说明。业务参数、工单格式与已有任务文件兼容；详细格式见技能内的 `references/workflow.md`。
+流程：`init` → `prepare` → `annotate` → `routes` → `check` → `render` → `package`。`routes` 列出所有能干净剪出的片段和通过全部机检的衔接，AI 只需判断衔接是否通顺，再由 `routes --joins` 生成满足批量限制的整批计划草稿。AI 在开始前必须向用户确认素材、包装素材包（文字钉、免责声明、BGM、名牌）、数量和明星，缺的素材先让用户补齐；素材包没有文字钉或免责声明不是正好一张时 `init` 直接报错。成片一律带完整包装（字幕、名牌、文字钉、免责声明、BGM），不提供无包装交付。确认之后遇到不确定的问题按技能中的默认做法继续出片，并在最终总结中说明。业务参数、工单格式与已有任务文件兼容；详细格式见技能内的 `references/workflow.md`。
 
 成片默认放在桌面的 `自动化混剪_YYYYMMDD_HHMMSS/`，旁边只有任务目录 `temp/`。修改字幕后再次执行 `package`，仅重做有变化的成片。首次下载会增加准备时间。
 
@@ -21,7 +21,7 @@
 
 | 使用功能 | 自动准备 |
 | --- | --- |
-| 基础命令、计划检查、发布无包装成片 | 私有 Python 3.13.15 |
+| 基础命令、计划检查 | 私有 Python 3.13.15 |
 | 素材分析、渲染、BGM 处理 | NumPy 2.5.3、Pillow 12.3.0、FFmpeg/FFprobe 9.0.2 |
 | 字幕动画包装 | 额外安装 OpenCV 5.0.0.93；仅下载实际用到的动画大表 |
 | 识别、校正文字重新对齐 | PyTorch 2.11.0、Transformers 4.57.6、qwen-asr 0.0.6 及两个 Qwen 模型 |

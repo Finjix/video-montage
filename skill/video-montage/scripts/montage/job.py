@@ -84,6 +84,11 @@ def init(order: dict, job_dir: Path | None = None) -> tuple[Path, dict]:
     asset_root = Path(order.get("asset_root", "")).resolve()
     if not asset_root.is_dir():
         raise ValueError(f"asset_root is not a folder: {asset_root}")
+    assets = asset_inventory(asset_root)
+    missing = ([] if assets["text_pins"] else ["no text pin PNGs (folder 文字钉/pin)"]) +         ([] if len(assets["disclaimers"]) == 1 else [f"{len(assets['disclaimers'])} disclaimer PNGs, need exactly one (folder 免责/disclaimer)"])
+    if missing:
+        raise ValueError(f"asset pack {asset_root} is incomplete: {'; '.join(missing)}. Every video is packaged: ask the "
+                         "user to add them to the asset pack, then run init again")
     celebrities = []
     for row in order.get("celebrities", []):
         row = row if isinstance(row, dict) else {"person_id": row}
