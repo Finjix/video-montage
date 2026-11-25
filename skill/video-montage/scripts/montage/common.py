@@ -15,10 +15,18 @@ ROOT = Path(__file__).resolve().parents[2]
 from montage import runtime
 FFMPEG = runtime.Executable("ffmpeg")
 FFPROBE = runtime.Executable("ffprobe")
+DELIVERY_LUFS = -12.0
+DELIVERY_TOLERANCE_LU = 0.1
 LIBRARY = ROOT / "assets/text-library.json"
 REJECTED = ROOT / "assets/rejected-source-intervals.json"
 FONT = ROOT / "assets/packaging/fonts/WenYue-XinQingNianTi-W8.otf"
 _DIGESTS: dict[tuple, str] = {}
+
+
+def delivery_lufs(value: float) -> float:
+    if value != DELIVERY_LUFS:
+        raise ValueError(f"final delivery target_lufs is fixed at {DELIVERY_LUFS:g} LUFS")
+    return DELIVERY_LUFS
 
 
 def desktop() -> Path:

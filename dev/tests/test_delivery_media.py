@@ -62,7 +62,7 @@ class DeliveryMedia(unittest.TestCase):
             self.source(a, "red", "160x96", 24, 2, tone=440, gain=-10)
             self.source(b, "lime", "96x160", 30, 1.5, tone=880, gain=9, delay=0.125)
             self.source(card, "blue", "160x96", 25, 1)
-            assemble(a, b, card, out, target_lufs=-12.0)
+            assemble(a, b, card, out)
 
             info = subprocess.check_output([self.ffprobe, "-v", "error", "-show_streams", "-of", "json", out])
             streams = {s["codec_type"]: s for s in json.loads(info)["streams"]}
@@ -92,16 +92,32 @@ class DeliveryMedia(unittest.TestCase):
             for start, end in ((2.025, 2.100), (3.525, 4.48)):
                 self.assertLess(np.abs(signal[round(start * rate):round(end * rate)]).max(), 0.001)
 
-    def test_audible_card_and_custom_target(self):
+    def test_audible_card_and_final_mix_at_explicit_minus_twelve(self):
         with tempfile.TemporaryDirectory(prefix="video-montage-delivery-") as temp:
             a, b, card, out = (Path(temp) / name for name in ("a.mov", "b.mov", "card.mov", "out.mp4"))
             for path, gain in ((a, -4), (b, 8), (card, -14)):
                 self.source(path, "white", "96x160", 30, 1, tone=1000, gain=gain)
-            assemble(a, b, card, out, target_lufs=-16.0)
-            for start, end in ((0, 1), (1, 2), (2, 3), (0, 3)):
-                loudness, peak = self.measure(out, start, end)
-                self.assertAlmostEqual(loudness, -16, delta=1)
+            assemble(a, b, card, out, target_lufs=-12)
+            for start in (0, 1, 2):
+                loudness, peak = self.measure(out, start, start + 1)
+                self.assertAlmostEqual(loudness, -12, delta=1)
                 self.assertLessEqual(peak, -1)
+            loudness, peak = self.measure(out, 0, 3)
+            self.assertAlmostEqual(loudness, -12, delta=0.1)
+            self.assertLessEqual(peak, -1)
+            other = Path(temp) / "other.mp4"
+            with self.assertRaisesRegex(ValueError, "-12"):
+                assemble(a, b, card, other, target_lufs=-16)
+            self.assertFalse(other.exists())
+
+    def test_all_silent_delivery_is_not_published(self):
+        with tempfile.TemporaryDirectory(prefix="video-montage-delivery-") as temp:
+            silent = Path(temp) / "silent.mov"
+            output = Path(temp) / "out.mp4"
+            self.source(silent, "red", "96x160", 30, 1)
+            with self.assertRaisesRegex(ValueError, "(?i)loudness|measurable|silent|LUFS"):
+                assemble(silent, silent, silent, output)
+            self.assertFalse(output.exists())
 
     def test_old_ad_keeps_only_the_selected_native_b_frames_and_audio(self):
         with tempfile.TemporaryDirectory(prefix="video-montage-delivery-") as temp:

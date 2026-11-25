@@ -13,9 +13,9 @@
 & "skill/video-montage/scripts/video_montage.cmd" runtime --feature base
 ```
 
-明星口播 A 面依次执行 `init` → `prepare` → `annotate` → `routes` → `check` → `render` → `package`。`routes` 列出可剪片段和通过机检的衔接，AI 判断衔接是否通顺，再用 `routes --joins` 生成整批计划。开工前核对 A 面原片、明星、名牌、文字钉、免责声明和 BGM，并确认 B 面配比、横竖版尾板、成片数量、响度和命名。工单格式见 [A 面工作流](skill/video-montage/references/workflow.md)。
+明星口播 A 面依次执行 `init` → `prepare` → `annotate` → `routes` → `check` → `render` → `package`。`routes` 列出可剪片段和通过机检的衔接，AI 判断衔接是否通顺，再用 `routes --joins` 生成整批计划。开工前核对 A 面原片、明星、名牌、文字钉、免责声明和 BGM，并确认 B 面配比、横竖版尾板、成片数量和命名。工单格式见 [A 面工作流](skill/video-montage/references/workflow.md)。
 
-新任务的包装 A 面暂存在 `temp/packaged/`。已有包装 A 面可直接从 `deliver` 开始。每条成片按清单接入选定的 B 面和尾板，分别均衡三段响度（默认 −12 LUFS），通过接缝和音频检查后，以业务素材名写入指定成片目录。可按成片逐条编号，也可让同一 A 面的多个 B 版本共号。命名、B 面截取和命令示例见 [成片交付](skill/video-montage/references/delivery.md)。
+新任务的包装 A 面暂存在 `temp/packaged/`。已有包装 A 面可直接从 `deliver` 开始。每条成片按清单接入选定的 B 面和尾板，分别均衡三段响度，整片固定按 −12 LUFS 输出，通过接缝和音频检查后，以业务素材名写入指定成片目录。可按成片逐条编号，也可让同一 A 面的多个 B 版本共号。命名、B 面截取和命令示例见 [成片交付](skill/video-montage/references/delivery.md)。
 
 ## 按需依赖与缓存
 

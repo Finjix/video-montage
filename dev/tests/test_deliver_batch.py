@@ -35,7 +35,7 @@ class DeliverBatch(unittest.TestCase):
     @staticmethod
     def assemble(a, b, endcard, output, **kwargs):
         output.write_bytes(a.read_bytes() + b.read_bytes() + endcard.read_bytes())
-        return {}
+        return {"integrated": {"lufs": -12.0}}
 
     def test_filename_collision_checked_before_rendering(self):
         self.config["outputs"][1]["series"] = self.config["outputs"][0]["series"]
@@ -78,12 +78,36 @@ class DeliverBatch(unittest.TestCase):
         with patch("montage.delivery.assemble", side_effect=self.assemble) as render:
             result = deliver(self.job, self.config, self.base)
             self.assertTrue(result["complete"])
+            self.assertEqual(result["target_lufs"], -12)
             self.assertEqual(self.first.read_bytes(), "A1B1尾板".encode())
             self.assertEqual(self.second.read_bytes(), "A1B2替换尾板".encode())
             self.assertEqual(render.call_count, 2)
             render.reset_mock()
+            self.config["target_lufs"] = -12.0
             self.assertTrue(deliver(self.job, self.config, self.base)["complete"])
             render.assert_not_called()
+
+    def test_other_target_is_rejected_during_preflight_and_delivery(self):
+        self.config["target_lufs"] = -16
+        with patch("montage.delivery.assemble") as render:
+            for check_only in (True, False):
+                with self.subTest(check_only=check_only), self.assertRaisesRegex(ValueError, "-12"):
+                    deliver(self.job, self.config, self.base, check_only=check_only)
+            render.assert_not_called()
+        self.assertFalse(self.output.exists())
+
+    def test_unmeasurable_or_off_target_legacy_encodes_are_rebuilt(self):
+        with patch("montage.delivery.assemble", side_effect=self.assemble) as render:
+            old = deliver(self.job, self.config, self.base)
+            old["files"][self.first.name]["qa"]["integrated"]["lufs"] = None
+            old["files"][self.second.name]["qa"]["integrated"]["lufs"] = -16.0
+            write(self.job / "reports/final-delivery.json", old)
+            self.config["outputs"][1]["series"] = "庇护所升级"
+            render.reset_mock()
+            result = deliver(self.job, self.config, self.base)
+        self.assertTrue(result["complete"])
+        self.assertEqual(render.call_count, 2)
+        self.assertTrue(all(row["qa"]["integrated"]["lufs"] == -12 for row in result["files"].values()))
 
     def test_revision_retires_only_its_obsolete_name(self):
         with patch("montage.delivery.assemble", side_effect=self.assemble) as render:

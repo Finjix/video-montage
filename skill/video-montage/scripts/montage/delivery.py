@@ -1,7 +1,6 @@
 """Join packaged A, a complete B and an end card on one frame and sample clock."""
 from __future__ import annotations
 
-import math
 import os
 import re
 import subprocess
@@ -10,7 +9,7 @@ from fractions import Fraction
 from pathlib import Path
 
 from montage import audio
-from montage.common import FFMPEG, probe, run
+from montage.common import DELIVERY_LUFS, DELIVERY_TOLERANCE_LU, FFMPEG, delivery_lufs, probe, run
 
 FPS, RATE = 60, 48000
 SAMPLES_PER_FRAME = RATE // FPS
@@ -138,11 +137,10 @@ def _soundtrack(work, parts, target):
              "-map", "[out]", "-c:a", "aac", "-b:a", "256k", "-ar", str(RATE), "-ac", "2",
              "-movie_timescale", str(RATE), candidate])
         integrated = audio.measure(candidate)
-        active = any(p["audio_mode"] == "balanced" for p in parts)
-        if active and integrated["lufs"] is None:
+        if integrated["lufs"] is None:
             raise ValueError("encoded mix has no measurable loudness")
-        master_error = target - integrated["lufs"] if active else 0.0
-        passed = abs(master_error) <= 0.1 and (integrated["true_peak"] is None or integrated["true_peak"] <= -1)
+        master_error = target - integrated["lufs"]
+        passed = abs(master_error) <= DELIVERY_TOLERANCE_LU and (integrated["true_peak"] is None or integrated["true_peak"] <= -1)
         common_gain = min(0.9, max(-0.9, common_gain + master_error))
         for i, p in enumerate(parts):
             first = p["start_frame"] * SAMPLES_PER_FRAME
@@ -195,15 +193,14 @@ def _verify(path, paths, parts, filters, frames, canvas):
         segment["seam_luma_mae"] = round(mae, 3)
 
 
-def assemble(a: Path, b: Path, endcard: Path, output: Path, target_lufs: float = -12.0,
+def assemble(a: Path, b: Path, endcard: Path, output: Path, target_lufs: float = DELIVERY_LUFS,
              b_range: tuple[int, int] | None = None) -> dict:
     """Encode, verify, then atomically publish one MP4. Return exact segment ranges and decoded AAC levels."""
+    target_lufs = delivery_lufs(target_lufs)
     paths = [Path(p).resolve(strict=True) for p in (a, b, endcard)]
     output = Path(output).resolve()
     if output in paths or output.suffix.lower() != ".mp4":
         raise ValueError("delivery output must be a separate MP4 path")
-    if not math.isfinite(target_lufs) or not -70 <= target_lufs <= -5:
-        raise ValueError("target LUFS must be a finite value from -70 to -5")
     streams = [_streams(path) for path in paths]
     canvas = _canvas(streams[0][0])
     b_trim, b_samples = _select_b(paths[1], b_range) if b_range is not None else ("", None)

@@ -53,7 +53,6 @@ This example delivers two B variants from one already packaged A:
   "output_dir": "../../成片",
   "expected_outputs": 2,
   "endcard": "D:/assets/尾板-竖.mp4",
-  "target_lufs": -12,
   "outputs": [
     {"plan_id": "P01", "b": "D:/assets/营地升级.mp4", "material_id": "GOFCN00001",
      "name_fields": ["营销", "口播"], "keyword": "建好第一间民居", "series": "庇护所升级",
@@ -79,14 +78,14 @@ to play the whole B.
 ## Sound and final checks
 
 A's baked mix stops at its cut. B and the tail retain their own narration, effects, music and intentional silence.
-The encoder matches each measurable segment to the order's integrated loudness, default **−12 LUFS**, and checks
+The encoder matches each measurable segment to **−12 LUFS**, the fixed final delivery target, and checks
 the decoded AAC by segment and as a whole. A's intermediate packaging target is −18 LUFS. A single whole-file
 reading can mask a quiet B or a loud end card. Review the three readings and true peaks, especially short tails
 and transitions from speech to effects. Silent sections stay silent. Review any source flagged too short or
 below the measurement gate, and check any unexpected missing track against the brief.
 
-The encoder checks measurable sections within 1 LU of the target, the whole measurable program within 0.1 LU,
-and a true peak ceiling of −1 dBTP. The result uses the A canvas at 60 fps, H.264 video and a continuous
+The encoder checks measurable sections within 1 LU of the target and requires the complete program to measure
+**−12 ±0.1 LUFS**, with a true peak ceiling of −1 dBTP. The result uses the A canvas at 60 fps, H.264 video and a continuous
 48 kHz stereo AAC track. Audio samples are
 aligned to each section's picture length. After encoding, inspect `reports/final-delivery.json` in the job folder
 for the exact segment boundaries, measured LUFS and true peak, and the two picture seam comparisons. Verify the

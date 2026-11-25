@@ -116,4 +116,4 @@ serve as music (only sound effects, for example).
 
 Voices are balanced per clip at render time. `package` sets the BGM gain so the voice stays at least 4 dB above the
 music, then corrects the packaged A mix to -18 LUFS (+/- 1 LU, true peak at most -1 dBTP).
-The final delivery stage balances A, B and the end card to the batch target.
+The final delivery stage balances the three sections and verifies the finished mix at −12 LUFS.

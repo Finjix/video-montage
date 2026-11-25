@@ -38,7 +38,7 @@ def cmd_init(args) -> int:
              f"sources: {len(state['sources'])}, A sides requested: {count}",
              f"asset pack: {len(assets['text_pins'])} text pins, {len(assets['disclaimers'])} disclaimer PNGs, "
              f"{len(assets['audio'])} audio files (BGM needs {need} tracks; download any shortfall with fetch-bgm)"]
-    show(lines + ["next: confirm A inputs and packaging, B assignments, end cards, final count, loudness and naming; prepare after they "
+    show(lines + ["next: confirm A inputs and packaging, B assignments, end cards, final count and naming; prepare after they "
                   f"agree (if they change the order: init again with --job-dir {job})"])
     return 0
 
@@ -191,11 +191,13 @@ def cmd_deliver(args) -> int:
 
 
 def cmd_status(args) -> int:
+    from montage.deliver_batch import verified_loudness
     job = args.job_dir.resolve()
     final_report = job / "reports/final-delivery.json"
     final = read(final_report) if final_report.is_file() else {}
     files = final.get("files", {})
-    current = final.get("complete") and all((Path(final["output_dir"]) / name).is_file() for name in files)
+    current = final.get("complete") and all(
+        verified_loudness(entry) and (Path(final["output_dir"]) / name).is_file() for name, entry in files.items())
     if final and not (job / "job.json").is_file():
         show([f"delivery: {final['output_dir']}", f"files in last completed delivery: {len(files) if current else 0}",
               "next: done" if current else "next: deliver --config <delivery.json>"])

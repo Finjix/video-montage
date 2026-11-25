@@ -29,7 +29,7 @@ description: Produce or revise batches of Chinese 混剪 videos on Windows. Cut 
 ## Talking to the user
 
 For a new batch, confirm the order in one message before media work. Include the A count and final count separately,
-B sources and variant split, end card(s) for the requested layouts, delivery folder, loudness target and naming
+B sources and variant split, end card(s) for the requested layouts, delivery folder and naming
 template (number range, per A or per output, and series reference). For celebrity cuts also include the footage,
 asset pack (text pins, disclaimer, BGM tracks found), cast and nameplates. List every gap
 (a missing disclaimer, text pin or nameplate, too few source files) and ask the user to fill it. Run `init` before
@@ -84,8 +84,8 @@ See [workflow](references/workflow.md) for commands, [editing](references/editin
    and re-run when a nameplate or layout covers a face or a cue reads badly.
 7. Match each A ending to the B opening, select the tail for its layout and give each variant its final material
    name. Follow [B selection, three-part loudness and naming](references/delivery.md). Run
-   `deliver --config <file> --check-only`, then `deliver --config <file>`. Check both seams, the decoded audio
-   readings and the expected number and grouping of named files.
+   `deliver --config <file> --check-only`, then `deliver --config <file>`. Final integrated loudness is fixed at
+   **−12 LUFS**. Check both seams, the decoded audio readings and the expected number and grouping of named files.
 8. Report final count and folder, B split, segment and whole-program loudness, any approximate series matches or
    exceptions. For newly cut celebrity A sides also report videos per celebrity, and
    why any registered celebrity has none; transcript inferences and their basis; weak routes by `plan_id`; BGM

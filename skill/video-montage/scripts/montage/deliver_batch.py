@@ -1,14 +1,13 @@
 """Resolve an editorial A/B/end-card assignment and publish the verified, named MP4s."""
 from __future__ import annotations
 
-import math
 import os
 import shutil
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from montage import runtime
-from montage.common import digest, log, read, sha, write
+from montage.common import DELIVERY_LUFS, DELIVERY_TOLERANCE_LU, delivery_lufs, digest, log, read, sha, write
 from montage.delivery_names import delivery_filename
 
 
@@ -16,6 +15,12 @@ def resolve_path(base: Path, value, field: str) -> Path:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{field} needs a path")
     return (base / value).resolve()
+
+
+def verified_loudness(entry: dict) -> bool:
+    # Older runs could mark a silent or unbalanced final as complete.
+    measured = entry.get("qa", {}).get("integrated", {}).get("lufs")
+    return measured is not None and abs(measured - DELIVERY_LUFS) <= DELIVERY_TOLERANCE_LU
 
 
 def assignments(job: Path, config: dict, base: Path) -> tuple[Path, float, list[dict]]:
@@ -28,9 +33,7 @@ def assignments(job: Path, config: dict, base: Path) -> tuple[Path, float, list[
     count = config.get("expected_outputs")
     if type(count) is not int or count < 1 or not isinstance(outputs, list) or len(outputs) != count:
         raise ValueError("expected_outputs must be positive and match the number of final output rows")
-    target = config.get("target_lufs", -12.0)
-    if type(target) not in (float, int) or not math.isfinite(target) or not -70 <= target <= -5:
-        raise ValueError("target_lufs must be a number between -70 and -5")
+    target = delivery_lufs(config.get("target_lufs", DELIVERY_LUFS))
     packaged = {}
     if (job / "job.json").is_file():
         report = job / "reports/package.json"
@@ -73,7 +76,7 @@ def assignments(job: Path, config: dict, base: Path) -> tuple[Path, float, list[
     sources = {Path(r[k]) for r in rows for k in ("a", "b", "endcard")}
     if any((folder / r["name"]).resolve() in sources for r in rows):
         raise ValueError("a delivery filename would overwrite a source")
-    return folder, float(target), rows
+    return folder, target, rows
 
 
 def deliver(job: Path, config: dict, base: Path, *, check_only=False) -> dict:
@@ -93,7 +96,7 @@ def deliver(job: Path, config: dict, base: Path, *, check_only=False) -> dict:
             return {"checked": len(rows), "output_dir": str(folder), "complete": False}
 
         from montage.delivery import assemble
-        by_key = {item["key"]: (folder / name, item) for name, item in owned.items()}
+        by_key = {item["key"]: (folder / name, item) for name, item in owned.items() if verified_loudness(item)}
         result = {"output_dir": str(folder), "target_lufs": target, "config_hash": digest(config),
                   "files": owned, "complete": False}
         folder.mkdir(parents=True, exist_ok=True)
@@ -109,7 +112,7 @@ def deliver(job: Path, config: dict, base: Path, *, check_only=False) -> dict:
             inputs = [Path(row[field]) for field in ("a", "b", "endcard")]
             hashes = [sha(p) for p in inputs]
             key = digest([1, hashes, row["b_range"], target])
-            if prior.get("key") == key and path.is_file() and sha(path) == prior["sha256"]:
+            if prior.get("key") == key and verified_loudness(prior) and path.is_file() and sha(path) == prior["sha256"]:
                 prior.update(row)
                 log(f"deliver {index}/{len(rows)}: reused {path.name}")
                 continue

@@ -186,7 +186,7 @@ Resolve all A packaging errors, then run [deliver](delivery.md) for the final A 
 ## Revisions and reburns
 
 - Edit, swap or replace A cuts: change the joins (`routes --joins`) or the plan, `render`, `package`, then update
-  the delivery assignments and run `deliver`. For B, tail, final loudness or name changes start at `deliver`.
+  the delivery assignments and run `deliver`. For B, tail or name changes start at `deliver`.
 - Subtitle reburn (the user edited `temp/subtitles/subtitle-<plan_id>.txt` or asks for a wording change): `package`, then `deliver`.
   Edited text that differs from the transcript is kept and noted.
 - Sources must stay where they were; if one moved, `init` a new job.
