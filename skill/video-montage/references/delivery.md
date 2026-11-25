@@ -1,6 +1,6 @@
 # Delivering A + B + 尾板
 
-## Pick the B segment and end card
+## Choose a B file and end card
 
 Make one assignment per final MP4. The brief determines how many B variants each A gets, the split between UE,
 narration and setting versions, and whether variants share the A's material number. Count these against the order
@@ -15,12 +15,12 @@ across its B variants.
 - Watch the end of the finished A and the first action of the proposed B. If A ends with 砍树, use an opening that
   shows chopping. If it promises food from fishing, fish should be visible in the opening. A general invitation to
   play leaves more room. Record the A line and the observed B action in the row's `match` field.
-- Inspect the actual B picture and sound. A narration variant needs intelligible narration within the selected
-  footage. UE footage can have narration too. For a complete B-only source use the full file. For a source that
-  contains an earlier ad, inspect frames at both boundaries and use `b_range` to isolate B from the old A and tail.
-- Choose a B and end card that fit the A layout, including landscape when supplied. Use the specified tail once,
-  through its final frame. Check both cuts at normal speed and frame-step them for flashes, an old card or a
-  missing first action. Check the A line and B opening together for meaning.
+- Each B is a standalone asset. Play the chosen file from its first frame through its last, with its own audio.
+  Check its picture and sound when classifying it. A narration variant needs intelligible narration, and UE
+  footage can include narration too.
+- Choose a B and end card that fit the A layout, including landscape when supplied. Append the specified tail
+  once and play it through its final frame. Watch both cuts at normal speed and frame-step them to confirm that
+  A goes directly into the B opening, and the last B frame goes directly into the tail.
 
 ## Name the actual edit
 
@@ -57,7 +57,7 @@ This example delivers two B variants from one already packaged A:
     {"plan_id": "P01", "b": "D:/assets/营地升级.mp4", "material_id": "GOFCN00001",
      "name_fields": ["营销", "口播"], "keyword": "建好第一间民居", "series": "庇护所升级",
      "match": "A ends on the first dwelling; B opens on the shelter being built."},
-    {"plan_id": "P01", "b": "D:/assets/旧广告.mp4", "b_range": [90, 630], "material_id": "GOFCN00001",
+    {"plan_id": "P01", "b": "D:/assets/幸存者管理城建.mp4", "material_id": "GOFCN00001",
      "name_fields": ["营销", "口播"], "keyword": "建好第一间民居", "series": "幸存者管理城建",
      "series_basis": "The original B ID matches the camp-management series in the supplied detail sheet."}
   ]
@@ -66,9 +66,8 @@ This example delivers two B variants from one already packaged A:
 
 For independently supplied, ready A files use a separate working directory for `--job-dir`, put `"a":
 "D:/assets/A1.mp4"` in each row in place of `plan_id`, and start at `deliver`. A packaging job resolves
-each `plan_id` from its A manifest. Include every packaged A at least once. A row may override `endcard`,
-e.g. for landscape. `b_range` uses zero-based frames in the original CFR B, with an exclusive end. Omit it
-to play the whole B.
+each `plan_id` from its A manifest. Include every packaged A at least once. Each `b` points to the complete
+B file for that output. A row may override `endcard`, e.g. for landscape.
 
 ```powershell
 & "<skill_root>/scripts/video_montage.cmd" deliver --job-dir "<job_dir>" --config "<delivery.json>" --check-only

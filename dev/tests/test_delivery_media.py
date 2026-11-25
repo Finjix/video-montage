@@ -119,10 +119,10 @@ class DeliveryMedia(unittest.TestCase):
                 assemble(silent, silent, silent, output)
             self.assertFalse(output.exists())
 
-    def test_old_ad_keeps_only_the_selected_native_b_frames_and_audio(self):
+    def test_complete_b_keeps_picture_and_audio_through_first_and_last_shots(self):
         with tempfile.TemporaryDirectory(prefix="video-montage-delivery-") as temp:
             root = Path(temp)
-            a, b, card, out = (root / name for name in ("a.mov", "old-ad.mov", "card.mov", "out.mp4"))
+            a, b, card, out = (root / name for name in ("a.mov", "gameplay.mov", "card.mov", "out.mp4"))
             self.source(a, "red", "96x160", 30, 1, tone=400)
             self.source(card, "blue", "96x160", 30, 0.5, tone=1600)
             shots = [("white", 100), ("lime", 800), ("cyan", 1200), ("yellow", 3000)]
@@ -132,14 +132,16 @@ class DeliveryMedia(unittest.TestCase):
             concat_list.write_text("".join(f"file '{i}.mov'\n" for i in range(4)), encoding="ascii")
             subprocess.run([self.ffmpeg, "-nostdin", "-v", "error", "-f", "concat", "-i", concat_list,
                             "-c", "copy", b], check=True)
-            assemble(a, b, card, out, b_range=(12, 36))
-
-            rgb = np.array([[1, 0, 0], [0, 1, 0], [0, 1, 1], [0, 0, 1]], dtype=bool)
-            expected = np.repeat(rgb, [60, 30, 30, 30], axis=0)
+            report = assemble(a, b, card, out)
+            self.assertEqual([(s["start_frame"], s["frames"]) for s in report["segments"]],
+                             [(0, 60), (60, 120), (180, 30)])
+            rgb = np.array([[1, 0, 0], [1, 1, 1], [0, 1, 0], [0, 1, 1], [1, 1, 0], [0, 0, 1]], dtype=bool)
+            expected = np.repeat(rgb, [60, 30, 30, 30, 30, 30], axis=0)
             np.testing.assert_array_equal(self.frame_centers(out) > 128, expected)
             signal = self.pcm(out)
             # 20 ms of tone close to both edges of each shot detects even one stray 24 fps source frame.
-            for start, end, tone in ((0, 1, 400), (1, 1.5, 800), (1.5, 2, 1200), (2, 2.5, 1600)):
+            for start, end, tone in ((0, 1, 400), (1, 1.5, 100), (1.5, 2, 800),
+                                     (2, 2.5, 1200), (2.5, 3, 3000), (3, 3.5, 1600)):
                 for pos in (start + 0.01, end - 0.03):
                     first = round(pos * 48000)
                     window = signal[first:first + 960]

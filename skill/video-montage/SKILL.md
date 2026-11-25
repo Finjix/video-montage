@@ -1,6 +1,6 @@
 ---
 name: video-montage
-description: Produce or revise batches of Chinese 混剪 videos on Windows. Cut and package celebrity 口播 A sides, or start from supplied A sides. Match each A to B footage, append the end card (尾板/落版), balance all three sections and deliver named MP4s for the batch.
+description: Produce or revise batches of Chinese 混剪 videos on Windows. Cut and package celebrity 口播 A sides, or start from supplied A sides. Match each A to a complete B clip, append the end card (尾板/落版), balance all three sections and deliver named MP4s for the batch.
 ---
 
 # Video montage
@@ -82,8 +82,8 @@ See [workflow](references/workflow.md) for commands, [editing](references/editin
    joins or subtitle files.
 6. `package [--config]` makes the packaged A sides. Look at the packaged sheets; adjust the config
    and re-run when a nameplate or layout covers a face or a cue reads badly.
-7. Match each A ending to the B opening, select the tail for its layout and give each variant its final material
-   name. Follow [B selection, three-part loudness and naming](references/delivery.md). Run
+7. Match each A ending to the opening of a standalone B file. Use the entire B, append the end card for its
+   layout and give each variant its final material name. Follow [B selection, three-part loudness and naming](references/delivery.md). Run
    `deliver --config <file> --check-only`, then `deliver --config <file>`. Final integrated loudness is fixed at
    **−12 LUFS**. Check both seams, the decoded audio readings and the expected number and grouping of named files.
 8. Report final count and folder, B split, segment and whole-program loudness, any approximate series matches or

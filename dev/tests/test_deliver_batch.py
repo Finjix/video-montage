@@ -5,8 +5,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from montage.common import sha, write
-from montage.deliver_batch import deliver
+from montage.common import digest, sha, write
+from montage.deliver_batch import deliver, verified_delivery
 
 
 @unittest.skipUnless(importlib.util.find_spec("numpy"), "requires the managed media environment")
@@ -95,6 +95,32 @@ class DeliverBatch(unittest.TestCase):
                     deliver(self.job, self.config, self.base, check_only=check_only)
             render.assert_not_called()
         self.assertFalse(self.output.exists())
+
+    def test_legacy_partial_b_order_fails_before_encoding_any_output(self):
+        self.config["outputs"][1]["b_range"] = [12, 36]
+        with patch("montage.delivery.assemble") as render:
+            for check_only in (True, False):
+                with self.subTest(check_only=check_only), self.assertRaisesRegex(ValueError, "standalone B"):
+                    deliver(self.job, self.config, self.base, check_only=check_only)
+            render.assert_not_called()
+        self.assertFalse(self.output.exists())
+
+    def test_rebuilds_only_the_legacy_partial_b(self):
+        with patch("montage.delivery.assemble", side_effect=self.assemble) as render:
+            old = deliver(self.job, self.config, self.base)
+            first, second = old["files"][self.first.name], old["files"][self.second.name]
+            first["b_range"] = None
+            self.second.write_bytes(b"partial B")
+            second.update(b_range=[12, 36], sha256=sha(self.second))
+            second["key"] = digest([1, second["input_sha256"], second["b_range"], -12.0])
+            write(self.job / "reports/final-delivery.json", old)
+            self.assertTrue(verified_delivery(first))
+            self.assertFalse(verified_delivery(second))
+            render.reset_mock()
+            result = deliver(self.job, self.config, self.base)
+            render.assert_called_once()
+        self.assertEqual(self.second.read_bytes(), "A1B2替换尾板".encode())
+        self.assertTrue(all("b_range" not in r for r in result["files"].values()))
 
     def test_unmeasurable_or_off_target_legacy_encodes_are_rebuilt(self):
         with patch("montage.delivery.assemble", side_effect=self.assemble) as render:

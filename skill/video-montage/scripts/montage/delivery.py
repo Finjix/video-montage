@@ -34,32 +34,17 @@ def _canvas(stream):
     return (height, width) if abs(rotation) % 180 == 90 else (width, height)
 
 
-def _select_b(path, frame_range):
-    from montage.catalog import video_clock
-
-    if len(frame_range) != 2 or any(type(n) is not int for n in frame_range):
-        raise ValueError("b_range needs two integer native frame numbers [start, stop)")
-    clock = video_clock(path)
-    start, stop = frame_range
-    if not 0 <= start < stop <= clock["frames"]:
-        raise ValueError(f"b_range must be within the {clock['frames']} source frames")
-    seconds = Fraction(clock["fps_den"], clock["fps_num"])
-    return (f"trim=start_frame={start}:end_frame={stop},",
-            (round(start * seconds * RATE), round(stop * seconds * RATE)))
-
-
-def _picture(work, paths, streams, canvas, b_trim):
+def _picture(work, paths, streams, canvas):
     width, height = canvas
     conform = (f"setpts=PTS-STARTPTS,fps={FPS}:start_time=0,"
                f"scale={width}:{height}:force_original_aspect_ratio=decrease:force_divisible_by=2:reset_sar=1:"
                "out_color_matrix=bt709:out_range=tv,"
                f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,format=yuv420p,setsar=1,"
                "setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709")
-    args, graph, filters = [], [], []
+    args, graph = [], []
     for i, role in enumerate(ROLES):
         args += ["-threads", "2", "-i", str(paths[i])]
-        filters.append((b_trim if role == "b" else "") + conform)
-        graph.append(f"[{i}:{streams[i][0]['index']}]{filters[i]},showinfo@{role}=checksum=0[v{i}]")
+        graph.append(f"[{i}:{streams[i][0]['index']}]{conform},showinfo@{role}=checksum=0[v{i}]")
     graph.append(f"[v0][v1][v2]concat=n=3:v=1:a=0,settb=1/{FPS},setpts=N[out]")
     picture = work / "picture.mp4"
     command = [str(FFMPEG), "-hide_banner", "-nostdin", "-nostats", "-xerror", *args,
@@ -75,7 +60,7 @@ def _picture(work, paths, streams, canvas, b_trim):
         counts[role] = int(number) + 1
     if not all(counts.values()):
         raise ValueError(f"an input has no complete output frame: {counts}")
-    return picture, counts, filters
+    return picture, counts, conform
 
 
 def _start(stream):
@@ -84,16 +69,13 @@ def _start(stream):
     return Fraction(stream.get("start_time", "0"))
 
 
-def _audio_source(path, streams, samples, wav, selected):
+def _audio_source(path, streams, samples, wav):
     video, sound = streams
     if sound:
         offset = round((_start(sound) - _start(video)) * RATE)
         args = ["-i", path, "-map", f"0:{sound['index']}"]
         align = (f"asetpts=PTS-STARTPTS+({offset})/{RATE}/TB,aresample={RATE}:async=1:first_pts=0,"
                  "aformat=channel_layouts=stereo,")
-        if selected:
-            start, stop = selected
-            align += f"atrim=start_sample={start}:end_sample={stop},asetpts=N/SR/TB,"
     else:
         args = ["-f", "lavfi", "-i", f"anullsrc=r={RATE}:cl=stereo"]
         align = ""
@@ -170,7 +152,7 @@ def _thumbnail(path, filters, first_frame=0):
                 "-f", "rawvideo", "-"], binary=True)
 
 
-def _verify(path, paths, parts, filters, frames, canvas):
+def _verify(path, paths, parts, conform, frames, canvas):
     video, sound = _streams(path)
     duration = Fraction(frames, FPS)
     if (not sound or int(video["nb_frames"]) != frames or _canvas(video) != canvas
@@ -181,7 +163,7 @@ def _verify(path, paths, parts, filters, frames, canvas):
             raise ValueError("assembled picture and audio must start at zero and end on the same frame")
     run([FFMPEG, "-v", "error", "-nostdin", "-xerror", "-err_detect", "explode", "-i", path,
          "-map", "0:v:0", "-map", "0:a:0", "-f", "null", "-"])
-    for segment, source, conform in zip(parts[1:], paths[1:], filters[1:]):
+    for segment, source in zip(parts[1:], paths[1:]):
         first = segment["start_frame"]
         reference = _thumbnail(source, conform + ",")
         actual = _thumbnail(path, "", first)
@@ -193,8 +175,7 @@ def _verify(path, paths, parts, filters, frames, canvas):
         segment["seam_luma_mae"] = round(mae, 3)
 
 
-def assemble(a: Path, b: Path, endcard: Path, output: Path, target_lufs: float = DELIVERY_LUFS,
-             b_range: tuple[int, int] | None = None) -> dict:
+def assemble(a: Path, b: Path, endcard: Path, output: Path, target_lufs: float = DELIVERY_LUFS) -> dict:
     """Encode, verify, then atomically publish one MP4. Return exact segment ranges and decoded AAC levels."""
     target_lufs = delivery_lufs(target_lufs)
     paths = [Path(p).resolve(strict=True) for p in (a, b, endcard)]
@@ -203,27 +184,24 @@ def assemble(a: Path, b: Path, endcard: Path, output: Path, target_lufs: float =
         raise ValueError("delivery output must be a separate MP4 path")
     streams = [_streams(path) for path in paths]
     canvas = _canvas(streams[0][0])
-    b_trim, b_samples = _select_b(paths[1], b_range) if b_range is not None else ("", None)
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".assembly-", dir=output.parent) as directory:
         work = Path(directory)
-        picture, counts, filters = _picture(work, paths, streams, canvas, b_trim)
+        picture, counts, conform = _picture(work, paths, streams, canvas)
         parts, frames = [], 0
         for role, path, source_streams in zip(ROLES, paths, streams):
             wav = work / (role + ".wav")
             samples = counts[role] * SAMPLES_PER_FRAME
-            _audio_source(path, source_streams, samples, wav, b_samples if role == "b" else None)
+            _audio_source(path, source_streams, samples, wav)
             level = audio.measure(wav)
             parts.append({"role": role, "source": str(path), "start_frame": frames, "frames": counts[role],
                           "input": level, "audio_mode": _mode(level, source_streams[1], samples)})
-            if role == "b" and b_range is not None:
-                parts[-1]["source_frames"] = list(b_range)
             frames += counts[role]
         soundtrack, integrated = _soundtrack(work, parts, target_lufs)
         candidate = work / "delivery.mp4"
         run([FFMPEG, "-v", "error", "-nostdin", "-i", picture, "-i", soundtrack, "-map", "0:v:0", "-map", "1:a:0",
              "-c", "copy", "-movie_timescale", str(RATE), "-movflags", "+faststart", candidate])
-        _verify(candidate, paths, parts, filters, frames, canvas)
+        _verify(candidate, paths, parts, conform, frames, canvas)
         os.replace(candidate, output)
     return {"frames": frames, "fps": FPS, "width": canvas[0], "height": canvas[1],
             "audio_samples": frames * SAMPLES_PER_FRAME, "target_lufs": target_lufs,

@@ -17,10 +17,10 @@ def resolve_path(base: Path, value, field: str) -> Path:
     return (base / value).resolve()
 
 
-def verified_loudness(entry: dict) -> bool:
-    # Older runs could mark a silent or unbalanced final as complete.
+def verified_delivery(entry: dict) -> bool:
+    # Earlier receipts can describe a partial B or an unbalanced final.
     measured = entry.get("qa", {}).get("integrated", {}).get("lufs")
-    return measured is not None and abs(measured - DELIVERY_LUFS) <= DELIVERY_TOLERANCE_LU
+    return entry.get("b_range") is None and measured is not None and abs(measured - DELIVERY_LUFS) <= DELIVERY_TOLERANCE_LU
 
 
 def assignments(job: Path, config: dict, base: Path) -> tuple[Path, float, list[dict]]:
@@ -44,6 +44,8 @@ def assignments(job: Path, config: dict, base: Path) -> tuple[Path, float, list[
     for index, row in enumerate(outputs, 1):
         if not isinstance(row, dict):
             raise ValueError(f"output {index} needs an assignment")
+        if row.get("b_range") is not None:
+            raise ValueError(f"output {index}: remove b_range and supply the complete standalone B file in b")
         name = delivery_filename(row.get("material_id"), row.get("name_fields"), row.get("keyword"), row.get("series"))
         if name.casefold() in names:
             raise ValueError(f"duplicate delivery filename: {name}")
@@ -65,12 +67,8 @@ def assignments(job: Path, config: dict, base: Path) -> tuple[Path, float, list[
         for path in (a, b, card):
             if not path.is_file():
                 raise ValueError(f"{name}: missing input {path}")
-        selection = row.get("b_range")
-        if selection is not None and (not isinstance(selection, list) or len(selection) != 2
-                or not all(type(n) is int for n in selection) or not 0 <= selection[0] < selection[1]):
-            raise ValueError(f"{name}: b_range needs [start_frame, end_frame_exclusive] in source B frames")
         rows.append({"name": name, "plan_id": pid, "a": str(a), "b": str(b), "endcard": str(card),
-                     "b_range": selection, "match": row.get("match"), "series_basis": row.get("series_basis")})
+                     "match": row.get("match"), "series_basis": row.get("series_basis")})
     if plans != set(packaged):
         raise ValueError(f"delivery is missing packaged A sides: {sorted(set(packaged) - plans)}")
     sources = {Path(r[k]) for r in rows for k in ("a", "b", "endcard")}
@@ -96,7 +94,7 @@ def deliver(job: Path, config: dict, base: Path, *, check_only=False) -> dict:
             return {"checked": len(rows), "output_dir": str(folder), "complete": False}
 
         from montage.delivery import assemble
-        by_key = {item["key"]: (folder / name, item) for name, item in owned.items() if verified_loudness(item)}
+        by_key = {item["key"]: (folder / name, item) for name, item in owned.items() if verified_delivery(item)}
         result = {"output_dir": str(folder), "target_lufs": target, "config_hash": digest(config),
                   "files": owned, "complete": False}
         folder.mkdir(parents=True, exist_ok=True)
@@ -111,8 +109,8 @@ def deliver(job: Path, config: dict, base: Path, *, check_only=False) -> dict:
             prior = owned.get(row["name"], {})
             inputs = [Path(row[field]) for field in ("a", "b", "endcard")]
             hashes = [sha(p) for p in inputs]
-            key = digest([1, hashes, row["b_range"], target])
-            if prior.get("key") == key and verified_loudness(prior) and path.is_file() and sha(path) == prior["sha256"]:
+            key = digest([1, hashes, None, target])  # keep existing cache keys for full-length B files
+            if prior.get("key") == key and verified_delivery(prior) and path.is_file() and sha(path) == prior["sha256"]:
                 prior.update(row)
                 log(f"deliver {index}/{len(rows)}: reused {path.name}")
                 continue
@@ -125,8 +123,7 @@ def deliver(job: Path, config: dict, base: Path, *, check_only=False) -> dict:
                     qc = previous_row["qa"]
                 else:
                     log(f"deliver {index}/{len(rows)}: assembling {path.name}")
-                    options = {"b_range": tuple(row["b_range"])} if row["b_range"] is not None else {}
-                    qc = assemble(*inputs, staged, target_lufs=target, **options)
+                    qc = assemble(*inputs, staged, target_lufs=target)
                 owned[path.name] = {**row, "key": key, "input_sha256": hashes, "sha256": sha(staged),
                                     "previous_sha256": sha(path) if path.is_file() else None, "qa": qc}
                 # Record both hashes before replacing the file, so an interrupted publish can be resumed.
@@ -143,6 +140,7 @@ def deliver(job: Path, config: dict, base: Path, *, check_only=False) -> dict:
             del owned[name]
         for entry in owned.values():
             entry.pop("previous_sha256", None)
+            entry.pop("b_range", None)
         result["complete"] = True
         write(report, result)
         return result
