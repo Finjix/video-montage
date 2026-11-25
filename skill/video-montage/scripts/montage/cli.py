@@ -1,4 +1,4 @@
-"""video-montage command line: init -> prepare -> annotate -> check/render -> package."""
+"""video-montage command line: prepare and package A sides, then deliver named A + B + end-card videos."""
 from __future__ import annotations
 
 import argparse
@@ -35,10 +35,10 @@ def cmd_init(args) -> int:
     assets = JOB.asset_inventory(Path(state["order"]["asset_root"]))
     need = -(-count // 8)
     lines = [f"job_dir: {job}", f"delivery: {state['delivery_dir']}",
-             f"sources: {len(state['sources'])}, outputs requested: {count}",
+             f"sources: {len(state['sources'])}, A sides requested: {count}",
              f"asset pack: {len(assets['text_pins'])} text pins, {len(assets['disclaimers'])} disclaimer PNGs, "
              f"{len(assets['audio'])} audio files (BGM needs {need} tracks; download any shortfall with fetch-bgm)"]
-    show(lines + ["next: confirm the footage, asset pack, count and celebrities with the user; prepare only after they "
+    show(lines + ["next: confirm A inputs and packaging, B assignments, end cards, final count, loudness and naming; prepare after they "
                   f"agree (if they change the order: init again with --job-dir {job})"])
     return 0
 
@@ -164,23 +164,48 @@ def cmd_package(args) -> int:
     result = PACKAGE.package(job, state, config)
     result.setdefault("complete", False)
     write(job / "reports/package.json", result)
-    lines = [f"published: {', '.join(result['published']) or 'none'} -> {state['delivery_dir']}"]
+    lines = [f"packaged A: {', '.join(result['published']) or 'none'} -> {state.get('packaged_dir', state['delivery_dir'])}"]
     if result["warnings"]:
         lines += ["notes:"] + errors_lines(result["warnings"])
     if result["errors"]:
         lines += ["problems:"] + errors_lines(result["errors"])
     elif result.get("complete"):
         sheets = job / "sheets"
-        lines.append(f"delivery complete ({len(result['published'])} videos); packaged sheets in {sheets}")
+        lines.append(f"A sides ready ({len(result['published'])}); inspect {sheets}, then deliver --config <delivery.json>")
     show(lines)
     return RULE_FAILURE if result["errors"] else 0
 
 
+def cmd_deliver(args) -> int:
+    from montage.deliver_batch import deliver
+    job = args.job_dir.resolve()
+    if not args.check_only:
+        runtime.ensure("media")
+    result = deliver(job, read(args.config), args.config.resolve().parent, check_only=args.check_only)
+    if args.check_only:
+        show(f"assignments checked: {result['checked']} -> {result['output_dir']}")
+    else:
+        show([f"delivered: {len(result['files'])} -> {result['output_dir']}",
+              f"per-file inputs, hashes and audio/video checks: {job / 'reports/final-delivery.json'}"])
+    return 0
+
+
 def cmd_status(args) -> int:
     job = args.job_dir.resolve()
+    final_report = job / "reports/final-delivery.json"
+    final = read(final_report) if final_report.is_file() else {}
+    files = final.get("files", {})
+    current = final.get("complete") and all((Path(final["output_dir"]) / name).is_file() for name in files)
+    if final and not (job / "job.json").is_file():
+        show([f"delivery: {final['output_dir']}", f"files in last completed delivery: {len(files) if current else 0}",
+              "next: done" if current else "next: deliver --config <delivery.json>"])
+        return 0
     state = JOB.load(job)
     count = state["order"]["requested_outputs"]
-    delivered = read(job / "delivery.json")["outputs"] if (job / "delivery.json").is_file() else []
+    packaged_a = read(job / "delivery.json")["outputs"] if (job / "delivery.json").is_file() else []
+    a_hashes = {r["plan_id"]: r["sha256"] for r in packaged_a}
+    current = current and {r["plan_id"] for r in files.values()} == set(a_hashes) and all(
+        r["input_sha256"][0] == a_hashes[r["plan_id"]] for r in files.values())
     catalog = read(job / "catalog/catalog.json") if (job / "catalog/catalog.json").is_file() else None
     beats = sum(len(s["beats"]) for s in catalog["sources"]) if catalog else 0
     plan = read(job / "config/plan.json")["outputs"] if (job / "config/plan.json").is_file() else []
@@ -194,13 +219,15 @@ def cmd_status(args) -> int:
         step = "routes, then check --plan <plan.json>"
     elif clean < len(plan):
         step = "render --plan <plan.json>"
-    elif len(delivered) < count or not packaged.get("complete", True):
+    elif len(packaged_a) < count or not packaged.get("complete", True):
         step = "package (the last run left problems: reports/package.json)" if packaged.get("errors") else "package"
+    elif not current:
+        step = "deliver --config <delivery.json> (packaged A + matched B + end card)"
     else:
-        step = "done (revisions: change the plan or subtitles, then render / package)"
-    show([f"delivery: {state['delivery_dir']}",
+        step = "done"
+    show([f"delivery: {final.get('output_dir', state['delivery_dir'])}",
           f"catalog: {'yes' if catalog else 'no'}, beats: {beats}, plan outputs: {len(plan)}, clean videos: {clean}, "
-          f"delivered: {len(delivered)}/{count}",
+          f"packaged A: {len(packaged_a)}/{count}, final files in last completed delivery: {len(files) if current else 0}",
           f"decisions: {json.dumps(state.get('decisions', {}), ensure_ascii=False)}", f"next: {step}"])
     return 0
 
@@ -280,6 +307,9 @@ def main() -> None:
     command("render", cmd_render).add_argument("--plan", type=Path, required=True)
     packaging = command("package", cmd_package)
     packaging.add_argument("--config", type=Path)
+    delivery = command("deliver", cmd_deliver)
+    delivery.add_argument("--config", type=Path, required=True, help="A/B/end-card assignments and final names")
+    delivery.add_argument("--check-only", action="store_true", help="validate all assignments without encoding")
     command("status", cmd_status)
     decide = command("decide", cmd_decide)
     decide.add_argument("--key", required=True, choices=sorted(JOB.DECISIONS))

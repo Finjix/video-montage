@@ -1,7 +1,7 @@
 # Packaging
 
-`package` burns the subtitles and overlays into each clean video, mixes the BGM, checks the encode and publishes
-it. Everything has a working default; the config only records your choices.
+`package` burns the subtitles and overlays into each clean celebrity A, mixes the BGM and checks the A master.
+Use [deliver](delivery.md) to append B and the end card and publish the named final.
 
 ## Config (`package --config <json>`, stored as `temp/config/packaging.json`)
 
@@ -115,4 +115,5 @@ serve as music (only sound effects, for example).
 ## Loudness
 
 Voices are balanced per clip at render time. `package` sets the BGM gain so the voice stays at least 4 dB above the
-music, then corrects the mix until the finished video lands at -18 LUFS (+/- 1 LU, true peak at most -1 dBTP).
+music, then corrects the packaged A mix to -18 LUFS (+/- 1 LU, true peak at most -1 dBTP).
+The final delivery stage balances A, B and the end card to the batch target.

@@ -13,9 +13,9 @@
 & "skill/video-montage/scripts/video_montage.cmd" runtime --feature base
 ```
 
-流程：`init` → `prepare` → `annotate` → `routes` → `check` → `render` → `package`。`routes` 列出所有能干净剪出的片段和通过全部机检的衔接，AI 只需判断衔接是否通顺，再由 `routes --joins` 生成满足批量限制的整批计划草稿。AI 在开始前必须向用户确认素材、包装素材包（文字钉、免责声明、BGM、名牌）、数量和明星，缺的素材先让用户补齐；素材包没有文字钉或免责声明不是正好一张时 `init` 直接报错。成片一律带完整包装（字幕、名牌、文字钉、免责声明、BGM），不提供无包装交付。确认之后遇到不确定的问题按技能中的默认做法继续出片，并在最终总结中说明。业务参数、工单格式与已有任务文件兼容；详细格式见技能内的 `references/workflow.md`。
+明星口播 A 面依次执行 `init` → `prepare` → `annotate` → `routes` → `check` → `render` → `package`。`routes` 列出可剪片段和通过机检的衔接，AI 判断衔接是否通顺，再用 `routes --joins` 生成整批计划。开工前核对 A 面原片、明星、名牌、文字钉、免责声明和 BGM，并确认 B 面配比、横竖版尾板、成片数量、响度和命名。工单格式见 [A 面工作流](skill/video-montage/references/workflow.md)。
 
-成片默认放在桌面的 `自动化混剪_YYYYMMDD_HHMMSS/`，旁边只有任务目录 `temp/`。修改字幕后再次执行 `package`，仅重做有变化的成片。首次下载会增加准备时间。
+新任务的包装 A 面暂存在 `temp/packaged/`。已有包装 A 面可直接从 `deliver` 开始。每条成片按清单接入选定的 B 面和尾板，分别均衡三段响度（默认 −12 LUFS），通过接缝和音频检查后，以业务素材名写入指定成片目录。可按成片逐条编号，也可让同一 A 面的多个 B 版本共号。命名、B 面截取和命令示例见 [成片交付](skill/video-montage/references/delivery.md)。
 
 ## 按需依赖与缓存
 

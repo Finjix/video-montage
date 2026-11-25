@@ -553,7 +553,8 @@ def package(job: Path, state: dict, config: dict) -> dict:
     for row in results:
         if row["errors"]:
             errors[row["plan_id"]] = row["errors"]
-    delivery = Path(state["delivery_dir"])
+    delivery = Path(state.get("packaged_dir", state["delivery_dir"]))  # older jobs keep their existing A paths
+    delivery.mkdir(parents=True, exist_ok=True)
     manifest_path = job / "delivery.json"
     manifest = read(manifest_path) if manifest_path.is_file() else {"outputs": []}
     rows = {row["plan_id"]: row for row in manifest["outputs"]}

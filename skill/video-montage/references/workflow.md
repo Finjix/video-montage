@@ -13,7 +13,8 @@ inspects or prefetches it; it needs no job). Long commands print progress lines 
 | `routes --joins <json> [--fresh] [--avoid <job_dir>]` | composes `config/plan-draft.json` for the whole batch from the accepted joins | 10-60 s |
 | `check --plan <json>` | exact cut frames and every rule → `reports/scripts.md` | < 1 s |
 | `render --plan <json>` | clean videos, QC, subtitle drafts, cut sheets (changed outputs only) | ~15 s per 3 videos |
-| `package [--config <json>]` | designs, encodes, checks and publishes (changed outputs only) | ~25-40 s per video, 4 in parallel |
+| `package [--config <json>]` | designs, encodes and checks the celebrity A masters (changed outputs only) | ~25-40 s per A, 4 in parallel |
+| `deliver --config <json> [--check-only]` | checks A/B/tail assignments and names, then encodes and verifies the named final MP4s ([delivery](delivery.md)) | depends on final duration and canvas |
 | `status` | what exists so far and the next step | - |
 | `decide --key K --value V --instruction "<text>"` | records a decision (the user's words, or `fallback: ...`) | - |
 | `bgm-assets`, `fetch-bgm ...` | BGM inventory and licensed downloads ([packaging](packaging.md#bgm)) | - |
@@ -30,6 +31,7 @@ inspects or prefetches it; it needs no job). Long commands print progress lines 
  "decisions": {"min_sources_per_output": {"value": 2, "instruction": "<the user's words>"}}}
 ```
 
+- `requested_outputs` counts edited A sides. Set the final variant count in the [delivery config](delivery.md).
 - `sources`: .mp4/.mov/.mkv with a constant frame rate from timestamp 0 (otherwise `prepare` says so: make a
   constant-frame-rate copy with FFmpeg and use that).
 - `celebrities`: every selected celebrity with a transparent 9:16 nameplate PNG; IDs look like `person:wu-yue`.
@@ -176,14 +178,15 @@ look alike.
 
 ## After `package`
 
-Videos land in the delivery folder as `<plan_id>.mp4`; `temp/sheets/<plan_id>-final.jpg` shows each nameplate in the
+New jobs stage A masters in `temp/packaged/<plan_id>.mp4`. Older jobs keep their existing A paths in
+`temp/delivery.json`. `temp/sheets/<plan_id>-final.jpg` shows each nameplate in the
 middle of its window (labelled with its spot), then each settled cue.
-Outputs without problems are published even while others still have problems; re-running redoes only what changed.
+Resolve all A packaging errors, then run [deliver](delivery.md) for the final A + B + end-card files.
 
 ## Revisions and reburns
 
-- Edit, swap or replace outputs: change the joins (`routes --joins`) or the plan, `render`, `package`. Removed plan
-  IDs leave the delivery folder.
-- Subtitle reburn (the user edited `temp/subtitles/subtitle-<plan_id>.txt` or asks for a wording change): `package`.
+- Edit, swap or replace A cuts: change the joins (`routes --joins`) or the plan, `render`, `package`, then update
+  the delivery assignments and run `deliver`. For B, tail, final loudness or name changes start at `deliver`.
+- Subtitle reburn (the user edited `temp/subtitles/subtitle-<plan_id>.txt` or asks for a wording change): `package`, then `deliver`.
   Edited text that differs from the transcript is kept and noted.
 - Sources must stay where they were; if one moved, `init` a new job.

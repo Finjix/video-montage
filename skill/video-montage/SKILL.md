@@ -1,6 +1,6 @@
 ---
 name: video-montage
-description: Produce, revise and reburn batches of Chinese spoken-word (口播) celebrity montage videos (17-30 s, 1440x2560, 60 fps) from source footage, with subtitles, nameplates, text pins, disclaimer and BGM. Use when the user asks for 混剪/口播混剪 videos cut from celebrity footage, or to edit, re-subtitle or reburn videos of an earlier montage batch. Windows only.
+description: Produce or revise batches of Chinese 混剪 videos on Windows. Cut and package celebrity 口播 A sides, or start from supplied A sides. Match each A to B footage, append the end card (尾板/落版), balance all three sections and deliver named MP4s for the batch.
 ---
 
 # Video montage
@@ -18,19 +18,22 @@ description: Produce, revise and reburn batches of Chinese spoken-word (口播) 
   cause it names (network, disk, a moved file) and run it again. A Python traceback is a skill bug: do not retry it
   unchanged; change the input that triggers it and name it in the final summary. Every command can be re-run and
   redoes only what changed.
-- The scripts do all media work, timing, route search and checking. Your part is editorial: transcript fixes,
-  people, beats, which joins a viewer would follow, packaging choices. Never write scripts that search routes,
-  generate joins, render, review, or rewrite plans and subtitles in bulk: edit those files yourself, one by one.
-- Files you write (annotations, joins, plan, packaging config) are English, except speech and subtitle text. Reply
+- Use the bundled commands for celebrity cutting, packaging and final assembly. Make the editorial decisions
+  yourself: transcript fixes, people, beats, accepted joins, packaging, B matches and names. Edit plans and
+  subtitles individually and use `routes` for route generation. A supplied A that
+  still needs overlays or music can be finished with FFmpeg as described in [delivery](references/delivery.md).
+- Files you write (annotations, joins, plan, packaging config) are English, except speech, subtitle text and the
+  batch's original naming fields and editorial evidence. Reply
   to the user in the user's language.
 
 ## Talking to the user
 
-Always confirm before any command that does media work, in a single message, even when the request looks complete:
-the footage (files and count), the asset pack (text pins, the one disclaimer, BGM tracks found), the number of
-videos, the celebrities and their nameplates, and that every video is delivered fully packaged. List every gap
+For a new batch, confirm the order in one message before media work. Include the A count and final count separately,
+B sources and variant split, end card(s) for the requested layouts, delivery folder, loudness target and naming
+template (number range, per A or per output, and series reference). For celebrity cuts also include the footage,
+asset pack (text pins, disclaimer, BGM tracks found), cast and nameplates. List every gap
 (a missing disclaimer, text pin or nameplate, too few source files) and ask the user to fill it. Run `init` before
-asking so the message can name what the pack holds; `init` refuses an asset pack without text pins or with other
+asking on the celebrity cutting route so the message can name what the pack holds; `init` refuses an asset pack without text pins or with other
 than one disclaimer, listing every gap at once. When the user fills gaps or changes the order, run `init` again
 with `--job-dir` of the first run: it replaces that job until `prepare` has run, so no second folder is left behind.
 Start `prepare` only after the user confirms and every gap is filled. The exception is BGM:
@@ -54,8 +57,12 @@ network. Say what you tried and the minimum you need.
 
 ## Workflow
 
-Commands and file formats: [workflow](references/workflow.md). Editorial rules: [editing](references/editing.md).
-Packaging: [packaging](references/packaging.md).
+For supplied A sides, start by checking their existing subtitles, warning, BGM and layout against the brief and
+reference. Complete any requested A packaging once per A, then go straight to step 7. Use steps 1–6 to create
+new celebrity A cuts (17–30 s, 1440×2560, 60 fps). This duration applies to A alone.
+
+See [workflow](references/workflow.md) for commands, [editing](references/editing.md) for the A cuts and
+[packaging](references/packaging.md) for the celebrity A overlays and BGM.
 
 1. `init --work-order -` (JSON on stdin) creates `<output_root>/自动化混剪_YYYYMMDD_HHMMSS/temp`, the job dir. Then
    send the confirmation message ([talking to the user](#talking-to-the-user)) and wait for the user's answer.
@@ -73,9 +80,14 @@ Packaging: [packaging](references/packaging.md).
    beats) and run `routes --joins` again: videos still chosen keep their plan IDs and renders. `render --plan` makes
    the clean videos, subtitle drafts and cut sheets; look at every sheet and subtitle file and fix the annotations,
    joins or subtitle files.
-6. `package [--config]` packages, checks and publishes every video. Look at the packaged sheets; adjust the config
+6. `package [--config]` makes the packaged A sides. Look at the packaged sheets; adjust the config
    and re-run when a nameplate or layout covers a face or a cue reads badly.
-7. Final summary, in your reply (not only in a file): videos delivered and the folder; videos per celebrity, and
+7. Match each A ending to the B opening, select the tail for its layout and give each variant its final material
+   name. Follow [B selection, three-part loudness and naming](references/delivery.md). Run
+   `deliver --config <file> --check-only`, then `deliver --config <file>`. Check both seams, the decoded audio
+   readings and the expected number and grouping of named files.
+8. Report final count and folder, B split, segment and whole-program loudness, any approximate series matches or
+   exceptions. For newly cut celebrity A sides also report videos per celebrity, and
    why any registered celebrity has none; transcript inferences and their basis; weak routes by `plan_id`; BGM
    tracks with license and why each fits; every fallback default you took.
 
@@ -85,7 +97,7 @@ Packaging: [packaging](references/packaging.md).
    that a person reviewed, or that a check passed when it did not.
 2. **ASR is a draft.** Correct misrecognitions in `annotate`. Never put words in a speaker's mouth: no ad copy, no
    invented lines.
-3. **Talk only.** Celebrities speak the message to camera. Acted scenes (reactions, gags, banter, role-play) are
+3. **Celebrity A cuts.** Celebrities speak the message to camera. Acted scenes (reactions, gags, banter, role-play) are
    `scene` beats and never planned.
 4. **Coherence first.** A video is one short spoken argument: opening, body, payoff or call to action, every join
    followed by a viewer who has not seen the sources. Coherence beats variety, cast mix and reuse limits.
@@ -94,10 +106,7 @@ Packaging: [packaging](references/packaging.md).
    already allowed up to the batch limits.
 6. **Every celebrity counts.** Each registered celebrity leads or joins videos when their footage allows; one with
    no video is a gap to work on, never an outcome to accept silently.
-7. **Always packaged.** Every delivered video has subtitles, nameplates, one text pin, the disclaimer and BGM. There
-   is no unpackaged delivery, even on request: `package` refuses a video missing any of them.
-8. **Delivery folder.** It holds only `<plan_id>.mp4` files and `temp/`. `temp/` holds only what a revision or
-   reburn needs, never for people: the pipeline's own folders, your current inputs in `temp/config/` (one file
-   per purpose; overwrite drafts instead of keeping copies) and the chosen BGM in `temp/config/bgm/`. Logs, scratch
-   scripts, downloaded pages and trial files also go in `temp/`.
-   Revisions and reburns reuse the same folder.
+7. **Packaging.** Celebrity A cuts carry subtitles, nameplates, one text pin, the disclaimer and BGM. Supplied
+   A sides follow their brief. Keep A overlays and music within A. Preserve the chosen B and end card's own sound.
+8. **Delivery folder.** Publish final A + B + end-card MP4s under their material names in the requested folder.
+   Keep the A masters, config, B selection evidence and QA in the job directory. Reuse it for revisions.

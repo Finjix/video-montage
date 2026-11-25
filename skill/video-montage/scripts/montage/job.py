@@ -155,7 +155,8 @@ def init(order: dict, job_dir: Path | None = None) -> tuple[Path, dict]:
     (job / "subtitles").mkdir(exist_ok=True)
     order = {**order, "sources": [str(p) for p in paths], "asset_root": str(asset_root), "celebrities": celebrities}
     order.pop("decisions", None)
-    state = {"delivery_dir": str(delivery), "job_dir": str(job), "order": order, "celebrities": celebrities,
+    state = {"delivery_dir": str(delivery), "packaged_dir": str(job / "packaged"), "job_dir": str(job),
+             "order": order, "celebrities": celebrities,
              "decisions": decisions, "created": datetime.now(timezone(timedelta(hours=8))).isoformat(timespec="seconds"),
              "sources": [{"id": f"S{i:02d}", "path": str(p), "name": p.name, "sha256": h, "size": p.stat().st_size,
                           "mtime_ns": p.stat().st_mtime_ns} for i, (p, h) in enumerate(zip(paths, hashes), 1)]}
